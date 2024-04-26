@@ -1,0 +1,50 @@
+{
+	"folders":
+	[
+		{
+			"path": ".",
+		},
+	],
+	"build_systems":
+	[
+		{
+			"name": "Debug Build",
+			"keyfiles": "Cargo.toml",
+			"file_regex": "--> ([^\\s]+):(\\d+):(\\d+)",
+			"working_dir": "${project_path:${folder}}",
+			"env":
+			{
+				"RUSTFLAGS": "-A dead_code -A unused_variables -A unused_imports -A unused_assignments",
+			},
+
+			"shell_cmd": "cargo build",
+		},
+		{
+			"name": "Debug Run",
+			"keyfiles": "Cargo.toml",
+			"file_regex": "--> ([^\\s]+):(\\d+):(\\d+)",
+			"working_dir": "${project_path:${folder}}",
+			"env":
+			{
+				"RUSTFLAGS": "-A dead_code -A unused_variables -A unused_imports -A unused_assignments",
+			},
+
+			"shell_cmd": "cargo run",
+            /*"working_dir": "${file_path}",*/
+		},
+		{
+			"name": "Debug Build (With annoying warnings)",
+			"keyfiles": "Cargo.toml",
+			"file_regex": "--> ([^\\s]+):(\\d+):(\\d+)",
+			"working_dir": "${project_path:${folder}}",
+			"shell_cmd": "cargo build",
+		},
+		{
+			"name": "Release Build",
+			"keyfiles": "Cargo.toml",
+			"file_regex": "--> ([^\\s]+):(\\d+):(\\d+)",
+			"working_dir": "${project_path:${folder}}",
+			"shell_cmd": "cargo build --release",
+		}
+	],
+}
