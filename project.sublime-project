@@ -4,6 +4,12 @@
 		{
 			"path": ".",
 		},
+		{
+			"path": "C:\\Users\\leona\\.cargo\\registry\\src\\index.crates.io-6f17d22bba15001f\\wgpu-0.19.4\\src",
+		},
+		{
+			"path": "C:\\Users\\leona\\.cargo\\registry\\src\\index.crates.io-6f17d22bba15001f\\winit-0.29.15\\src",
+		},
 	],
 	"build_systems":
 	[
