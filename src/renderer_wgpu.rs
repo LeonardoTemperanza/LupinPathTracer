@@ -1,7 +1,7 @@
 
-use winit::window::Window;
-
 use crate::base::*;
+
+use winit::window::Window;
 
 pub type TextureHandle = u32;
 pub type BufferHandle  = u32;
@@ -21,15 +21,13 @@ pub struct Renderer<'a>
     frame_view:    Option<wgpu::TextureView>,
     frame_texture: Option<wgpu::SurfaceTexture>,
 
+    // EGUI render state
+    egui_renderer: egui_wgpu::Renderer,
+
     // Resources to be accessed with the handles
     shaders:          Vec<wgpu::ShaderModule>,
     programs:         Vec<wgpu::RenderPipeline>,
     compute_programs: Vec<wgpu::ComputePipeline>
-}
-
-pub struct EGUIRenderState
-{
-    pub render_pass: egui_wgpu_backend::RenderPass,
 }
 
 pub fn configure_surface(surface: &mut wgpu::Surface,
@@ -105,6 +103,9 @@ impl<'a> Renderer<'a>
         let win_size = window.inner_size();
         configure_surface(&mut surface, &device, swapchain_format, win_size.width as i32, win_size.height as i32);
 
+        // Init EGUI render state
+        let egui_renderer = egui_wgpu::Renderer::new(&device, swapchain_format, None, 1);
+
         return Renderer
         {
             instance,
@@ -116,6 +117,8 @@ impl<'a> Renderer<'a>
 
             frame_view: None,
             frame_texture: None,
+
+            egui_renderer,
 
             shaders:  vec![],
             programs: vec![],
@@ -154,9 +157,9 @@ impl<'a> Renderer<'a>
     pub fn draw_scene(&mut self)
     {
         use wgpu::*;
-        let surface  = &self.surface;
-        let device   = &self.device;
-        let queue    = &self.queue;
+        let surface = &self.surface;
+        let device  = &self.device;
+        let queue   = &self.queue;
 
         let frame_view_ref = self.frame_view.as_ref().unwrap();
         let encoder_desc = CommandEncoderDescriptor
@@ -188,19 +191,8 @@ impl<'a> Renderer<'a>
         self.queue.submit(Some(encoder.finish()));
     }
 
-    pub fn init_egui(&self)->EGUIRenderState
-    {
-        use egui_wgpu_backend::{RenderPass, ScreenDescriptor};
-
-        let render_pass = RenderPass::new(&self.device, self.swapchain_format, 1);
-        return EGUIRenderState
-        {
-            render_pass
-        };
-    }
-
+    /*
     pub fn draw_egui(&self,
-                     egui_state: &mut EGUIRenderState,
                      textures_delta: &egui::TexturesDelta,
                      paint_jobs: Vec<egui::ClippedPrimitive>,
                      win_width: i32,
@@ -212,7 +204,7 @@ impl<'a> Renderer<'a>
         let win_height_u32: u32 = win_height.max(1) as u32;
 
         use wgpu::*;
-        use egui_wgpu_backend::ScreenDescriptor;
+        //use egui_wgpu_backend::ScreenDescriptor;
 
         let frame_view = self.frame_view.as_ref().unwrap();
 
@@ -240,6 +232,57 @@ impl<'a> Renderer<'a>
         res.expect("Failed to execute EGUI render pass");
         self.queue.submit(std::iter::once(encoder.finish()));
     }
+    */
+
+    pub fn draw_egui(&mut self, textures_delta: &egui::TexturesDelta,
+                 tris: Vec<egui::ClippedPrimitive>,
+                 width: i32, height: i32, scale: f32)
+    {
+        let frame_view = self.frame_view.as_ref().unwrap();
+
+        let win_width = width.max(0) as u32;
+        let win_height = height.max(0) as u32;
+
+        let encoder_desc = wgpu::CommandEncoderDescriptor { label: Some("EGUI Encoder") };
+        let mut encoder = self.device.create_command_encoder(&encoder_desc);
+
+        for (id, image_delta) in &textures_delta.set
+        {
+            self.egui_renderer.update_texture(&self.device, &self.queue, *id, &image_delta);
+        }
+
+        let screen_descriptor = egui_wgpu::ScreenDescriptor
+        {
+            size_in_pixels: [win_width, win_height],
+            pixels_per_point: scale
+        };
+        self.egui_renderer.update_buffers(&self.device, &self.queue, &mut encoder, &tris, &screen_descriptor);
+
+        let mut rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view: frame_view,
+                resolve_target: None,
+                ops: wgpu::Operations {
+                    load: wgpu::LoadOp::Load,
+                    store: wgpu::StoreOp::Store,
+                },
+            })],
+            depth_stencil_attachment: None,
+            label: Some("EGUI Main Render Pass"),
+            timestamp_writes: None,
+            occlusion_query_set: None,
+        });
+
+        self.egui_renderer.render(&mut rpass, &tris, &screen_descriptor);
+        drop(rpass);
+
+        for x in &textures_delta.free
+        {
+            self.egui_renderer.free_texture(x)
+        }
+
+        self.queue.submit(Some(encoder.finish()));
+    }
 
     pub fn swap_buffers(&mut self)
     {
@@ -252,7 +295,6 @@ impl<'a> Renderer<'a>
 
     // WebGPU does not support texture arrays yet. So texture atlasing
     // is required to dynamically index into textures
-
     pub fn upload_texture(&mut self)->TextureHandle
     {
         return 0;
