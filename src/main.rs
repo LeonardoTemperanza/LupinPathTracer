@@ -47,9 +47,10 @@ fn main()
     let mut platform = Platform::new(platform_desc);
 
     // NOTE: Important for crisp font and icons on high DPI displays
-    platform.context().set_pixels_per_point(window.scale_factor() as f32);
+    //platform.context().set_pixels_per_point(window.scale_factor() as f32);
+    platform.context().set_pixels_per_point(4.0 as f32);
 
-    // Init EGUI Rendering state
+    // Init  Rendering state
     let mut egui_state: EGUIRenderState = renderer.init_egui();
 
     // Init Core state

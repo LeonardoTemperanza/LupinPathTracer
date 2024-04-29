@@ -281,6 +281,7 @@ impl<'a> Renderer<'a>
 
     pub fn create_program(&mut self, compute_shader: ShaderHandle)->ComputeProgramHandle
     {
+        assert!(compute_shader < self.shaders.len() as u32);
         use wgpu::*;
 
         let bind_group_layout_entry = BindGroupLayoutEntry
