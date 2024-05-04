@@ -3,11 +3,7 @@ use crate::base::*;
 
 use winit::window::Window;
 
-pub type TextureHandle = u32;
-pub type BufferHandle  = u32;
-pub type ShaderHandle  = u32;
-pub type ProgramHandle = u32;
-pub type ComputeProgramHandle = u32;
+use egui::{ClippedPrimitive, TexturesDelta};
 
 pub struct Renderer<'a>
 {
@@ -20,14 +16,25 @@ pub struct Renderer<'a>
 
     frame_view:    Option<wgpu::TextureView>,
     frame_texture: Option<wgpu::SurfaceTexture>,
+}
 
-    // EGUI render state
-    egui_renderer: egui_wgpu::Renderer,
+pub struct EGUIRenderState
+{
+    renderer: egui_wgpu::Renderer,
+}
 
-    // Resources to be accessed with the handles
-    shaders:          Vec<wgpu::ShaderModule>,
-    programs:         Vec<wgpu::RenderPipeline>,
-    compute_programs: Vec<wgpu::ComputePipeline>
+// Info stored on the CPU to upload to GPU
+pub struct SceneParams
+{
+    // Vector or images, vector of models
+    // etc. etc.
+}
+
+// Handles for GPU resources used for rendering
+pub struct Scene
+{
+    compute_program: wgpu::RenderPipeline,
+    display_program: wgpu::RenderPipeline,
 }
 
 pub fn configure_surface(surface: &mut wgpu::Surface,
@@ -60,7 +67,7 @@ pub fn configure_surface(surface: &mut wgpu::Surface,
 impl<'a> Renderer<'a>
 {
     ////////
-    // Initialization and drawing
+    // Initialization
     pub fn new(window: &'a Window)->Self
     {
         use wgpu::*;
@@ -103,9 +110,6 @@ impl<'a> Renderer<'a>
         let win_size = window.inner_size();
         configure_surface(&mut surface, &device, swapchain_format, win_size.width as i32, win_size.height as i32);
 
-        // Init EGUI render state
-        let egui_renderer = egui_wgpu::Renderer::new(&device, swapchain_format, None, 1);
-
         return Renderer
         {
             instance,
@@ -117,15 +121,17 @@ impl<'a> Renderer<'a>
 
             frame_view: None,
             frame_texture: None,
-
-            egui_renderer,
-
-            shaders:  vec![],
-            programs: vec![],
-            compute_programs: vec![]
         };
     }
 
+    pub fn init_egui(&self)->EGUIRenderState
+    {
+        let renderer = egui_wgpu::Renderer::new(&self.device, self.swapchain_format, None, 1);
+        return EGUIRenderState { renderer };
+    }
+
+    ////////
+    // Utils
     pub fn resize(&mut self, width: i32, height: i32)
     {
         configure_surface(&mut self.surface, &self.device, self.swapchain_format, width, height);
@@ -154,14 +160,22 @@ impl<'a> Renderer<'a>
         self.frame_view    = Some(view);
     }
 
-    pub fn draw_scene(&mut self)
+    ////////
+    // Rendering
+    // Will later take a scene
+    pub fn draw_scene(&mut self) //main_shader: ShaderHandle)
     {
         use wgpu::*;
         let surface = &self.surface;
         let device  = &self.device;
         let queue   = &self.queue;
 
-        let frame_view_ref = self.frame_view.as_ref().unwrap();
+        // Compute pass to generate image
+
+
+        // Render pass to display the generated image on the screen
+
+        let frame_view = self.frame_view.as_ref().unwrap();
         let encoder_desc = CommandEncoderDescriptor
         {
             label: None,
@@ -169,8 +183,9 @@ impl<'a> Renderer<'a>
         let mut encoder = device.create_command_encoder(&encoder_desc);
 
         {
-            let color_attachment = RenderPassColorAttachment {
-                view: frame_view_ref,
+            let color_attachment = RenderPassColorAttachment
+            {
+                view: frame_view,
                 resolve_target: None,
                 ops: Operations {
                     load: LoadOp::Clear(wgpu::Color::GREEN),
@@ -178,7 +193,8 @@ impl<'a> Renderer<'a>
                 },
             };
 
-            let render_pass_desc = RenderPassDescriptor {
+            let render_pass_desc = RenderPassDescriptor
+            {
                 label: None,
                 color_attachments: &[Some(color_attachment)],
                 depth_stencil_attachment: None,
@@ -191,64 +207,22 @@ impl<'a> Renderer<'a>
         self.queue.submit(Some(encoder.finish()));
     }
 
-    /*
-    pub fn draw_egui(&self,
-                     textures_delta: &egui::TexturesDelta,
-                     paint_jobs: Vec<egui::ClippedPrimitive>,
-                     win_width: i32,
-                     win_height: i32,
-                     scale_factor: f32)
-    {
-        // Don't panic with 0 size (e.g. when minimized)
-        let win_width_u32: u32  = win_width.max(1) as u32;
-        let win_height_u32: u32 = win_height.max(1) as u32;
-
-        use wgpu::*;
-        //use egui_wgpu_backend::ScreenDescriptor;
-
-        let frame_view = self.frame_view.as_ref().unwrap();
-
-        let encoder_desc = wgpu::CommandEncoderDescriptor::default();
-        let mut encoder = self.device.create_command_encoder(&encoder_desc);
-
-        // Upload all resources for the GPU.
-        let screen_descriptor = ScreenDescriptor {
-            physical_width: win_width_u32,
-            physical_height: win_height_u32,
-            scale_factor: scale_factor,
-        };
-        
-        let res = egui_state.render_pass.add_textures(&self.device, &self.queue, textures_delta);
-        res.expect("Failed to add textures in EGUI render pass");
-
-        egui_state.render_pass.update_buffers(&self.device, &self.queue, &paint_jobs, &screen_descriptor);
-
-        let res = egui_state.render_pass.execute(&mut encoder,
-                                                 frame_view,
-                                                 &paint_jobs,
-                                                 &screen_descriptor,
-                                                 None);
-
-        res.expect("Failed to execute EGUI render pass");
-        self.queue.submit(std::iter::once(encoder.finish()));
-    }
-    */
-
-    pub fn draw_egui(&mut self, textures_delta: &egui::TexturesDelta,
-                 tris: Vec<egui::ClippedPrimitive>,
-                 width: i32, height: i32, scale: f32)
+    pub fn draw_egui(&mut self, egui_renderer: &mut EGUIRenderState,
+                     tris: Vec<ClippedPrimitive>,
+                     textures_delta: &TexturesDelta,
+                     width: i32, height: i32, scale: f32)
     {
         let frame_view = self.frame_view.as_ref().unwrap();
+        let egui: &mut EGUIRenderState = egui_renderer;
 
         let win_width = width.max(0) as u32;
         let win_height = height.max(0) as u32;
 
         let encoder_desc = wgpu::CommandEncoderDescriptor { label: Some("EGUI Encoder") };
         let mut encoder = self.device.create_command_encoder(&encoder_desc);
-
         for (id, image_delta) in &textures_delta.set
         {
-            self.egui_renderer.update_texture(&self.device, &self.queue, *id, &image_delta);
+            egui.renderer.update_texture(&self.device, &self.queue, *id, &image_delta);
         }
 
         let screen_descriptor = egui_wgpu::ScreenDescriptor
@@ -256,9 +230,9 @@ impl<'a> Renderer<'a>
             size_in_pixels: [win_width, win_height],
             pixels_per_point: scale
         };
-        self.egui_renderer.update_buffers(&self.device, &self.queue, &mut encoder, &tris, &screen_descriptor);
+        egui.renderer.update_buffers(&self.device, &self.queue, &mut encoder, &tris, &screen_descriptor);
 
-        let mut rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+        let mut egui_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                 view: frame_view,
                 resolve_target: None,
@@ -273,12 +247,12 @@ impl<'a> Renderer<'a>
             occlusion_query_set: None,
         });
 
-        self.egui_renderer.render(&mut rpass, &tris, &screen_descriptor);
-        drop(rpass);
+        egui.renderer.render(&mut egui_pass, &tris, &screen_descriptor);
+        drop(egui_pass);
 
         for x in &textures_delta.free
         {
-            self.egui_renderer.free_texture(x)
+            egui.renderer.free_texture(x)
         }
 
         self.queue.submit(Some(encoder.finish()));
@@ -293,84 +267,11 @@ impl<'a> Renderer<'a>
     ////////
     // Upload to GPU
 
-    // WebGPU does not support texture arrays yet. So texture atlasing
-    // is required to dynamically index into textures
-    pub fn upload_texture(&mut self)->TextureHandle
+    // Uploads the entire scene to GPU
+    pub fn upload_scene(&mut self)
     {
-        return 0;
-    }
-
-    pub fn upload_model(&mut self)->BufferHandle
-    {
-        use wgpu::*;
-
-        return 0;
-    }
-
-    pub fn compile_shader(&mut self, source: &str)->ShaderHandle
-    {
-        use wgpu::*;
-        let shader_desc = ShaderModuleDescriptor
-        {
-            label: None,
-            source: ShaderSource::Wgsl(std::borrow::Cow::Borrowed(source)),
-        };
-        let shader: ShaderModule = self.device.create_shader_module(shader_desc);
-
-        self.shaders.push(shader);
-        return (self.shaders.len() - 1) as u32;
-    }
-
-    pub fn create_program(&mut self, compute_shader: ShaderHandle)->ComputeProgramHandle
-    {
-        assert!(compute_shader < self.shaders.len() as u32);
-        use wgpu::*;
-
-        let bind_group_layout_entry = BindGroupLayoutEntry
-        {
-            binding: 0,
-            visibility: ShaderStages::COMPUTE,
-            ty: BindingType::Buffer
-            {
-                ty: BufferBindingType::Storage { read_only: false },
-                has_dynamic_offset: false,
-                min_binding_size: None
-            },
-            count: None
-        };
-
-        // Signature of our compute main function
-        let bind_group_layout_desc = BindGroupLayoutDescriptor
-        {
-            label: None,
-            entries: &[bind_group_layout_entry]
-        };
-        let bind_group_layout = self.device.create_bind_group_layout(&bind_group_layout_desc);
-
-        let pipeline_layout_desc = wgpu::PipelineLayoutDescriptor
-        {
-            label: None,
-            bind_group_layouts: &[&bind_group_layout],
-            push_constant_ranges: &[],
-        };
-        let pipeline_layout = self.device.create_pipeline_layout(&pipeline_layout_desc);
-
-        let program_desc = ComputePipelineDescriptor
-        {
-            label: None,
-            layout: Some(&pipeline_layout),
-            module: &self.shaders[compute_shader as usize],
-            entry_point: "main"
-        };
-        let program: ComputePipeline = self.device.create_compute_pipeline(&program_desc);
-
-        self.compute_programs.push(program);
-        return (self.compute_programs.len() - 1) as u32;
-    }
-
-    // Do some compute stuff
-    pub fn test(compute_program: ComputeProgramHandle)
-    {
-
+        // WebGPU does not support texture arrays yet, so that's why
+        // that is not supported by this renderer. Texture atlasing
+        // is required to dynamically index into textures
     }
 }

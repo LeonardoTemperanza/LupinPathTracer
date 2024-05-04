@@ -6,30 +6,30 @@
 use crate::renderer_wgpu::*;
 
 use winit::window::Window;
+use egui_winit::State;
+use egui::ClippedPrimitive;
 
 pub struct Core
 {
-    main_shader:  ShaderHandle,
-    main_program: ProgramHandle
+    
 }
 
 impl Core
 {
     pub fn new(renderer: &mut Renderer)->Core
     {
-        let main_shader: ShaderHandle = renderer.compile_shader(include_str!("../assets/raytracer.wgsl"));
-        let main_program: ComputeProgramHandle = renderer.create_program(main_shader);
-
-        return Core
-        {
-            main_shader,
-            main_program
-        };
+        return Core {};
     }
 
-    pub fn main_update(&mut self, renderer: &mut Renderer,
-                       egui_ctx: &mut egui::Context, egui_input: egui::RawInput)->egui::FullOutput
+    pub fn main_update(&mut self, egui_renderer: &mut EGUIRenderState,
+                       renderer: &mut Renderer, window: &Window,
+                       egui_ctx: &mut egui::Context, egui_state: &mut State)
     {
+        // Poll input
+        // Consume the accumulated egui inputs
+        let egui_input = egui_state.take_egui_input(&window);
+
+        // Update UI
         let gui_output = egui_ctx.run(egui_input, |ui|
         {
             gui_update(&egui_ctx);
@@ -38,7 +38,25 @@ impl Core
         // Update scene entities
         camera_first_person_update(2);
 
-        return gui_output;
+        // Rendering
+        let win_size   = window.inner_size();
+        let win_width  = win_size.width as i32;
+        let win_height = win_size.height as i32;
+        let scale      = window.scale_factor() as f32;
+
+        egui_state.handle_platform_output(&window, gui_output.platform_output);
+        let tris: Vec<ClippedPrimitive> = egui_ctx.tessellate(gui_output.shapes,
+                                                 gui_output.pixels_per_point);
+
+        renderer.prepare_frame();
+        renderer.draw_scene();
+
+        // Draw gui last, as an overlay
+        renderer.draw_egui(egui_renderer, tris, &gui_output.textures_delta, win_width, win_height, scale);
+
+        // Notify winit that we're about to submit a new frame
+        window.pre_present_notify();
+        renderer.swap_buffers();
     }
 }
 
@@ -50,20 +68,17 @@ pub fn camera_first_person_update(prev: i32)->i32
 pub fn gui_update(ui: &egui::Context)
 {
     egui::Window::new("Streamline CFD")
-        // .vscroll(true)
         .default_open(true)
-        .max_width(1000.0)
-        .max_height(800.0)
         .default_width(800.0)
         .resizable(true)
-        .anchor(egui::Align2::LEFT_TOP, [0.0, 0.0])
+        .movable(true)
         .show(&ui, |ui| {
             if ui.add(egui::Button::new("Click me")).clicked() {
                 println!("PRESSED")
             }
 
             ui.label("Slider");
-            // ui.add(egui::Slider::new(_, 0..=120).text("age"));
+            //ui.add(egui::Slider::new(_, 0..=120).text("age"));
             ui.end_row();
 
             // proto_scene.egui(ui);

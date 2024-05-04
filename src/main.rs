@@ -1,4 +1,7 @@
 
+// Don't spawn a terminal window on windows
+#![windows_subsystem = "windows"]
+
 use std::time::Instant;
 
 use winit::
@@ -43,6 +46,8 @@ fn main()
 
     let mut egui_state = egui_winit::State::new(egui_ctx.clone(), viewport_id, &window, None, None);
 
+    let mut egui_renderer = renderer.init_egui();
+
     // Init Core state
     let mut core = core::Core::new(&mut renderer);
 
@@ -56,7 +61,7 @@ fn main()
         if let Event::WindowEvent { window_id, event } = event
         {
             // Collect inputs
-            egui_state.on_window_event(&window, &event);
+            let _ = egui_state.on_window_event(&window, &event);
             
             match event
             {
@@ -74,34 +79,9 @@ fn main()
                 },
                 WindowEvent::RedrawRequested =>
                 {
-                    use egui::ClippedPrimitive;
-
-                    // Consume the accumulated inputs
-                    let egui_input = egui_state.take_egui_input(&window);
-
                     delta_time = min_delta_time.max(time_begin.elapsed().as_secs_f32());
 
-                    let win_size   = window.inner_size();
-                    let win_width  = win_size.width as i32;
-                    let win_height = win_size.height as i32;
-                    let scale      = window.scale_factor() as f32;
-
-                    let gui_output = core.main_update(&mut renderer, &mut egui_ctx, egui_input);
-
-                    egui_state.handle_platform_output(&window, gui_output.platform_output);
-                    let tris: Vec<ClippedPrimitive> = egui_ctx.tessellate(gui_output.shapes,
-                                                                          gui_output.pixels_per_point);
-
-                    renderer.prepare_frame();
-                    renderer.draw_scene();
-
-                    // Draw gui last, as an overlay
-                    renderer.draw_egui(&gui_output.textures_delta, tris, win_width, win_height, scale);
-
-                    // Notify winit that we're about to submit a new frame.
-                    // Not sure if this actually does anything...
-                    window.pre_present_notify();
-                    renderer.swap_buffers();
+                    core.main_update(&mut egui_renderer, &mut renderer, &window, &mut egui_ctx, &mut egui_state);
 
                     // Continuously request drawing messages to let the main loop continue
                     window.request_redraw();
