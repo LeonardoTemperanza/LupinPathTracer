@@ -67,6 +67,8 @@ pub fn camera_first_person_update(prev: i32)->i32
 
 pub fn gui_update(ui: &egui::Context)
 {
+    menu_bar(ui);
+
     egui::Window::new("Streamline CFD")
         .default_open(true)
         .default_width(800.0)
@@ -83,4 +85,22 @@ pub fn gui_update(ui: &egui::Context)
 
             // proto_scene.egui(ui);
         });
+}
+
+pub fn menu_bar(ui: &egui::Context)
+{
+    use egui::{menu, Button};
+    egui::TopBottomPanel::top("menu_bar").show(ui, |ui|
+    {
+        menu::bar(ui, |ui|
+        {
+            ui.menu_button("File", |ui|
+            {
+                if ui.button("Open").clicked()
+                {
+                    println!("Clicked open!");
+                }
+            })
+        })
+    });
 }

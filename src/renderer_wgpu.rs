@@ -188,7 +188,7 @@ impl<'a> Renderer<'a>
                 view: frame_view,
                 resolve_target: None,
                 ops: Operations {
-                    load: LoadOp::Clear(wgpu::Color::GREEN),
+                    load: LoadOp::Clear(wgpu::Color { r: 0.55, g: 0.55, b: 0.55, a: 1.0 }),
                     store: StoreOp::Store,
                 },
             };
