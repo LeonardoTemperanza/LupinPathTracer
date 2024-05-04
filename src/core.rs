@@ -69,7 +69,7 @@ pub fn gui_update(ui: &egui::Context)
 {
     menu_bar(ui);
 
-    egui::Window::new("Streamline CFD")
+    egui::Window::new("Example window")
         .default_open(true)
         .default_width(800.0)
         .resizable(true)
