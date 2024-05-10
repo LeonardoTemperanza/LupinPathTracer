@@ -71,19 +71,11 @@ pub fn gui_update(ui: &egui::Context)
 
     egui::Window::new("Example window")
         .default_open(true)
-        .default_width(800.0)
         .resizable(true)
         .movable(true)
-        .show(&ui, |ui| {
-            if ui.add(egui::Button::new("Click me")).clicked() {
-                println!("PRESSED")
-            }
-
-            ui.label("Slider");
-            //ui.add(egui::Slider::new(_, 0..=120).text("age"));
-            ui.end_row();
-
-            // proto_scene.egui(ui);
+        .show(&ui, |ui|
+        {
+            ui.allocate_space(ui.available_size());
         });
 }
 

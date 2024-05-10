@@ -39,6 +39,7 @@ fn main()
 
     // Initialize renderer
     let mut renderer = Renderer::new(&window);
+    renderer.log_backend();
 
     // Initialize egui
     let mut egui_ctx = egui::Context::default();

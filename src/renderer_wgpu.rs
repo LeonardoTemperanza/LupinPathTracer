@@ -274,4 +274,21 @@ impl<'a> Renderer<'a>
         // that is not supported by this renderer. Texture atlasing
         // is required to dynamically index into textures
     }
+
+    ////////
+    // Miscellaneous
+    pub fn log_backend(&self)
+    {
+        print!("Using backend: ");
+        let backend = self.adapter.get_info().backend;
+        match backend
+        {
+            wgpu::Backend::Empty  => { println!("Empty"); }
+            wgpu::Backend::Vulkan => { println!("Vulkan"); }
+            wgpu::Backend::Metal  => { println!("Metal"); }
+            wgpu::Backend::Dx12   => { println!("D3D12"); }
+            wgpu::Backend::Gl     => { println!("OpenGL"); }
+            wgpu::Backend::BrowserWebGpu => { println!("WebGPU"); }
+        }
+    }
 }
