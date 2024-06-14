@@ -14,7 +14,6 @@ use winit::
 };
 
 use ::egui::FontDefinitions;
-//use egui_winit::{Platform, PlatformDescriptor};
 
 mod base;
 pub use base::*;
@@ -24,6 +23,9 @@ mod renderer_wgpu;
 pub use renderer_wgpu::{Renderer};
 
 mod core;
+
+mod loader;
+pub use loader::*;
 
 fn main()
 {
@@ -46,8 +48,6 @@ fn main()
     let viewport_id = egui_ctx.viewport_id();
 
     let mut egui_state = egui_winit::State::new(egui_ctx.clone(), viewport_id, &window, None, None);
-
-    let mut egui_renderer = renderer.init_egui();
 
     // Init Core state
     let mut core = core::Core::new(&mut renderer);
@@ -82,7 +82,7 @@ fn main()
                 {
                     delta_time = min_delta_time.max(time_begin.elapsed().as_secs_f32());
 
-                    core.main_update(&mut egui_renderer, &mut renderer, &window, &mut egui_ctx, &mut egui_state);
+                    core.main_update(&mut renderer, &window, &mut egui_ctx, &mut egui_state);
 
                     // Continuously request drawing messages to let the main loop continue
                     window.request_redraw();

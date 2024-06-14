@@ -48,3 +48,23 @@ fn my_waker() -> Waker { unsafe { return Waker::from_raw(my_raw_waker()) } }
 ////////
 // Math
 
+pub struct Vec2
+{
+    x: f32,
+    y: f32
+}
+
+pub struct Vec3
+{
+    x: f32,
+    y: f32,
+    z: f32
+}
+
+pub struct Vec4
+{
+    x: f32,
+    y: f32,
+    z: f32,
+    w: f32
+}
