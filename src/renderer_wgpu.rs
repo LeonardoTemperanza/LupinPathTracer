@@ -265,18 +265,6 @@ impl<'a> Renderer<'a>
                     visibility: ShaderStages::COMPUTE,
                     ty: BindingType::Buffer
                     {
-                        ty: BufferBindingType::Uniform,
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None
-                },
-                BindGroupLayoutEntry
-                {
-                    binding: 2,
-                    visibility: ShaderStages::COMPUTE,
-                    ty: BindingType::Buffer
-                    {
                         ty: BufferBindingType::Storage { read_only: true },
                         has_dynamic_offset: false,
                         min_binding_size: None,
@@ -285,7 +273,7 @@ impl<'a> Renderer<'a>
                 },
                 BindGroupLayoutEntry
                 {
-                    binding: 3,
+                    binding: 2,
                     visibility: ShaderStages::COMPUTE,
                     ty: BindingType::Buffer
                     {
@@ -502,17 +490,6 @@ impl<'a> Renderer<'a>
             use std::mem;
             let size_uniform: [u32; 2] = [width, height];
 
-            // Pass render target size uniform
-            let size_uniform_buffer = device.create_buffer(&BufferDescriptor
-            {
-                label: None,
-                size: 8,
-                usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST,
-                mapped_at_creation: false,
-            });
-
-            queue.write_buffer(&size_uniform_buffer, 0, unsafe { std::slice::from_raw_parts(&size_uniform as *const _ as *const u8, 8) });
-
             let bind_group = device.create_bind_group(&BindGroupDescriptor
             {
                 label: None,
@@ -528,16 +505,6 @@ impl<'a> Renderer<'a>
                         binding: 1,
                         resource: BindingResource::Buffer(BufferBinding
                         {
-                            buffer: &size_uniform_buffer,
-                            offset: 0,
-                            size: None, // Use the entire buffer
-                        })
-                    },
-                    BindGroupEntry
-                    {
-                        binding: 2,
-                        resource: BindingResource::Buffer(BufferBinding
-                        {
                             buffer: &scene.verts,
                             offset: 0,
                             size: None
@@ -545,7 +512,7 @@ impl<'a> Renderer<'a>
                     },
                     BindGroupEntry
                     {
-                        binding: 3,
+                        binding: 2,
                         resource: BindingResource::Buffer(BufferBinding
                         {
                             buffer: &scene.indices,
@@ -564,8 +531,10 @@ impl<'a> Renderer<'a>
 
             compute_pass.set_pipeline(&self.pathtracer);
             compute_pass.set_bind_group(0, &bind_group, &[]);
-            let num_workers_x = 1; //(width as f32 / 16.0).ceil() as u32;
-            let num_workers_y = 1; //(height as f32 / 16.0).ceil() as u32;
+            const WORKGROUP_SIZE_X: u32 = 16;
+            const WORKGROUP_SIZE_Y: u32 = 16;
+            let num_workers_x = (width + WORKGROUP_SIZE_X - 1) / WORKGROUP_SIZE_X;
+            let num_workers_y = (height + WORKGROUP_SIZE_Y - 1) / WORKGROUP_SIZE_Y;
             compute_pass.dispatch_workgroups(num_workers_x, num_workers_y, 1);
         }
 

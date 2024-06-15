@@ -31,20 +31,20 @@ impl Core
 {
     pub fn new(renderer: &mut Renderer)->Core
     {
-        let render_image = renderer.create_texture(1920, 1080);
+        let render_image = renderer.create_texture(1, 1);
         let render_image_id = renderer.egui_texture_from_wgpu(&render_image, true);
 
         // Load scene
         let mut obj_path = std::env::current_exe().unwrap();
         obj_path.pop();
-        obj_path = append_to_path(obj_path, "/../assets/FinalBaseMesh.obj");
+        obj_path = append_to_path(obj_path, "/../assets/cube.obj");
 
         let scene: Scene = load_scene_obj(obj_path.into_os_string().to_str().unwrap(), renderer);
         return Core
         {
             render_image_id,
             render_image,
-            preview_window_size: (1920, 1080),
+            preview_window_size: (1, 1),
 
             // GUI
             slider_value: 0.0,
@@ -97,15 +97,6 @@ impl Core
     {
         menu_bar(ctx);
 
-        let (size_x, size_y) = get_texture_size(&self.render_image);
-        let size = egui::Vec2::new(size_x as f32, size_y as f32);
-
-        let mut to_draw = egui::load::SizedTexture
-        {
-            id: self.render_image_id,
-            size: size
-        };
-
         egui::SidePanel::left("side_panel")
             .resizable(true)
             .min_width(250.0)
@@ -141,15 +132,23 @@ impl Core
             .frame(egui::Frame::none())
             .show(ctx, |ui|
             {
-                let size = ui.available_size() * ctx.pixels_per_point();
+                let size = (ui.available_size() * ctx.pixels_per_point()).round();
                 let size_int = (size.x as i32, size.y as i32);
                 if size_int.0 != self.preview_window_size.0 || size_int.1 != self.preview_window_size.1
                 {
-                    self.preview_window_size = (size.x as i32, size.y as i32);
-                    to_draw.size = size;
+                    self.preview_window_size = size_int;
                     resize_egui_image(renderer, &mut self.render_image, self.render_image_id,
                                       self.preview_window_size.0, self.preview_window_size.1, true);
                 }
+
+                let size_in_points = egui::Vec2::new((size_int.0 as f32 / ctx.pixels_per_point()).round(),
+                                                         (size_int.1 as f32 / ctx.pixels_per_point()).round());
+                let to_draw = egui::load::SizedTexture
+                {
+                    id: self.render_image_id,
+                    size: size_in_points 
+                };
+
                 ui.image(to_draw);
             });
     }

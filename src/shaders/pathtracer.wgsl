@@ -6,20 +6,19 @@
 //@group(0) @binding(0) var models: storage
 
 @group(0) @binding(0) var output_texture: texture_storage_2d<rgba8unorm, write>;
-@group(0) @binding(1) var<uniform> output_size: vec2u;
-@group(0) @binding(2) var<storage, read> verts_pos: array<vec3f>;
-@group(0) @binding(3) var<storage, read> indices: array<u32>;
+@group(0) @binding(1) var<storage, read> verts_pos: array<vec3f>;
+@group(0) @binding(2) var<storage, read> indices: array<u32>;
 
-const num_indices: u32 = 10000;
-
-// Like alpha and roughness
 //@group(1) @binding(0) var atlas_1_channel: texture_2d<r8unorm, read>;
 // Like base color
 //@group(1) @binding(2) var atlas_3_channels: texture_2d<rgb8unorm, read>;
 // Like environment maps
 //@group(1) @binding(4) var atlas_hdr_3_channels: texture_2d<rgbf32, read>;
 
-const f32_max: f32 = 0x1.fffffep+127;
+// Should add a per_frame here that i can use to send camera transform
+
+//const f32_max: f32 = 0x1.fffffep+127;
+const f32_max: f32 = 999999.0f;
 
 struct Material
 {
@@ -157,46 +156,20 @@ fn ray_tri_dst(ray: Ray, v0: vec3f, v1: vec3f, v2: vec3f)->f32
     return res; // This ray hits the triangle
 }
 
-fn ray_sphere_dst(ray: Ray, sphere_ori: vec3f, sphere_rad: f32)->f32
-{
-    let oc = ray.ori - sphere_ori;
-    let a = dot(ray.dir, ray.dir);
-    let b = 2.0f * dot(oc, ray.dir);
-    let c = dot(oc, oc) - sphere_rad * sphere_rad;
-    let discriminant = b * b - 4.0f * a * c;
-    
-    let intersection = discriminant >= 0.0f;
-    var dst = 0.0f;
-    if(intersection)
-    {
-        // Sphere intersections
-        let t0 = (-b + sqrt(discriminant)) / (2.0f * a);
-        let t1 = (-b - sqrt(discriminant)) / (2.0f * a);
-        dst = min(t0, t1) * f32(intersection);
-    }
-    
-    return select(f32_max, dst, intersection);
-}
-
 // Loop through all triangles for now
 fn ray_scene_intersection(ray: Ray)->f32
 {
     var res: f32 = f32_max;
 
-//    for(var i = 0u; i < num_indices; i += 3u)
-//    {
-        let v0 = vec3f(0.0f, 0.0f, 10.0f);
-        let v1 = vec3f(1.0f, 1.0f, 10.0f);
-        let v2 = vec3f(0.0f, 1.0f, 10.0f);
-
-        /*let v0: vec3f = verts_pos[indices[i + 0]];
+    for(var i = 0u; i < 36; i += 3u)
+    {
+        let v0: vec3f = verts_pos[indices[i + 0]];
         let v1: vec3f = verts_pos[indices[i + 1]];
-        let v2: vec3f = verts_pos[indices[i + 2]];        
-        */
+        let v2: vec3f = verts_pos[indices[i + 2]];
 
         let dst = ray_tri_dst(ray, v0, v1, v2);
         res = min(res, dst);
-//    }
+    }
 
     //res = min(res, ray_sphere_dst(ray, vec3f(0.0f), 0.5f));
 
@@ -210,27 +183,24 @@ fn ray_scene_intersection(ray: Ray)->f32
 @workgroup_size(16, 16, 1)
 fn main(@builtin(global_invocation_id) global_id: vec3<u32>)
 {
-    var coords = vec2u(global_id.xy);
-
-    var frag_coord = vec2f(f32(global_id.x) + 0.5f, f32(global_id.y) + 0.5f);
-    var resolution = vec2f(f32(output_size.x), f32(output_size.y));
+    var frag_coord = vec2f(global_id.xy) + 0.5f;
+    var output_dim = textureDimensions(output_texture).xy;
+    var resolution = vec2f(output_dim.xy);
 
     var uv = frag_coord / resolution;
     var coord = 2.0f * uv - 1.0f;
-    coord.y *= resolution.y / resolution.x;
+    coord.y *= -resolution.y / resolution.x;
     
     var camera_look_at = normalize(vec3(coord, 1.0f));
-    var camera_ray = Ray(vec3f(0.0f, 0.0f, -1.0f), camera_look_at, 1.0f / camera_look_at);
+
+    var camera_ray = Ray(vec3f(0.0f, 3.0f, -10.0f), camera_look_at, 1.0f / camera_look_at);
 
     var hit = ray_scene_intersection(camera_ray) != f32_max;
     var color = select(vec4f(0.0f, 1.0f, 0.0f, 0.0f), vec4f(1.0f, 0.0f, 0.0f, 0.0f), hit);
 
-    // Rotate to lookAt vector according to camera rotation
-    //let world_camera_look_at = normalize(CameraFrame2World(cameraLookat, cameraAngle.x, cameraAngle.y));
-
-    if coords.x < output_size.x && coords.y < output_size.y
+    if global_id.x < output_dim.x && global_id.y < output_dim.y
     {
         var coord_color = vec4f(uv, 1.0f, 1.0f);
-        textureStore(output_texture, coords, coord_color);
+        textureStore(output_texture, global_id.xy, color);
     }
 }
