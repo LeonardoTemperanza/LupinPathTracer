@@ -42,6 +42,10 @@ pub struct EGUIRenderState
 // handles for the scene info
 pub struct Scene
 {
+    pub verts: wgpu::Buffer,
+    pub indices: wgpu::Buffer,
+
+    /*
     triangles: wgpu::Buffer,
     bvh_nodes: u32,
     tlas_nodes: u32,
@@ -49,7 +53,7 @@ pub struct Scene
     // Texture atlases
     atlas_1_channel: u32,
     atlas_3_channels: u32,
-    atlas_hdr_3_channels: u32,
+    atlas_hdr_3_channels: u32,*/
 }
 
 struct BvhNode
@@ -267,6 +271,30 @@ impl<'a> Renderer<'a>
                     },
                     count: None
                 },
+                BindGroupLayoutEntry
+                {
+                    binding: 2,
+                    visibility: ShaderStages::COMPUTE,
+                    ty: BindingType::Buffer
+                    {
+                        ty: BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None
+                },
+                BindGroupLayoutEntry
+                {
+                    binding: 3,
+                    visibility: ShaderStages::COMPUTE,
+                    ty: BindingType::Buffer
+                    {
+                        ty: BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None
+                }
             ]
         });
 
@@ -453,7 +481,7 @@ impl<'a> Renderer<'a>
     // Rendering
 
     // Will later take a scene as input
-    pub fn draw_scene(&mut self, render_to: &Texture)
+    pub fn draw_scene(&mut self, scene: &Scene, render_to: &Texture)
     {
         use wgpu::*;
         let surface = &self.surface;
@@ -474,6 +502,7 @@ impl<'a> Renderer<'a>
             use std::mem;
             let size_uniform: [u32; 2] = [width, height];
 
+            // Pass render target size uniform
             let size_uniform_buffer = device.create_buffer(&BufferDescriptor
             {
                 label: None,
@@ -504,6 +533,26 @@ impl<'a> Renderer<'a>
                             size: None, // Use the entire buffer
                         })
                     },
+                    BindGroupEntry
+                    {
+                        binding: 2,
+                        resource: BindingResource::Buffer(BufferBinding
+                        {
+                            buffer: &scene.verts,
+                            offset: 0,
+                            size: None
+                        })
+                    },
+                    BindGroupEntry
+                    {
+                        binding: 3,
+                        resource: BindingResource::Buffer(BufferBinding
+                        {
+                            buffer: &scene.indices,
+                            offset: 0,
+                            size: None
+                        })
+                    },
                 ],
             });
 
@@ -515,54 +564,9 @@ impl<'a> Renderer<'a>
 
             compute_pass.set_pipeline(&self.pathtracer);
             compute_pass.set_bind_group(0, &bind_group, &[]);
-            let num_workers_x = (width as f32 / 16.0).ceil() as u32;
-            let num_workers_y = (height as f32 / 16.0).ceil() as u32;
+            let num_workers_x = 1; //(width as f32 / 16.0).ceil() as u32;
+            let num_workers_y = 1; //(height as f32 / 16.0).ceil() as u32;
             compute_pass.dispatch_workgroups(num_workers_x, num_workers_y, 1);
-        }
-
-        // Render pass to display the generated image on the screen
-        {
-            let bind_group = device.create_bind_group(&BindGroupDescriptor
-            {
-                label: None,
-                layout: &self.tex_to_screen_layout,
-                entries: &[
-                    BindGroupEntry
-                    {
-                        binding: 0,
-                        resource: BindingResource::TextureView(&self.pathtracer_out_tex_view)
-                    },
-                    BindGroupEntry
-                    {
-                        binding: 1,
-                        resource: BindingResource::Sampler(&self.pathtracer_sampler)
-                    }
-                ],
-            });
-
-            let color_attachment = RenderPassColorAttachment
-            {
-                view: frame_view,
-                resolve_target: None,
-                ops: Operations
-                {
-                    load: LoadOp::Clear(wgpu::Color { r: 0.55, g: 0.55, b: 0.55, a: 1.0 }),
-                    store: StoreOp::Store,
-                },
-            };
-
-            let mut render_pass = encoder.begin_render_pass(&RenderPassDescriptor
-            {
-                label: None,
-                color_attachments: &[Some(color_attachment)],
-                depth_stencil_attachment: None,
-                timestamp_writes: None,
-                occlusion_query_set: None,
-            });
-
-            render_pass.set_pipeline(&self.tex_to_screen);
-            render_pass.set_bind_group(0, &bind_group, &[]);
-            render_pass.draw(0..6, 0..1);
         }
 
         self.queue.submit(Some(encoder.finish()));
@@ -634,10 +638,35 @@ impl<'a> Renderer<'a>
     ////////
     // Upload to GPU
 
-    // Uploads the entire scene to GPU
-    pub fn upload_scene(&mut self)
+    pub fn upload_buffer(&mut self, buffer: &[u8])->wgpu::Buffer
     {
+        println!("{}", buffer.len());
 
+        use wgpu::*;
+        let wgpu_buffer = self.device.create_buffer(&BufferDescriptor
+        {
+            label: None,
+            size: buffer.len() as u64,
+            usage: BufferUsages::COPY_DST | BufferUsages::STORAGE,
+            mapped_at_creation: false,
+        });
+
+        self.queue.write_buffer(&wgpu_buffer, 0, buffer);
+
+        return wgpu_buffer;
+    }
+
+    pub fn empty_buffer(&mut self)->wgpu::Buffer
+    {
+        use wgpu::*;
+        let buffer = self.device.create_buffer(&BufferDescriptor
+        {
+            label: None,
+            size: 0,
+            usage: BufferUsages::COPY_DST | BufferUsages::STORAGE,
+            mapped_at_creation: false,
+        });
+        return buffer;
     }
 
     ////////

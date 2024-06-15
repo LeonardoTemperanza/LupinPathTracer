@@ -68,3 +68,25 @@ pub struct Vec4
     z: f32,
     w: f32
 }
+
+
+////////
+// Miscellaneous
+
+// From https://stackoverflow.com/questions/74322541/how-to-append-to-pathbuf
+pub fn append_to_path(p: std::path::PathBuf, s: &str)->std::path::PathBuf
+{
+    let mut p = p.into_os_string();
+    p.push(s);
+    return p.into();
+}
+
+// Useful for passing buffers to the GPU
+pub fn to_u8_slice<T>(slice: &[T])->&[u8]
+{
+    let buf_size = slice.len() * std::mem::size_of::<T>();
+    return unsafe
+    {
+        std::slice::from_raw_parts(slice.as_ptr() as *const _ as *const u8, buf_size)
+    };
+}

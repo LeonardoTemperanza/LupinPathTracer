@@ -9,6 +9,7 @@ use winit::window::Window;
 use egui_winit::State;
 use egui::ClippedPrimitive;
 use crate::loader::*;
+use crate::base::*;
 
 use crate::renderer_wgpu::*;
 
@@ -20,7 +21,10 @@ pub struct Core
     preview_window_size: (i32, i32),
 
     // Gui state
-    slider_value: f32
+    slider_value: f32,
+
+    // Scene info
+    scene: Scene
 }
 
 impl Core
@@ -30,6 +34,12 @@ impl Core
         let render_image = renderer.create_texture(1920, 1080);
         let render_image_id = renderer.egui_texture_from_wgpu(&render_image, true);
 
+        // Load scene
+        let mut obj_path = std::env::current_exe().unwrap();
+        obj_path.pop();
+        obj_path = append_to_path(obj_path, "/../assets/FinalBaseMesh.obj");
+
+        let scene: Scene = load_scene_obj(obj_path.into_os_string().to_str().unwrap(), renderer);
         return Core
         {
             render_image_id,
@@ -37,7 +47,10 @@ impl Core
             preview_window_size: (1920, 1080),
 
             // GUI
-            slider_value: 0.0
+            slider_value: 0.0,
+
+            // Scene info
+            scene
         };
     }
 
@@ -69,7 +82,7 @@ impl Core
                                                                   gui_output.pixels_per_point);
 
             renderer.prepare_frame();
-            renderer.draw_scene(&self.render_image);
+            renderer.draw_scene(&self.scene, &self.render_image);
 
             // Draw gui last, as an overlay
             renderer.draw_egui(tris, &gui_output.textures_delta, win_width, win_height, scale);
@@ -128,7 +141,7 @@ impl Core
             .frame(egui::Frame::none())
             .show(ctx, |ui|
             {
-                let size = ui.available_size();
+                let size = ui.available_size() * ctx.pixels_per_point();
                 let size_int = (size.x as i32, size.y as i32);
                 if size_int.0 != self.preview_window_size.0 || size_int.1 != self.preview_window_size.1
                 {
