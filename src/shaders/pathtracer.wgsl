@@ -2,12 +2,19 @@
 // There should be a wgsl custom preprocessor which implements:
 // #assert(expression), should write to a debug texture (only in debug)
 
+// NOTE: Early returns are heavily discouraged here because it
+// will lead to thread divergence, and that in turn will cause
+// any proceeding __syncthreads() call to invoke UB, as some threads
+// will never reach that point because they early returned. In general
+// execution between multiple threads should be as predictable as possible
+
 // Scene representation
 //@group(0) @binding(0) var models: storage
 
 @group(0) @binding(0) var output_texture: texture_storage_2d<rgba8unorm, write>;
 @group(0) @binding(1) var<storage, read> verts_pos: array<vec3f>;
 @group(0) @binding(2) var<storage, read> indices: array<u32>;
+@group(0) @binding(3) var<storage, read> bvh_nodes: array<BvhNode>;
 
 //@group(1) @binding(0) var atlas_1_channel: texture_2d<r8unorm, read>;
 // Like base color
@@ -17,8 +24,15 @@
 
 // Should add a per_frame here that i can use to send camera transform
 
-//const f32_max: f32 = 0x1.fffffep+127;
-const f32_max: f32 = 999999.0f;
+const f32_max: f32 = 0x1.fffffep+127;
+
+// This doesn't include positions, as that
+// is stored in a separate buffer for locality
+struct Vertex
+{
+    normal: vec3f,
+    tex_coords: vec3f
+}
 
 struct Material
 {
@@ -43,15 +57,18 @@ struct Ray
     inv_dir: vec3f  // Precomputed inverse of the ray direction, for performance
 }
 
+// NOTE: The odd ordering of the fields
+// ensures that the struct is 32 bytes wide,
+// given that vec3f has 16-byte padding
 struct BvhNode
 {
     aabb_min:  vec3f,
-    aabb_max:  vec3f,
     // If tri_count is 0, this is first_child
     // otherwise this is tri_begin
     tri_begin_or_first_child: u32,
+    aabb_max:  vec3f,
     tri_count: u32
-
+    
     // Second child is at index first_child + 1
 }
 
@@ -156,24 +173,98 @@ fn ray_tri_dst(ray: Ray, v0: vec3f, v1: vec3f, v2: vec3f)->f32
     return res; // This ray hits the triangle
 }
 
-// Loop through all triangles for now
-fn ray_scene_intersection(ray: Ray)->f32
+struct HitInfo
 {
-    var res: f32 = f32_max;
+    dst: f32,
+    normal: vec3f,
+    tex_coords: vec3f
+}
+fn ray_scene_intersection(ray: Ray)->HitInfo
+{
+    var stack: array<u32, 30>;
+    var stack_idx: i32 = 1;
+    stack[0] = 0u;
 
-    for(var i = 0u; i < 36; i += 3u)
+    var min_dst = f32_max;
+    var tri_idx: u32 = 0;
+    while stack_idx > 0
     {
-        let v0: vec3f = verts_pos[indices[i + 0]];
-        let v1: vec3f = verts_pos[indices[i + 1]];
-        let v2: vec3f = verts_pos[indices[i + 2]];
+        stack_idx--;
+        let node = bvh_nodes[stack[stack_idx]];
 
-        let dst = ray_tri_dst(ray, v0, v1, v2);
-        res = min(res, dst);
+        if node.tri_count > 0u  // Leaf node
+        {
+            let tri_begin = node.tri_begin_or_first_child;
+            let tri_count = node.tri_count;
+            for(var i: u32 = tri_begin; i < tri_begin + tri_count; i++)
+            {
+                let v0: vec3f = verts_pos[indices[i*3 + 0]];
+                let v1: vec3f = verts_pos[indices[i*3 + 1]];
+                let v2: vec3f = verts_pos[indices[i*3 + 2]];
+                let dst: f32 = ray_tri_dst(ray, v0, v1, v2);
+                if dst < min_dst
+                {
+                    min_dst = dst;
+                    tri_idx = i;
+                }
+            }
+        }
+        else  // Non-leaf node
+        {
+            let left_child  = node.tri_begin_or_first_child;
+            let right_child = left_child + 1;
+            let left_child_node  = bvh_nodes[left_child];
+            let right_child_node = bvh_nodes[right_child];
+
+            let left_dst  = ray_aabb_dst(ray, left_child_node.aabb_min,  left_child_node.aabb_max);
+            let right_dst = ray_aabb_dst(ray, right_child_node.aabb_min, right_child_node.aabb_max);
+
+            // Push children onto the stack
+            // The closest child should be looked at
+            // first. This order is chosen so that it's more
+            // likely that the second child will never need
+            // to be queried
+            if left_dst <= right_dst
+            {
+                if right_dst < min_dst
+                {
+                    stack[stack_idx] = right_child;
+                    stack_idx++;
+                }
+                
+                if left_dst < min_dst
+                {
+                    stack[stack_idx] = left_child;
+                    stack_idx++;
+                }
+            }
+            else
+            {
+                if left_dst < min_dst
+                {
+                    stack[stack_idx] = left_child;
+                    stack_idx++;
+                }
+
+                if right_dst < min_dst
+                {
+                    stack[stack_idx] = right_child;
+                    stack_idx++;
+                }
+            }
+        }
     }
 
-    //res = min(res, ray_sphere_dst(ray, vec3f(0.0f), 0.5f));
+    var hit_info: HitInfo = HitInfo(min_dst, vec3f(0.0f), vec3f(0.0f));
+    if min_dst != f32_max
+    {
+        let v0: vec3f = verts_pos[indices[tri_idx*3 + 0]];
+        let v1: vec3f = verts_pos[indices[tri_idx*3 + 1]];
+        let v2: vec3f = verts_pos[indices[tri_idx*3 + 2]];
+        hit_info.normal = normalize(cross(v1 - v0, v2 - v0));
+    }
 
-    return res;
+    return hit_info;
 }
 
 @compute
@@ -193,10 +284,11 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>)
     
     var camera_look_at = normalize(vec3(coord, 1.0f));
 
-    var camera_ray = Ray(vec3f(0.0f, 3.0f, -10.0f), camera_look_at, 1.0f / camera_look_at);
+    var camera_ray = Ray(vec3f(-0.3f, 1.0f, -2.0f), camera_look_at, 1.0f / camera_look_at);
 
-    var hit = ray_scene_intersection(camera_ray) != f32_max;
-    var color = select(vec4f(0.0f, 1.0f, 0.0f, 0.0f), vec4f(1.0f, 0.0f, 0.0f, 0.0f), hit);
+    var hit = ray_scene_intersection(camera_ray);
+
+    var color = vec4f(select(vec3f(0.0f), hit.normal, hit.dst != f32_max), 1.0f);
 
     if global_id.x < output_dim.x && global_id.y < output_dim.y
     {

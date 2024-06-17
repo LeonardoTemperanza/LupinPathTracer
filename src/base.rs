@@ -48,27 +48,100 @@ fn my_waker() -> Waker { unsafe { return Waker::from_raw(my_raw_waker()) } }
 ////////
 // Math
 
+#[derive(Default, Clone, Copy)]
 pub struct Vec2
 {
-    x: f32,
-    y: f32
+    pub x: f32,
+    pub y: f32
 }
 
+#[derive(Default, Clone, Copy)]
 pub struct Vec3
 {
-    x: f32,
-    y: f32,
-    z: f32
+    pub x: f32,
+    pub y: f32,
+    pub z: f32
 }
 
+#[derive(Default, Clone, Copy)]
 pub struct Vec4
 {
-    x: f32,
-    y: f32,
-    z: f32,
-    w: f32
+    pub x: f32,
+    pub y: f32,
+    pub z: f32,
+    pub w: f32
 }
 
+pub fn lerp_f32(a: f32, b: f32, t: f32)->f32
+{
+    return a + (b - a) * t;
+}
+
+impl std::ops::Add for Vec3
+{
+    type Output = Self;
+
+    fn add(self, other: Self)->Self::Output
+    {
+        return Self
+        {
+            x: self.x + other.x,
+            y: self.y + other.y,
+            z: self.z + other.z
+        };
+    }
+}
+
+impl std::ops::Sub for Vec3
+{
+    type Output = Self;
+
+    fn sub(self, other: Self)->Self::Output
+    {
+        return Self
+        {
+            x: self.x - other.x,
+            y: self.y - other.y,
+            z: self.z - other.z
+        };
+    }
+}
+
+impl std::ops::Div<f32> for Vec3
+{
+    type Output = Vec3;
+
+    fn div(self, rhs: f32)->Vec3
+    {
+        return Self
+        {
+            x: self.x / rhs,
+            y: self.y / rhs,
+            z: self.z / rhs
+        };
+    }
+}
+
+impl std::ops::Index<usize> for Vec3
+{
+    type Output = f32;
+    fn index<'a>(&'a self, i: usize) -> &'a f32
+    {
+        debug_assert!(i < 3);
+        let ptr = &self.x as *const f32;
+        return unsafe { &*ptr.add(i) };
+    }
+}
+
+impl std::ops::IndexMut<usize> for Vec3
+{
+    fn index_mut<'a>(&'a mut self, i: usize) -> &'a mut f32
+    {
+        debug_assert!(i < 3);
+        let ptr = &mut self.x as *mut f32;
+        return unsafe { &mut *ptr.add(i) };
+    }
+}
 
 ////////
 // Miscellaneous
@@ -89,4 +162,40 @@ pub fn to_u8_slice<T>(slice: &[T])->&[u8]
     {
         std::slice::from_raw_parts(slice.as_ptr() as *const _ as *const u8, buf_size)
     };
+}
+
+pub fn grow_aabb_to_include_tri(aabb_min: &mut Vec3, aabb_max: &mut Vec3, t0: Vec3, t1: Vec3, t2: Vec3)
+{
+    aabb_min.x = aabb_min.x.min(t0.x);
+    aabb_min.x = aabb_min.x.min(t1.x);
+    aabb_min.x = aabb_min.x.min(t2.x);
+    aabb_max.x = aabb_max.x.max(t0.x);
+    aabb_max.x = aabb_max.x.max(t1.x);
+    aabb_max.x = aabb_max.x.max(t2.x);
+
+    aabb_min.y = aabb_min.y.min(t0.y);
+    aabb_min.y = aabb_min.y.min(t1.y);
+    aabb_min.y = aabb_min.y.min(t2.y);
+    aabb_max.y = aabb_max.y.max(t0.y);
+    aabb_max.y = aabb_max.y.max(t1.y);
+    aabb_max.y = aabb_max.y.max(t2.y);
+
+    aabb_min.z = aabb_min.z.min(t0.z);
+    aabb_min.z = aabb_min.z.min(t1.z);
+    aabb_min.z = aabb_min.z.min(t2.z);
+    aabb_max.z = aabb_max.z.max(t0.z);
+    aabb_max.z = aabb_max.z.max(t1.z);
+    aabb_max.z = aabb_max.z.max(t2.z);
+}
+
+pub fn compute_tri_centroid(t0: Vec3, t1: Vec3, t2: Vec3)->Vec3
+{
+    return (t0 + t1 + t2) / 3.0;
+}
+
+pub fn in_aabb(v: Vec3, aabb_min: Vec3, aabb_max: Vec3)->bool
+{
+    return v.x >= aabb_min.x && v.x <= aabb_max.x &&
+           v.y >= aabb_min.y && v.y <= aabb_max.y &&
+           v.z >= aabb_min.z && v.z <= aabb_max.z;
 }

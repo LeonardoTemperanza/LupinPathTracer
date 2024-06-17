@@ -37,7 +37,7 @@ impl Core
         // Load scene
         let mut obj_path = std::env::current_exe().unwrap();
         obj_path.pop();
-        obj_path = append_to_path(obj_path, "/../assets/cube.obj");
+        obj_path = append_to_path(obj_path, "/../assets/bunny.obj");
 
         let scene: Scene = load_scene_obj(obj_path.into_os_string().to_str().unwrap(), renderer);
         return Core

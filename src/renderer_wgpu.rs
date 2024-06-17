@@ -22,15 +22,8 @@ pub struct Renderer<'a>
 
     // Common shader pipelines
     //pathtrace_pipelines: [wgpu::ComputePipeline; PathtraceMode::Count as usize],
-    tex_to_screen: wgpu::RenderPipeline,
-    pathtracer:    wgpu::ComputePipeline,
-    tex_to_screen_layout: wgpu::BindGroupLayout,
+    pathtracer: wgpu::ComputePipeline,
     pathtracer_layout: wgpu::BindGroupLayout,
-
-    // Common resources
-    pathtracer_out_tex: wgpu::Texture,
-    pathtracer_out_tex_view: wgpu::TextureView,
-    pathtracer_sampler: wgpu::Sampler
 }
 
 pub struct EGUIRenderState
@@ -44,6 +37,7 @@ pub struct Scene
 {
     pub verts: wgpu::Buffer,
     pub indices: wgpu::Buffer,
+    pub bvh_nodes: wgpu::Buffer,
 
     /*
     triangles: wgpu::Buffer,
@@ -56,14 +50,18 @@ pub struct Scene
     atlas_hdr_3_channels: u32,*/
 }
 
-struct BvhNode
+// NOTE: The odd ordering of the fields
+// ensures that the struct is 32 bytes wide,
+// given that vec3f has 16-byte padding (on the GPU)
+#[derive(Default)]
+pub struct BvhNode
 {
-    aabb_min: Vec3,
-    aabb_max: Vec3,
-    // If tri count is 0, this is first child
+    pub aabb_min: Vec3,
+    // If tri_count is 0, this is first_child
     // otherwise this is tri_begin
-    tri_begin_or_first_child: u32,
-    tri_count: u32
+    pub tri_begin_or_first_child: u32,
+    pub aabb_max: Vec3,
+    pub tri_count: u32
 }
 
 #[repr(u8)]
@@ -169,80 +167,13 @@ impl<'a> Renderer<'a>
         configure_surface(&mut surface, &device, swapchain_format, win_size.width as i32, win_size.height as i32);
 
         // Compile all shader variations
-        let tex_to_screen_module = device.create_shader_module(ShaderModuleDescriptor
-        {
-            label: Some("Tex2ScreenShader"),
-            source: ShaderSource::Wgsl(include_str!("shaders/texture2screen.wgsl").into()),
-        });
-
         let pathtracer_module = device.create_shader_module(ShaderModuleDescriptor
         {
             label: Some("PathtracerShader"),
             source: ShaderSource::Wgsl(include_str!("shaders/pathtracer.wgsl").into()),
         });
 
-        // Create shader pipelines
-        let tex_to_screen_bind_group_layout = device.create_bind_group_layout(&BindGroupLayoutDescriptor
-        {
-            label: None,
-            entries:
-            &[
-                BindGroupLayoutEntry
-                {
-                    binding: 0,
-                    visibility: ShaderStages::FRAGMENT,
-                    ty: BindingType::Texture
-                    {
-                        view_dimension: TextureViewDimension::D2,
-                        multisampled: false,
-                        sample_type: TextureSampleType::Float { filterable: true }
-                    },
-                    count: None
-                },
-                BindGroupLayoutEntry
-                {
-                    binding: 1,
-                    visibility: ShaderStages::FRAGMENT,
-                    ty: BindingType::Sampler(SamplerBindingType::Filtering),
-                    count: None
-                },
-            ]
-        });
-
-        let tex_to_screen_layout = device.create_pipeline_layout(&PipelineLayoutDescriptor
-        {
-            label: None,
-            bind_group_layouts: &[&tex_to_screen_bind_group_layout],
-            push_constant_ranges: &[]
-        });
-
-        let tex_to_screen = device.create_render_pipeline(&RenderPipelineDescriptor
-        {
-            label: Some("Tex2ScreenPipeline"),
-            layout: Some(&tex_to_screen_layout),
-            vertex: VertexState
-            {
-                module: &tex_to_screen_module,
-                entry_point: "vert_main",
-                buffers: &[]
-            },
-            fragment: Some(FragmentState
-            {
-                module: &tex_to_screen_module,
-                entry_point: "frag_main",
-                targets: &[Some(ColorTargetState
-                {
-                    format: swapchain_format,
-                    blend: Some(BlendState::REPLACE),
-                    write_mask: ColorWrites::ALL
-                })],
-            }),
-            primitive: PrimitiveState::default(),
-            depth_stencil: None,
-            multisample: MultisampleState::default(),
-            multiview: None,
-        });
-
+        // Create shader pipeline
         let pathtracer_bind_group_layout = device.create_bind_group_layout(&BindGroupLayoutDescriptor {
             label: None,
             entries:
@@ -282,7 +213,19 @@ impl<'a> Renderer<'a>
                         min_binding_size: None,
                     },
                     count: None
-                }
+                },
+                BindGroupLayoutEntry
+                {
+                    binding: 3,
+                    visibility: ShaderStages::COMPUTE,
+                    ty: BindingType::Buffer
+                    {
+                        ty: BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None
+                },
             ]
         });
 
@@ -300,26 +243,6 @@ impl<'a> Renderer<'a>
             module: &pathtracer_module,
             entry_point: "main"
         });
-
-        // Create resources
-        let pathtracer_out_tex = device.create_texture(&TextureDescriptor
-        {
-            label: None,
-            dimension: TextureDimension::D2,
-            format: TextureFormat::Rgba8Unorm,
-            mip_level_count: 1,
-            sample_count: 1,
-            size: Extent3d { width: 1920, height: 1080, depth_or_array_layers: 1 },
-            usage: TextureUsages::TEXTURE_BINDING | TextureUsages::STORAGE_BINDING | TextureUsages::RENDER_ATTACHMENT,
-            view_formats: &[TextureFormat::Rgba8Unorm]
-        });
-
-        let pathtracer_out_tex_view = pathtracer_out_tex.create_view(&TextureViewDescriptor
-        {
-            format: Some(TextureFormat::Rgba8Unorm),
-            ..Default::default()
-        });
-        let pathtracer_sampler = device.create_sampler(&SamplerDescriptor::default());
 
         // Init egui info
         let renderer = egui_wgpu::Renderer::new(&device, swapchain_format, None, 1);
@@ -341,15 +264,8 @@ impl<'a> Renderer<'a>
             egui_render_state,
 
             // Common shader pipelines
-            tex_to_screen,
             pathtracer,
-            tex_to_screen_layout: tex_to_screen_bind_group_layout,
             pathtracer_layout: pathtracer_bind_group_layout,
-
-            // Common resources
-            pathtracer_out_tex,
-            pathtracer_out_tex_view,
-            pathtracer_sampler
         };
     }
 
@@ -487,9 +403,6 @@ impl<'a> Renderer<'a>
 
         // Compute pass to generate image
         {
-            use std::mem;
-            let size_uniform: [u32; 2] = [width, height];
-
             let bind_group = device.create_bind_group(&BindGroupDescriptor
             {
                 label: None,
@@ -516,6 +429,16 @@ impl<'a> Renderer<'a>
                         resource: BindingResource::Buffer(BufferBinding
                         {
                             buffer: &scene.indices,
+                            offset: 0,
+                            size: None
+                        })
+                    },
+                    BindGroupEntry
+                    {
+                        binding: 3,
+                        resource: BindingResource::Buffer(BufferBinding
+                        {
+                            buffer: &scene.bvh_nodes,
                             offset: 0,
                             size: None
                         })
