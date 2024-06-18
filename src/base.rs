@@ -164,6 +164,15 @@ pub fn to_u8_slice<T>(slice: &[T])->&[u8]
     };
 }
 
+pub fn to_u64_slice<T>(slice: &[T])->&[u64]
+{
+    let buf_size = slice.len() * std::mem::size_of::<T>();
+    return unsafe
+    {
+        std::slice::from_raw_parts(slice.as_ptr() as *const _ as *const u64, buf_size / 8)
+    };
+}
+
 pub fn grow_aabb_to_include_tri(aabb_min: &mut Vec3, aabb_max: &mut Vec3, t0: Vec3, t1: Vec3, t2: Vec3)
 {
     aabb_min.x = aabb_min.x.min(t0.x);

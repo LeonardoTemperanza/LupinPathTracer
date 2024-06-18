@@ -34,6 +34,11 @@ struct Vertex
     tex_coords: vec3f
 }
 
+struct PerFrame
+{
+    camera_transform: mat4x3f
+}
+
 struct Material
 {
     color_scale: vec3f,
@@ -48,6 +53,9 @@ struct Material
     alpha_texture: vec2u,      // 1 channel
     roughness_texture: vec2u,  // 1 channel
     emission_texture: vec2u    // hdr 3 channels
+
+    // We also need some texture wrapping info, i guess.
+    // Stuff like: repeat, clamp, etc.
 }
 
 struct Ray
@@ -181,7 +189,7 @@ struct HitInfo
 }
 fn ray_scene_intersection(ray: Ray)->HitInfo
 {
-    var stack: array<u32, 30>;
+    var stack: array<u32, 40>;
     var stack_idx: i32 = 1;
     stack[0] = 0u;
 

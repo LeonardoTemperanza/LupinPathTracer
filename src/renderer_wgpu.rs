@@ -24,6 +24,9 @@ pub struct Renderer<'a>
     //pathtrace_pipelines: [wgpu::ComputePipeline; PathtraceMode::Count as usize],
     pathtracer: wgpu::ComputePipeline,
     pathtracer_layout: wgpu::BindGroupLayout,
+
+    // Profiling
+    timer_query_set: wgpu::QuerySet
 }
 
 pub struct EGUIRenderState
@@ -132,6 +135,7 @@ impl<'a> Renderer<'a>
 {
     ////////
     // Initialization
+
     pub fn new(window: &'a Window)->Self
     {
         use wgpu::*;
@@ -154,7 +158,7 @@ impl<'a> Renderer<'a>
         let device_desc = DeviceDescriptor
         {
             label: None,
-            required_features: Features::empty(),
+            required_features: Features::TIMESTAMP_QUERY,
             required_limits: Limits::default(),
         };
         let maybe_device_queue = wait_for(adapter.request_device(&device_desc, None));
@@ -248,6 +252,14 @@ impl<'a> Renderer<'a>
         let renderer = egui_wgpu::Renderer::new(&device, swapchain_format, None, 1);
         let egui_render_state = EGUIRenderState { renderer };
 
+        // Profiling
+        let timer_query_set = device.create_query_set(&wgpu::QuerySetDescriptor
+        {
+            label: Some("TimerQuerySet"),
+            ty: wgpu::QueryType::Timestamp,
+            count: 2,  // Two queries are used, one for start time and one for end time
+        });
+
         return Renderer
         {
             instance,
@@ -266,11 +278,15 @@ impl<'a> Renderer<'a>
             // Common shader pipelines
             pathtracer,
             pathtracer_layout: pathtracer_bind_group_layout,
+
+            // Profiling
+            timer_query_set
         };
     }
 
     ////////
     // Utils
+
     pub fn resize(&mut self, width: i32, height: i32)
     {
         configure_surface(&mut self.surface, &self.device, self.swapchain_format, width, height);
@@ -416,32 +432,17 @@ impl<'a> Renderer<'a>
                     BindGroupEntry
                     {
                         binding: 1,
-                        resource: BindingResource::Buffer(BufferBinding
-                        {
-                            buffer: &scene.verts,
-                            offset: 0,
-                            size: None
-                        })
+                        resource: buffer_resource(&scene.verts)
                     },
                     BindGroupEntry
                     {
                         binding: 2,
-                        resource: BindingResource::Buffer(BufferBinding
-                        {
-                            buffer: &scene.indices,
-                            offset: 0,
-                            size: None
-                        })
+                        resource: buffer_resource(&scene.indices)
                     },
                     BindGroupEntry
                     {
                         binding: 3,
-                        resource: BindingResource::Buffer(BufferBinding
-                        {
-                            buffer: &scene.bvh_nodes,
-                            offset: 0,
-                            size: None
-                        })
+                        resource: buffer_resource(&scene.bvh_nodes)
                     },
                 ],
             });
@@ -516,9 +517,9 @@ impl<'a> Renderer<'a>
         self.queue.submit(Some(encoder.finish()));
     }
 
-    pub fn generate_bvh()
+    pub fn build_bvh(&mut self)->wgpu::Buffer
     {
-        
+        return self.empty_buffer();
     }
 
     pub fn swap_buffers(&mut self)
@@ -528,7 +529,7 @@ impl<'a> Renderer<'a>
     }
 
     ////////
-    // Upload to GPU
+    // CPU <-> GPU transfers
 
     pub fn upload_buffer(&mut self, buffer: &[u8])->wgpu::Buffer
     {
@@ -561,8 +562,92 @@ impl<'a> Renderer<'a>
         return buffer;
     }
 
+    // Lets the user read a buffer from the GPU to the CPU. This will
+    // cause latency so it should be used very sparingly
+    pub fn read_buffer(&mut self, buffer: wgpu::Buffer, output: &mut[u8])
+    {
+        assert!(buffer.size() == output.len() as u64);
+
+        let gpu_read_buffer = self.device.create_buffer(&wgpu::BufferDescriptor
+        {
+            label: Some("TimerQueryBuffer"),
+            size: buffer.size(),
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+            mapped_at_creation: false,
+        });
+
+        let encoder_desc = wgpu::CommandEncoderDescriptor { label: None };
+        let mut encoder = self.device.create_command_encoder(&encoder_desc);
+        encoder.copy_buffer_to_buffer(&buffer, 0, &gpu_read_buffer, 0, buffer.size());
+
+        let command_buffer = encoder.finish();
+        self.queue.submit(Some(command_buffer));
+
+        // Wait for read 
+        let buffer_slice = gpu_read_buffer.slice(..);
+        buffer_slice.map_async(wgpu::MapMode::Read, |result|
+        {
+            assert!(result.is_ok());
+        });
+        self.device.poll(wgpu::Maintain::Wait);
+
+        let data = buffer_slice.get_mapped_range();
+        output[..].clone_from_slice(&data);
+    }
+
     ////////
     // Miscellaneous
+
+    pub fn gpu_timer_begin(&self)
+    {
+        let encoder_desc = wgpu::CommandEncoderDescriptor { label: Some("TimerEncoder") };
+        let mut encoder = self.device.create_command_encoder(&encoder_desc);
+        encoder.write_timestamp(&self.timer_query_set, 0);
+        
+        let command_buffer = encoder.finish();
+        self.queue.submit(Some(command_buffer));
+    }
+
+    // Returns GPU time spent between the begin and end calls,
+    // in milliseconds. This will make the CPU wait for
+    // all the calls to be finished on the GPU side, so it can only
+    // really be used for very simple profiling, and definitely not
+    // in release builds
+    pub fn gpu_timer_end(&mut self)->f32
+    {
+        let encoder_desc = wgpu::CommandEncoderDescriptor { label: Some("TimerEncoder") };
+        let mut encoder = self.device.create_command_encoder(&encoder_desc);
+        encoder.write_timestamp(&self.timer_query_set, 1);
+
+        // Create a buffer to resolve query results
+        let query_buffer = self.device.create_buffer(&wgpu::BufferDescriptor
+        {
+            label: Some("TimerQueryBuffer"),
+            size: 16,
+            usage: wgpu::BufferUsages::QUERY_RESOLVE | wgpu::BufferUsages::COPY_SRC |
+                   wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::STORAGE,
+            mapped_at_creation: false,
+        });
+
+        // Resolve the query set to the buffer
+        encoder.resolve_query_set(&self.timer_query_set, 0..2, &query_buffer, 0);
+        let command_buffer = encoder.finish();
+        self.queue.submit(Some(command_buffer));
+
+        // Read the result back on the CPU
+        let mut read_data = Vec::<u8>::new();
+        read_data.resize(query_buffer.size() as usize, 0);
+        self.read_buffer(query_buffer, &mut read_data);
+
+        let timestamps: &[u64] = to_u64_slice(&read_data);
+
+        // This elapsed time is in nanoseconds
+        let elapsed_time = timestamps[1] - timestamps[0];
+
+        // Convert to milliseconds
+        return elapsed_time as f32 / 1_000_000.0;
+    }
+
     pub fn log_backend(&self)
     {
         print!("Using WGPU, with backend: ");
@@ -582,4 +667,17 @@ impl<'a> Renderer<'a>
 pub fn get_texture_size(texture: &Texture)->(u32, u32)
 {
     return (texture.desc.size.width, texture.desc.size.height);
+}
+
+////////
+// WGPU specific utils
+fn buffer_resource(buffer: &wgpu::Buffer)->wgpu::BindingResource
+{
+    use wgpu::*;
+    return BindingResource::Buffer(BufferBinding
+    {
+        buffer: buffer,
+        offset: 0,
+        size: None
+    })
 }
