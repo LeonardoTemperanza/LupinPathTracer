@@ -48,14 +48,14 @@ fn my_waker() -> Waker { unsafe { return Waker::from_raw(my_raw_waker()) } }
 ////////
 // Math
 
-#[derive(Default, Clone, Copy)]
+#[derive(Debug, Default, Clone, Copy)]
 pub struct Vec2
 {
     pub x: f32,
     pub y: f32
 }
 
-#[derive(Default, Clone, Copy)]
+#[derive(Debug, Default, Clone, Copy)]
 pub struct Vec3
 {
     pub x: f32,
@@ -63,7 +63,7 @@ pub struct Vec3
     pub z: f32
 }
 
-#[derive(Default, Clone, Copy)]
+#[derive(Debug, Default, Clone, Copy)]
 pub struct Vec4
 {
     pub x: f32,

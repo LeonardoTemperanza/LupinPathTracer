@@ -4,7 +4,7 @@
 
 use std::time::Instant;
 
-use winit::
+/*use winit::
 {
     dpi::LogicalSize,
     event::{Event, WindowEvent, StartCause},
@@ -12,6 +12,7 @@ use winit::
     window::Window,
     window::WindowBuilder,
 };
+*/
 
 use ::egui::FontDefinitions;
 
@@ -27,6 +28,43 @@ mod core;
 mod loader;
 pub use loader::*;
 
+mod platform;
+pub use platform::*;
+
+fn main()
+{
+    let mut platform = Platform::new();
+
+    let (mut width, mut height) = platform.get_framebuffer_size();
+    println!("width {} height {}", width, height);
+    let window_handle = platform.get_window_handle();
+    let mut renderer = Renderer::new(window_handle, width as i32, height as i32);
+    renderer.log_backend();
+
+    platform.show_window();
+    
+    // Main application state
+    //let mut core = core::Core::new(&mut renderer);
+
+    loop
+    {
+        let quit = platform.handle_window_events();
+        if quit { break; }
+
+        let (new_width, new_height) = platform.get_framebuffer_size();
+        if width != new_width || height != new_height
+        {
+            width = new_width;
+            height = new_height;
+            renderer.resize(width as i32, height as i32);
+        }
+
+        renderer.draw_test_triangle();
+        renderer.swap_buffers();
+    }
+}
+
+#[cfg(target_os = "linux")]
 fn main()
 {
     // Initialize window

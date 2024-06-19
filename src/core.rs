@@ -37,7 +37,7 @@ impl Core
         // Load scene
         let mut obj_path = std::env::current_exe().unwrap();
         obj_path.pop();
-        obj_path = append_to_path(obj_path, "/../assets/dragon.obj");
+        obj_path = append_to_path(obj_path, "/../assets/dragon_lowpoly.obj");
 
         let scene: Scene = load_scene_obj(obj_path.into_os_string().to_str().unwrap(), renderer);
         return Core
@@ -81,7 +81,6 @@ impl Core
             let tris: Vec<ClippedPrimitive> = egui_ctx.tessellate(gui_output.shapes,
                                                                   gui_output.pixels_per_point);
 
-            renderer.prepare_frame();
             renderer.draw_scene(&self.scene, &self.render_image);
 
             // Draw gui last, as an overlay

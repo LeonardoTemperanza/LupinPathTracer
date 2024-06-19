@@ -1,7 +1,8 @@
 
 use crate::base::*;
+use crate::platform::*;
 
-use winit::window::Window;
+//use winit::window::Window;
 
 use egui::{ClippedPrimitive, TexturesDelta};
 
@@ -14,8 +15,7 @@ pub struct Renderer<'a>
     queue:    wgpu::Queue,
     swapchain_format: wgpu::TextureFormat,
 
-    frame_view:    Option<wgpu::TextureView>,
-    frame_texture: Option<wgpu::SurfaceTexture>,
+    next_frame: Option<wgpu::SurfaceTexture>,
 
     // EGUI
     egui_render_state: EGUIRenderState,
@@ -136,7 +136,7 @@ impl<'a> Renderer<'a>
     ////////
     // Initialization
 
-    pub fn new(window: &'a Window)->Self
+    pub fn new(window: &'a Window, init_width: i32, init_height: i32)->Self
     {
         use wgpu::*;
 
@@ -167,8 +167,10 @@ impl<'a> Renderer<'a>
         let swapchain_capabilities = surface.get_capabilities(&adapter);
         let swapchain_format = swapchain_capabilities.formats[0];
 
-        let win_size = window.inner_size();
-        configure_surface(&mut surface, &device, swapchain_format, win_size.width as i32, win_size.height as i32);
+        configure_surface(&mut surface, &device, swapchain_format, init_width, init_height);
+
+        // Get first frame to render to
+        let next_frame = try_get_next_frame(&surface);
 
         // Compile all shader variations
         let pathtracer_module = device.create_shader_module(ShaderModuleDescriptor
@@ -269,8 +271,7 @@ impl<'a> Renderer<'a>
             queue,
             swapchain_format,
 
-            frame_view: None,
-            frame_texture: None,
+            next_frame,
 
             // Egui
             egui_render_state,
@@ -289,30 +290,15 @@ impl<'a> Renderer<'a>
 
     pub fn resize(&mut self, width: i32, height: i32)
     {
-        configure_surface(&mut self.surface, &self.device, self.swapchain_format, width, height);
-    }
-
-    pub fn prepare_frame(&mut self)
-    {
         use wgpu::*;
-
-        self.frame_texture = None;
-        self.frame_view = None;
-
-        let frame = match self.surface.get_current_texture()
+        if self.next_frame.is_some()
         {
-            Ok(frame) => frame,
-            Err(SurfaceError::Outdated) => { return; },  // This happens on some platforms when minimized
-            Err(e) =>
-            {
-                eprintln!("Dropped frame with error: {}", e);
-                return;
-            },
-        };
+            let next_frame = self.next_frame.take().unwrap();
+            drop(next_frame);
+        }
 
-        let view = frame.texture.create_view(&TextureViewDescriptor::default());
-        self.frame_texture = Some(frame);
-        self.frame_view    = Some(view);
+        configure_surface(&mut self.surface, &self.device, self.swapchain_format, width, height);
+        self.next_frame = try_get_next_frame(&self.surface);
     }
 
     pub fn create_texture(&mut self, width: u32, height: u32)->Texture
@@ -409,8 +395,6 @@ impl<'a> Renderer<'a>
         let queue   = &self.queue;
         let (width, height) = (render_to.desc.size.width, render_to.desc.size.height);
 
-        if self.frame_view.is_none() { return; }
-        let frame_view = self.frame_view.as_ref().unwrap();
         let encoder_desc = CommandEncoderDescriptor
         {
             label: None,
@@ -470,9 +454,13 @@ impl<'a> Renderer<'a>
                      textures_delta: &TexturesDelta,
                      width: i32, height: i32, scale: f32)
     {
-        if self.frame_view.is_none() { return; }
-        let frame_view = self.frame_view.as_ref().unwrap();
         let egui: &mut EGUIRenderState = &mut self.egui_render_state;
+
+        use wgpu::*;
+
+        if self.next_frame.is_none() { return; }
+        let next_frame = self.next_frame.as_ref().unwrap();
+        let frame_view = next_frame.texture.create_view(&TextureViewDescriptor::default());
 
         let win_width = width.max(1) as u32;
         let win_height = height.max(1) as u32;
@@ -491,11 +479,14 @@ impl<'a> Renderer<'a>
         };
         egui.renderer.update_buffers(&self.device, &self.queue, &mut encoder, &tris, &screen_descriptor);
 
-        let mut egui_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                view: frame_view,
+        let mut egui_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor
+        {
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment
+            {
+                view: &frame_view,
                 resolve_target: None,
-                ops: wgpu::Operations {
+                ops: wgpu::Operations
+                {
                     load: wgpu::LoadOp::Load,
                     store: wgpu::StoreOp::Store,
                 },
@@ -524,8 +515,14 @@ impl<'a> Renderer<'a>
 
     pub fn swap_buffers(&mut self)
     {
-        let texture = self.frame_texture.take();
-        if texture.is_some() { texture.unwrap().present(); }
+        use wgpu::*;
+        if self.next_frame.is_some()
+        {
+            let next_frame = self.next_frame.take().unwrap();
+            next_frame.present();
+        }
+
+        self.next_frame = try_get_next_frame(&self.surface);
     }
 
     ////////
@@ -563,7 +560,7 @@ impl<'a> Renderer<'a>
     }
 
     // Lets the user read a buffer from the GPU to the CPU. This will
-    // cause latency so it should be used very sparingly
+    // cause latency so it should be used very sparingly if at all
     pub fn read_buffer(&mut self, buffer: wgpu::Buffer, output: &mut[u8])
     {
         assert!(buffer.size() == output.len() as u64);
@@ -597,6 +594,107 @@ impl<'a> Renderer<'a>
 
     ////////
     // Miscellaneous
+
+    pub fn draw_test_triangle(&self)
+    {
+        use wgpu::*;        
+        let surface = &self.surface;
+        let device  = &self.device;
+        let queue   = &self.queue;
+
+        if self.next_frame.is_none() { return; }
+        let next_frame = self.next_frame.as_ref().unwrap();
+        let frame_view = next_frame.texture.create_view(&TextureViewDescriptor::default());
+
+        let encoder_desc = CommandEncoderDescriptor
+        {
+            label: None,
+        };
+        let mut encoder = device.create_command_encoder(&encoder_desc);
+
+        let shader_source = "
+        @vertex
+        fn vert_main(@builtin(vertex_index) VertexIndex : u32)->@builtin(position) vec4f {
+          var pos = array<vec2f, 3>
+          (
+            vec2(0.0, 0.5),
+            vec2(-0.5, -0.5),
+            vec2(0.5, -0.5)
+          );
+
+          return vec4f(pos[VertexIndex], 0.0, 1.0);
+        }
+
+        @fragment
+        fn frag_main()->@location(0) vec4f
+        {
+          return vec4(1.0, 0.0, 0.0, 1.0);
+        }
+        ";
+
+        let module = device.create_shader_module(ShaderModuleDescriptor
+        {
+            label: None,
+            source: ShaderSource::Wgsl(shader_source.into())
+        });
+
+        let pipeline = device.create_render_pipeline(&RenderPipelineDescriptor
+        {
+            label: None,
+            layout: None,
+            vertex: VertexState
+            {
+                module: &module,
+                entry_point: "vert_main",
+                buffers: &[]
+            },
+            fragment: Some(FragmentState
+            {
+                module: &module,
+                entry_point: "frag_main",
+                targets: &[Some(ColorTargetState
+                {
+                    format: self.swapchain_format,
+                    blend: Some(BlendState::REPLACE),
+                    write_mask: ColorWrites::ALL,
+                })],
+            }),
+            depth_stencil: None,
+            multisample: MultisampleState::default(),
+            multiview: None,
+            primitive: PrimitiveState
+            {
+                topology: PrimitiveTopology::TriangleList,
+                ..Default::default()
+            }
+        });
+
+        {
+            let mut render_pass = encoder.begin_render_pass(&RenderPassDescriptor
+            {
+                label: None,
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment
+                {
+                    view: &frame_view,
+                    resolve_target: None,
+                    ops: wgpu::Operations
+                    {
+                        load: LoadOp::Clear(Color::BLACK),
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None
+            });
+            
+            render_pass.set_pipeline(&pipeline);
+            render_pass.draw(0..3, 0..1);
+        }
+
+        let command_buffer = encoder.finish();
+        self.queue.submit(Some(command_buffer));
+    }
 
     pub fn gpu_timer_begin(&self)
     {
@@ -680,4 +778,19 @@ fn buffer_resource(buffer: &wgpu::Buffer)->wgpu::BindingResource
         offset: 0,
         size: None
     })
+}
+
+fn try_get_next_frame(surface: &wgpu::Surface)->Option<wgpu::SurfaceTexture>
+{
+    use wgpu::*;
+    return match surface.get_current_texture()
+    {
+        Ok(next_frame) => Some(next_frame),
+        Err(SurfaceError::Outdated) => { println!("Outdated!"); None },  // This happens on some platforms when minimized
+        Err(e) =>
+        {
+            eprintln!("Dropped frame with error: {}", e);
+            None
+        },
+    }   
 }
