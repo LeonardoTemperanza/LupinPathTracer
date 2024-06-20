@@ -18,9 +18,10 @@ use ::egui::FontDefinitions;
 mod base;
 pub use base::*;
 
-// Choose renderer between different backends
-mod renderer_wgpu;
-pub use renderer_wgpu::{Renderer};
+//mod renderer_wgpu;
+//pub use renderer_wgpu::{Renderer};
+mod renderer;
+pub use renderer::*;
 
 mod core;
 

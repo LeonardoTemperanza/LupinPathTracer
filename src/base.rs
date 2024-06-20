@@ -49,12 +49,14 @@ fn my_waker() -> Waker { unsafe { return Waker::from_raw(my_raw_waker()) } }
 // Math
 
 #[derive(Debug, Default, Clone, Copy)]
+#[repr(C)]
 pub struct Vec2
 {
     pub x: f32,
     pub y: f32
 }
 
+#[repr(C)]
 #[derive(Debug, Default, Clone, Copy)]
 pub struct Vec3
 {
@@ -64,6 +66,7 @@ pub struct Vec3
 }
 
 #[derive(Debug, Default, Clone, Copy)]
+#[repr(C)]
 pub struct Vec4
 {
     pub x: f32,
@@ -143,6 +146,41 @@ impl std::ops::IndexMut<usize> for Vec3
     }
 }
 
+pub trait VectorOps
+{
+    fn normalize(&mut self);
+}
+
+impl VectorOps for Vec3
+{
+    fn normalize(&mut self)
+    {
+        let magnitude = self.x * self.x + self.y * self.y + self.z * self.z;
+        self.x /= magnitude;
+        self.y /= magnitude;
+        self.z /= magnitude;
+    }
+}
+
+impl VectorOps for Vec2
+{
+    fn normalize(&mut self)
+    {
+        let magnitude = self.x * self.x + self.y * self.y;
+        self.x /= magnitude;
+        self.y /= magnitude;
+    }
+}
+
+impl std::fmt::Display for Vec3
+{
+    fn fmt(&self, _: &mut std::fmt::Formatter<'_>)->std::result::Result<(), std::fmt::Error>
+    {
+        println!("(x: {}, y: {}, z: {})", self.x, self.y, self.z);
+        return Ok(());
+    }
+}
+
 ////////
 // Miscellaneous
 
@@ -202,7 +240,7 @@ pub fn compute_tri_centroid(t0: Vec3, t1: Vec3, t2: Vec3)->Vec3
     return (t0 + t1 + t2) / 3.0;
 }
 
-pub fn in_aabb(v: Vec3, aabb_min: Vec3, aabb_max: Vec3)->bool
+pub fn is_point_in_aabb(v: Vec3, aabb_min: Vec3, aabb_max: Vec3)->bool
 {
     return v.x >= aabb_min.x && v.x <= aabb_max.x &&
            v.y >= aabb_min.y && v.y <= aabb_max.y &&

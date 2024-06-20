@@ -2,8 +2,7 @@
 // Contains all application logic that isn't already separated
 // into different modules (such as serialization and rendering)
 
-// Select the appropriate backend
-use crate::renderer_wgpu::*;
+use crate::renderer::*;
 
 use winit::window::Window;
 use egui_winit::State;
@@ -11,7 +10,8 @@ use egui::ClippedPrimitive;
 use crate::loader::*;
 use crate::base::*;
 
-use crate::renderer_wgpu::*;
+//use crate::renderer_wgpu::*;
+use crate::renderer::*;
 
 pub struct Core
 {

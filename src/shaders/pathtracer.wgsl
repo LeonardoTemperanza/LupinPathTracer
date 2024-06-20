@@ -15,6 +15,7 @@
 @group(0) @binding(1) var<storage, read> verts_pos: array<vec3f>;
 @group(0) @binding(2) var<storage, read> indices: array<u32>;
 @group(0) @binding(3) var<storage, read> bvh_nodes: array<BvhNode>;
+@group(0) @binding(4) var<storage, read> verts: array<Vertex>;
 
 //@group(1) @binding(0) var atlas_1_channel: texture_2d<r8unorm, read>;
 // Like base color
@@ -31,7 +32,7 @@ const f32_max: f32 = 0x1.fffffep+127;
 struct Vertex
 {
     normal: vec3f,
-    tex_coords: vec3f
+    tex_coords: vec2f
 }
 
 struct PerFrame
@@ -149,7 +150,7 @@ struct HitInfo
 {
     dst: f32,
     normal: vec3f,
-    tex_coords: vec3f
+    tex_coords: vec2f
 }
 fn ray_scene_intersection(ray: Ray)->HitInfo
 {
@@ -157,7 +158,8 @@ fn ray_scene_intersection(ray: Ray)->HitInfo
     var stack_idx: i32 = 1;
     stack[0] = 0u;
 
-    var min_dst = f32_max;
+    // t, u, v
+    var min_hit = vec3f(f32_max, 0.0f, 0.0f);
     var tri_idx: u32 = 0;
     while stack_idx > 0
     {
@@ -173,10 +175,10 @@ fn ray_scene_intersection(ray: Ray)->HitInfo
                 let v0: vec3f = verts_pos[indices[i*3 + 0]];
                 let v1: vec3f = verts_pos[indices[i*3 + 1]];
                 let v2: vec3f = verts_pos[indices[i*3 + 2]];
-                let dst: f32 = ray_tri_dst(ray, v0, v1, v2).x;
-                if dst < min_dst
+                let hit: vec3f = ray_tri_dst(ray, v0, v1, v2);
+                if hit.x < min_hit.x
                 {
-                    min_dst = dst;
+                    min_hit = hit;
                     tri_idx = i;
                 }
             }
@@ -198,13 +200,13 @@ fn ray_scene_intersection(ray: Ray)->HitInfo
             // to be queried
             if left_dst <= right_dst
             {
-                if right_dst < min_dst
+                if right_dst < min_hit.x
                 {
                     stack[stack_idx] = right_child;
                     stack_idx++;
                 }
                 
-                if left_dst < min_dst
+                if left_dst < min_hit.x
                 {
                     stack[stack_idx] = left_child;
                     stack_idx++;
@@ -212,13 +214,13 @@ fn ray_scene_intersection(ray: Ray)->HitInfo
             }
             else
             {
-                if left_dst < min_dst
+                if left_dst < min_hit.x
                 {
                     stack[stack_idx] = left_child;
                     stack_idx++;
                 }
 
-                if right_dst < min_dst
+                if right_dst < min_hit.x
                 {
                     stack[stack_idx] = right_child;
                     stack_idx++;
@@ -227,13 +229,18 @@ fn ray_scene_intersection(ray: Ray)->HitInfo
         }
     }
 
-    var hit_info: HitInfo = HitInfo(min_dst, vec3f(0.0f), vec3f(0.0f));
-    if min_dst != f32_max
+    var hit_info: HitInfo = HitInfo(min_hit.x, vec3f(0.0f), vec2f(0.0f));
+    if hit_info.dst != f32_max
     {
-        let v0: vec3f = verts_pos[indices[tri_idx*3 + 0]];
-        let v1: vec3f = verts_pos[indices[tri_idx*3 + 1]];
-        let v2: vec3f = verts_pos[indices[tri_idx*3 + 2]];
-        hit_info.normal = normalize(cross(v1 - v0, v2 - v0));
+        let vert0: Vertex = verts[indices[tri_idx*3 + 0]];
+        let vert1: Vertex = verts[indices[tri_idx*3 + 1]];
+        let vert2: Vertex = verts[indices[tri_idx*3 + 2]];
+        let u = min_hit.y;
+        let v = min_hit.z;
+        let w = 1.0 - u - v;
+
+        hit_info.normal = vert0.normal*w + vert1.normal*u + vert2.normal*v;
+        hit_info.tex_coords = vert0.tex_coords*w + vert1.tex_coords*u + vert2.tex_coords*v;
     }
 
     return hit_info;

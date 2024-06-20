@@ -3,7 +3,7 @@ use crate::base::*;
 
 use tobj::*;
 use std::ptr::NonNull;
-use crate::renderer_wgpu::*;
+use crate::renderer::*;
 
 pub fn load_scene_custom_format(path: &str)
 {
@@ -12,14 +12,16 @@ pub fn load_scene_custom_format(path: &str)
 
 pub fn load_scene_obj(path: &str, renderer: &mut Renderer)->Scene
 {
+    println!("Loading file from disk...");
+    let timer_start = std::time::Instant::now();
+
     let scene = tobj::load_obj(path, &tobj::GPU_LOAD_OPTIONS);
     assert!(scene.is_ok());
 
-    let (mut models, materials) = scene.expect("Failed to load OBJ file");
-    //let materials = materials.expect("Failed to load MTL file");
+    let elapsed: f32 = timer_start.elapsed().as_nanos() as f32 / 1_000_000_000.0;
+    println!("Done! Took: {}(s)", elapsed);
 
-    println!("Num models: {}", models.len());
-    //println!("Num materials: {}", materials.len());
+    let (mut models, materials) = scene.expect("Failed to load OBJ file");
 
     if models.len() > 0
     {
@@ -43,19 +45,49 @@ pub fn load_scene_obj(path: &str, renderer: &mut Renderer)->Scene
         let verts_pos_buf = renderer.upload_buffer(to_u8_slice(&verts_pos));
         let indices_buf = renderer.upload_buffer(to_u8_slice(&mesh.indices));
 
+        let mut verts: Vec<Vertex> = Vec::new();
+        verts.reserve_exact(mesh.positions.len() / 3);
+        for vert_idx in 0..(mesh.positions.len() / 3)
+        {
+            let mut normal = Vec3::default();
+            if mesh.normals.len() > 0
+            {
+                normal.x = mesh.normals[vert_idx*3+0];
+                normal.y = mesh.normals[vert_idx*3+1];
+                normal.z = mesh.normals[vert_idx*3+2];
+                normal.normalize();
+            };
+
+            let mut tex_coords = Vec2::default();
+            if mesh.texcoords.len() > 0
+            {
+                tex_coords.x = mesh.texcoords[vert_idx*2+0];
+                tex_coords.y = mesh.texcoords[vert_idx*2+1];
+                tex_coords.normalize();
+            };
+
+            let vert = Vertex { normal, padding0: 0.0, tex_coords, padding1: 0.0, padding2: 0.0 };
+
+            verts.push(vert);
+        }
+
+        let verts_buf = renderer.upload_buffer(to_u8_slice(&verts));
+
         return Scene
         {
-            verts: verts_pos_buf,
+            verts_pos: verts_pos_buf,
             indices: indices_buf,
             bvh_nodes: bvh_buf,
+            verts: verts_buf
         }
     }
 
     return Scene
     {
-        verts: renderer.empty_buffer(),
-        indices: renderer.empty_buffer(),
-        bvh_nodes: renderer.empty_buffer()
+        verts_pos: renderer.create_empty_buffer(),
+        indices: renderer.create_empty_buffer(),
+        bvh_nodes: renderer.create_empty_buffer(),
+        verts: renderer.create_empty_buffer()
     }
 }
 
@@ -74,9 +106,13 @@ pub fn load_image(path: &str, required_channels: i32)
 
 // NOTE: modifies the indices array to change the order of triangles
 // based on BVH
+// @performance This can be greatly improved, this first implementation
+// is just a simple working one, but this could probably be easily SIMD-ized
+// and parallelized.
 pub fn create_bvh(verts: &[f32], indices: &mut[u32])->Vec<BvhNode>
 {
     println!("Building bvh...");
+    let timer_start = std::time::Instant::now();
 
     let (aabb_min, aabb_max) = compute_aabb(verts, indices, 0, indices.len() as u32 / 3);
     let bvh_root = BvhNode
@@ -98,7 +134,8 @@ pub fn create_bvh(verts: &[f32], indices: &mut[u32])->Vec<BvhNode>
     const BVH_MAX_DEPTH: u32 = 20;
     bvh_split(&mut bvh, verts, indices, 0, BVH_MAX_DEPTH, 0);
 
-    println!("Done!");
+    let elapsed: f32 = timer_start.elapsed().as_nanos() as f32 / 1_000_000_000.0;
+    println!("Done! Took: {}(s)", elapsed);
     return bvh;
 }
 

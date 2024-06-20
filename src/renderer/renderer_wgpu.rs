@@ -6,6 +6,8 @@ use winit::window::Window;
 
 use egui::{ClippedPrimitive, TexturesDelta};
 
+use crate::renderer::*;
+
 pub struct Renderer<'a>
 {
     instance: wgpu::Instance,
@@ -34,58 +36,6 @@ pub struct EGUIRenderState
     renderer: egui_wgpu::Renderer,
 }
 
-// Contains the GPU resource
-// handles for the scene info
-pub struct Scene
-{
-    pub verts: wgpu::Buffer,
-    pub indices: wgpu::Buffer,
-    pub bvh_nodes: wgpu::Buffer,
-
-    /*
-    triangles: wgpu::Buffer,
-    bvh_nodes: u32,
-    tlas_nodes: u32,
-
-    // Texture atlases
-    atlas_1_channel: u32,
-    atlas_3_channels: u32,
-    atlas_hdr_3_channels: u32,*/
-}
-
-// NOTE: The odd ordering of the fields
-// ensures that the struct is 32 bytes wide,
-// given that vec3f has 16-byte padding (on the GPU)
-#[derive(Default)]
-pub struct BvhNode
-{
-    pub aabb_min: Vec3,
-    // If tri_count is 0, this is first_child
-    // otherwise this is tri_begin
-    pub tri_begin_or_first_child: u32,
-    pub aabb_max: Vec3,
-    pub tri_count: u32
-}
-
-#[repr(u8)]
-pub enum PathtraceMode
-{
-    None = 0,
-    PreviewModels,
-    PreviewTextures,
-    PreviewLights,
-    DebugBvh,
-    Full,
-
-    Count
-}
-
-pub struct RenderParams
-{
-    samples_per_pixel: u32,
-    fov: u32
-}
-
 pub struct Texture
 {
     desc:   TextureDesc,
@@ -104,48 +54,29 @@ pub struct TextureDesc
     usage: wgpu::TextureUsages,
 }
 
-pub fn configure_surface(surface: &mut wgpu::Surface,
-                         device: &wgpu::Device,
-                         format: wgpu::TextureFormat,
-                         width: i32, height: i32)
-{
-    use wgpu::*;
-
-    // Don't panic when trying to resize to 0 (e.g. when minimizing)
-    let des_width: u32  = width.max(1) as u32;
-    let des_height: u32 = height.max(1) as u32;
-    let surface_config = wgpu::SurfaceConfiguration
-    {
-        usage: TextureUsages::RENDER_ATTACHMENT,
-        format: format,
-        width: des_width,
-        height: des_height,
-        present_mode: PresentMode::Fifo,
-        desired_maximum_frame_latency: 0,
-        alpha_mode: CompositeAlphaMode::Auto,
-        view_formats: vec![format],
-    };
-
-    // TODO: This panics if the surface config isn't supported.
-    // How to select one that is closest to this one or default back to something else?
-    surface.configure(&device, &surface_config);
-}
-
-impl<'a> Renderer<'a>
+impl<'a> RendererImpl<'a> for Renderer<'a>
 {
     ////////
     // Initialization
 
-    pub fn new(window: &'a Window, init_width: i32, init_height: i32)->Self
+    fn new(window: &'a Window, init_width: i32, init_height: i32)->Self
     {
         use wgpu::*;
 
         let instance_desc = InstanceDescriptor
         {
-            // The OpenGL backend seems to be the best one,
-            // which is kind of ironic if you think about it
+            // Windows considerations:
+            // The Vulkan backend seems to be
+            // the best when debugging with RenderDoc,
+            // but its resizing behavior is the worst
+            // by far compared to opengl and dx12.
+            // dx12 resizes fine with few artifacts but
+            // takes a while to start up (though that might
+            // be an implementation issue). The best one seems
+            // to be OpenGL (it doesn't have any issues)
+            // but it's not really debuggable.
             #[cfg(target_os = "windows")]
-            backends: wgpu::Backends::GL,
+            backends: wgpu::Backends::VULKAN,
 
             #[cfg(not(target_os = "windows"))]
             #[cfg(not(target_arch = "wasm32"))]
@@ -190,7 +121,7 @@ impl<'a> Renderer<'a>
         let pathtracer_module = device.create_shader_module(ShaderModuleDescriptor
         {
             label: Some("PathtracerShader"),
-            source: ShaderSource::Wgsl(include_str!("shaders/pathtracer.wgsl").into()),
+            source: ShaderSource::Wgsl(include_str!("../shaders/pathtracer.wgsl").into()),
         });
 
         // Create shader pipeline
@@ -237,6 +168,18 @@ impl<'a> Renderer<'a>
                 BindGroupLayoutEntry
                 {
                     binding: 3,
+                    visibility: ShaderStages::COMPUTE,
+                    ty: BindingType::Buffer
+                    {
+                        ty: BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None
+                },
+                BindGroupLayoutEntry
+                {
+                    binding: 4,
                     visibility: ShaderStages::COMPUTE,
                     ty: BindingType::Buffer
                     {
@@ -302,7 +245,7 @@ impl<'a> Renderer<'a>
     ////////
     // Utils
 
-    pub fn resize(&mut self, width: i32, height: i32)
+    fn resize(&mut self, width: i32, height: i32)
     {
         use wgpu::*;
         if self.next_frame.is_some()
@@ -312,10 +255,9 @@ impl<'a> Renderer<'a>
         }
 
         configure_surface(&mut self.surface, &self.device, self.swapchain_format, width, height);
-        self.next_frame = try_get_next_frame(&self.surface);
     }
 
-    pub fn create_texture(&mut self, width: u32, height: u32)->Texture
+    fn create_texture(&mut self, width: u32, height: u32)->Texture
     {
         let format = wgpu::TextureFormat::Rgba8Unorm;
 
@@ -356,7 +298,7 @@ impl<'a> Renderer<'a>
         return Texture { desc: texture_desc, handle: texture, view };
     }
 
-    pub fn resize_texture(&mut self, texture: &mut Texture, width: i32, height: i32)
+    fn resize_texture(&mut self, texture: &mut Texture, width: i32, height: i32)
     {
         texture.desc.size.width  = width.max(1) as u32;
         texture.desc.size.height = height.max(1) as u32;
@@ -384,13 +326,13 @@ impl<'a> Renderer<'a>
         });
     }
 
-    pub fn egui_texture_from_wgpu(&mut self, texture: &Texture, filter_near: bool)->egui::TextureId
+    fn egui_texture_from_wgpu(&mut self, texture: &Texture, filter_near: bool)->egui::TextureId
     {
         let filter_mode = if filter_near { wgpu::FilterMode::Nearest } else { wgpu::FilterMode::Linear };
         return self.egui_render_state.renderer.register_native_texture(&self.device, &texture.view, filter_mode);
     }
 
-    pub fn update_egui_texture(&mut self, texture: &Texture, texture_id: egui::TextureId, filter_near: bool)
+    fn update_egui_texture(&mut self, texture: &Texture, texture_id: egui::TextureId, filter_near: bool)
     {
         let filter_mode = if filter_near { wgpu::FilterMode::Nearest } else { wgpu::FilterMode::Linear };
         let egui_renderer = &mut self.egui_render_state.renderer;
@@ -401,7 +343,7 @@ impl<'a> Renderer<'a>
     // Rendering
 
     // Will later take a scene as input
-    pub fn draw_scene(&mut self, scene: &Scene, render_to: &Texture)
+    fn draw_scene(&mut self, scene: &Scene, render_to: &Texture)
     {
         use wgpu::*;
         let surface = &self.surface;
@@ -421,27 +363,13 @@ impl<'a> Renderer<'a>
             {
                 label: None,
                 layout: &self.pathtracer_layout,
-                entries: &[
-                    BindGroupEntry
-                    {
-                        binding: 0,
-                        resource: BindingResource::TextureView(&render_to.view)
-                    },
-                    BindGroupEntry
-                    {
-                        binding: 1,
-                        resource: buffer_resource(&scene.verts)
-                    },
-                    BindGroupEntry
-                    {
-                        binding: 2,
-                        resource: buffer_resource(&scene.indices)
-                    },
-                    BindGroupEntry
-                    {
-                        binding: 3,
-                        resource: buffer_resource(&scene.bvh_nodes)
-                    },
+                entries:
+                &[
+                    BindGroupEntry { binding: 0, resource: BindingResource::TextureView(&render_to.view) },
+                    BindGroupEntry { binding: 1, resource: buffer_resource(&scene.verts_pos) },
+                    BindGroupEntry { binding: 2, resource: buffer_resource(&scene.indices) },
+                    BindGroupEntry { binding: 3, resource: buffer_resource(&scene.bvh_nodes) },
+                    BindGroupEntry { binding: 4, resource: buffer_resource(&scene.verts) },
                 ],
             });
 
@@ -463,7 +391,7 @@ impl<'a> Renderer<'a>
         self.queue.submit(Some(encoder.finish()));
     }
 
-    pub fn draw_egui(&mut self,
+    fn draw_egui(&mut self,
                      tris: Vec<ClippedPrimitive>,
                      textures_delta: &TexturesDelta,
                      width: i32, height: i32, scale: f32)
@@ -522,12 +450,7 @@ impl<'a> Renderer<'a>
         self.queue.submit(Some(encoder.finish()));
     }
 
-    pub fn build_bvh(&mut self)->wgpu::Buffer
-    {
-        return self.empty_buffer();
-    }
-
-    pub fn begin_frame(&mut self)
+    fn begin_frame(&mut self)
     {
         use wgpu::*;
         if self.next_frame.is_some()
@@ -538,7 +461,7 @@ impl<'a> Renderer<'a>
         self.next_frame = try_get_next_frame(&self.surface);
     }
 
-    pub fn end_frame(&mut self)
+    fn end_frame(&mut self)
     {
         use wgpu::*;
         if self.next_frame.is_some()
@@ -551,10 +474,8 @@ impl<'a> Renderer<'a>
     ////////
     // CPU <-> GPU transfers
 
-    pub fn upload_buffer(&mut self, buffer: &[u8])->wgpu::Buffer
+    fn upload_buffer(&mut self, buffer: &[u8])->wgpu::Buffer
     {
-        println!("{}", buffer.len());
-
         use wgpu::*;
         let wgpu_buffer = self.device.create_buffer(&BufferDescriptor
         {
@@ -569,7 +490,7 @@ impl<'a> Renderer<'a>
         return wgpu_buffer;
     }
 
-    pub fn empty_buffer(&mut self)->wgpu::Buffer
+    fn create_empty_buffer(&mut self)->wgpu::Buffer
     {
         use wgpu::*;
         let buffer = self.device.create_buffer(&BufferDescriptor
@@ -584,7 +505,7 @@ impl<'a> Renderer<'a>
 
     // Lets the user read a buffer from the GPU to the CPU. This will
     // cause latency so it should be used very sparingly if at all
-    pub fn read_buffer(&mut self, buffer: wgpu::Buffer, output: &mut[u8])
+    fn read_buffer(&mut self, buffer: wgpu::Buffer, output: &mut[u8])
     {
         assert!(buffer.size() == output.len() as u64);
 
@@ -618,7 +539,7 @@ impl<'a> Renderer<'a>
     ////////
     // Miscellaneous
 
-    pub fn draw_test_triangle(&self)
+    fn draw_test_triangle(&self)
     {
         use wgpu::*;        
         let surface = &self.surface;
@@ -719,7 +640,7 @@ impl<'a> Renderer<'a>
         self.queue.submit(Some(command_buffer));
     }
 
-    pub fn gpu_timer_begin(&self)
+    fn gpu_timer_begin(&self)
     {
         let encoder_desc = wgpu::CommandEncoderDescriptor { label: Some("TimerEncoder") };
         let mut encoder = self.device.create_command_encoder(&encoder_desc);
@@ -734,7 +655,7 @@ impl<'a> Renderer<'a>
     // all the calls to be finished on the GPU side, so it can only
     // really be used for very simple profiling, and definitely not
     // in release builds
-    pub fn gpu_timer_end(&mut self)->f32
+    fn gpu_timer_end(&mut self)->f32
     {
         let encoder_desc = wgpu::CommandEncoderDescriptor { label: Some("TimerEncoder") };
         let mut encoder = self.device.create_command_encoder(&encoder_desc);
@@ -769,7 +690,7 @@ impl<'a> Renderer<'a>
         return elapsed_time as f32 / 1_000_000.0;
     }
 
-    pub fn log_backend(&self)
+    fn log_backend(&self)
     {
         print!("Using WGPU, with backend: ");
         let backend = self.adapter.get_info().backend;
@@ -782,6 +703,14 @@ impl<'a> Renderer<'a>
             wgpu::Backend::Gl     => { println!("OpenGL"); }
             wgpu::Backend::BrowserWebGpu => { println!("WebGPU"); }
         }
+    }
+} 
+
+impl TextureImpl for Texture
+{
+    fn get_size(&self)->(u32, u32)
+    {
+        return (self.desc.size.width, self.desc.size.height);
     }
 }
 
@@ -815,5 +744,32 @@ fn try_get_next_frame(surface: &wgpu::Surface)->Option<wgpu::SurfaceTexture>
             eprintln!("Dropped frame with error: {}", e);
             None
         },
-    }   
+    }
+}
+
+fn configure_surface(surface: &mut wgpu::Surface,
+                     device: &wgpu::Device,
+                     format: wgpu::TextureFormat,
+                     width: i32, height: i32)
+{
+    use wgpu::*;
+
+    // Don't panic when trying to resize to 0 (e.g. when minimizing)
+    let des_width: u32  = width.max(1) as u32;
+    let des_height: u32 = height.max(1) as u32;
+    let surface_config = wgpu::SurfaceConfiguration
+    {
+        usage: TextureUsages::RENDER_ATTACHMENT,
+        format: format,
+        width: des_width,
+        height: des_height,
+        present_mode: PresentMode::Fifo,
+        desired_maximum_frame_latency: 0,
+        alpha_mode: CompositeAlphaMode::Auto,
+        view_formats: vec![format],
+    };
+
+    // TODO: This panics if the surface config isn't supported.
+    // How to select one that is closest to this one or default back to something else?
+    surface.configure(&device, &surface_config);
 }
