@@ -106,7 +106,7 @@ struct Scene
 }
 
 // From: https://tavianator.com/2011/ray_box.html
-// Returns f32_max if there was no hit
+// For misses, t = f32_max
 fn ray_aabb_dst(ray: Ray, aabb_min: vec3f, aabb_max: vec3f)->f32
 {
     let t_min: vec3f = (aabb_min - ray.ori) * ray.inv_dir;
@@ -120,65 +120,29 @@ fn ray_aabb_dst(ray: Ray, aabb_min: vec3f, aabb_max: vec3f)->f32
     return select(f32_max, dst_near, did_hit);
 }
 
-// From https://www.scratchapixel.com/lessons/3d-basic-rendering/ray-tracing-rendering-a-triangle/ray-triangle-intersection-geometric-solution.html
-fn ray_tri_dst(ray: Ray, v0: vec3f, v1: vec3f, v2: vec3f)->f32
+// From: https://www.shadertoy.com/view/MlGcDz
+// Triangle intersection. Returns { t, u, v }
+// For misses, t = f32_max
+fn ray_tri_dst(ray: Ray, v0: vec3f, v1: vec3f, v2: vec3f)->vec3f
 {
-    var res: f32 = f32_max;
-    
-    // Compute the plane's normal
-    let v0v1: vec3f = v1 - v0;
-    let v0v2: vec3f = v2 - v0;
-    // No need to normalize
-    let normal: vec3f = cross(v0v1, v0v2);
-    let area2: f32 = length(normal);
-    
-    // Step 1: Finding P
-    
-    // Check if the ray and plane are parallel
-    let nDotRayDir: f32 = dot(normal, ray.dir);
-//    if(nDotRayDir >= 0.0f) { return res; }  // Ray and tri are facing the same way, thus don't show anything
-    
-    let epsilon: f32 = 0.000001f;
-    if(abs(nDotRayDir) < epsilon) // Almost 0
-    {
-        return res; // They are parallel, so they don't intersect!
-    }
-    
-    // Compute d parameter using equation 2
-    let d: f32 = -dot(normal, v0);
-    
-    // Compute t (equation 3)
-    let t: f32 = -(dot(normal, ray.ori) + d) / nDotRayDir;
-    
-    // Check if the triangle is behind the ray
-    if(t < 0) { return res; } // The triangle is behind
-    
-    // Compute the intersection point using equation 1
-    let p: vec3f = ray.ori + t * ray.dir;
-    
-    // Step 2: Inside-Outside Test
-    var c: vec3f; // Vector perpendicular to triangle's plane
-    
-    // Edge 0
-    let edge0: vec3f = v1 - v0; 
-    let vp0: vec3f = p - v0;
-    c = cross(edge0, vp0);
-    if(dot(normal, c) < 0) { return res; } // P is on the right side
-    
-    // Edge 1
-    let edge1: vec3f = v2 - v1; 
-    let vp1: vec3f = p - v1;
-    c = cross(edge1, vp1);
-    if(dot(normal, c) < 0) { return res; } // P is on the right side
-    
-    // Edge 2
-    let edge2: vec3f = v0 - v2; 
-    let vp2: vec3f = p - v2;
-    c = cross(edge2, vp2);
-    if(dot(normal, c) < 0) { return res; } // P is on the right side
-    
-    res = t;
-    return res; // This ray hits the triangle
+    let v1v0 = v1 - v0;
+    let v2v0 = v2 - v0;
+    let rov0 = ray.ori - v0;
+
+    // Cramer's rule for solving p(t) = ro+t·rd = p(u,v) = vo + u·(v1-v0) + v·(v2-v1).
+    // The four determinants above have lots of terms in common. Knowing the changing
+    // the order of the columns/rows doesn't change the volume/determinant, and that
+    // the volume is dot(cross(a,b,c)), we can precompute some common terms and reduce
+    // it all to:
+    let n = cross(v1v0, v2v0);
+    let q = cross(rov0, ray.dir);
+    let d = 1.0 / dot(ray.dir, n);
+    let u = d * dot(-q, v2v0);
+    let v = d * dot(q, v1v0);
+    var t = d * dot(-n, rov0);
+
+    if min(u, v) < 0.0 || (u+v) > 1.0 { t = f32_max; }
+    return vec3f(t, u, v);
 }
 
 struct HitInfo
@@ -209,7 +173,7 @@ fn ray_scene_intersection(ray: Ray)->HitInfo
                 let v0: vec3f = verts_pos[indices[i*3 + 0]];
                 let v1: vec3f = verts_pos[indices[i*3 + 1]];
                 let v2: vec3f = verts_pos[indices[i*3 + 2]];
-                let dst: f32 = ray_tri_dst(ray, v0, v1, v2);
+                let dst: f32 = ray_tri_dst(ray, v0, v1, v2).x;
                 if dst < min_dst
                 {
                     min_dst = dst;

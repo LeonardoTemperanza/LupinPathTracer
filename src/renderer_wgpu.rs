@@ -1,8 +1,8 @@
 
 use crate::base::*;
-use crate::platform::*;
+//use crate::platform::*;
 
-//use winit::window::Window;
+use winit::window::Window;
 
 use egui::{ClippedPrimitive, TexturesDelta};
 
@@ -140,7 +140,21 @@ impl<'a> Renderer<'a>
     {
         use wgpu::*;
 
-        let instance_desc = InstanceDescriptor::default();
+        let instance_desc = InstanceDescriptor
+        {
+            // The OpenGL backend seems to be the best one,
+            // which is kind of ironic if you think about it
+            #[cfg(target_os = "windows")]
+            backends: wgpu::Backends::GL,
+
+            #[cfg(not(target_os = "windows"))]
+            #[cfg(not(target_arch = "wasm32"))]
+            backends: wgpu::Backends::PRIMARY,
+
+            #[cfg(target_arch = "wasm32")]
+            backends: wgpu::Backends::GL,
+            ..Default::default()
+        };
         let instance: Instance = Instance::new(instance_desc);
 
         let maybe_surface = instance.create_surface(window);
@@ -513,7 +527,18 @@ impl<'a> Renderer<'a>
         return self.empty_buffer();
     }
 
-    pub fn swap_buffers(&mut self)
+    pub fn begin_frame(&mut self)
+    {
+        use wgpu::*;
+        if self.next_frame.is_some()
+        {
+            let next_frame = self.next_frame.take().unwrap();
+        }
+
+        self.next_frame = try_get_next_frame(&self.surface);
+    }
+
+    pub fn end_frame(&mut self)
     {
         use wgpu::*;
         if self.next_frame.is_some()
@@ -521,8 +546,6 @@ impl<'a> Renderer<'a>
             let next_frame = self.next_frame.take().unwrap();
             next_frame.present();
         }
-
-        self.next_frame = try_get_next_frame(&self.surface);
     }
 
     ////////
@@ -617,16 +640,16 @@ impl<'a> Renderer<'a>
         fn vert_main(@builtin(vertex_index) VertexIndex : u32)->@builtin(position) vec4f {
           var pos = array<vec2f, 3>
           (
-            vec2(0.0, 0.5),
-            vec2(-0.5, -0.5),
-            vec2(0.5, -0.5)
+            vec2(-1.0, 1),
+            vec2(-1.0, 0.0),
+            vec2(0.0, 1.0)
           );
 
           return vec4f(pos[VertexIndex], 0.0, 1.0);
         }
 
         @fragment
-        fn frag_main()->@location(0) vec4f
+        fn frag_main(@builtin )->@location(0) vec4f
         {
           return vec4(1.0, 0.0, 0.0, 1.0);
         }
