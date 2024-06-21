@@ -65,7 +65,7 @@ pub trait RendererImpl<'a>
     // Utils
     fn create_texture(&mut self, width: u32, height: u32)->Texture;
     fn resize_texture(&mut self, texture: &mut Texture, width: i32, height: i32);
-    fn egui_texture_from_wgpu(&mut self, texture: &Texture, filter_near: bool)->egui::TextureId;
+    fn texture_to_egui_texture(&mut self, texture: &Texture, filter_near: bool)->egui::TextureId;
     fn update_egui_texture(&mut self, texture: &Texture, texture_id: egui::TextureId, filter_near: bool);
 
     // Rendering

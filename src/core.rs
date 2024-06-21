@@ -32,7 +32,7 @@ impl Core
     pub fn new(renderer: &mut Renderer)->Core
     {
         let render_image = renderer.create_texture(1, 1);
-        let render_image_id = renderer.egui_texture_from_wgpu(&render_image, true);
+        let render_image_id = renderer.texture_to_egui_texture(&render_image, true);
 
         // Load scene
         let mut obj_path = std::env::current_exe().unwrap();

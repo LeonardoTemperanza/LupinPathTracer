@@ -326,7 +326,7 @@ impl<'a> RendererImpl<'a> for Renderer<'a>
         });
     }
 
-    fn egui_texture_from_wgpu(&mut self, texture: &Texture, filter_near: bool)->egui::TextureId
+    fn texture_to_egui_texture(&mut self, texture: &Texture, filter_near: bool)->egui::TextureId
     {
         let filter_mode = if filter_near { wgpu::FilterMode::Nearest } else { wgpu::FilterMode::Linear };
         return self.egui_render_state.renderer.register_native_texture(&self.device, &texture.view, filter_mode);
