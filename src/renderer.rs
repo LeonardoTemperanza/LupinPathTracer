@@ -45,7 +45,7 @@ pub struct Vertex
 // ensures that the struct is 32 bytes wide,
 // given that vec3f has 16-byte padding (on the GPU)
 #[repr(C)]
-#[derive(Default)]
+#[derive(Default, Clone, Copy)]
 pub struct BvhNode
 {
     pub aabb_min: Vec3,

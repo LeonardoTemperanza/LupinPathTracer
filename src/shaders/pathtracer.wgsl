@@ -263,7 +263,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>)
     
     var camera_look_at = normalize(vec3(coord, 1.0f));
 
-    var camera_ray = Ray(vec3f(-0.3f, 1.0f, -2.0f), camera_look_at, 1.0f / camera_look_at);
+    var camera_ray = Ray(vec3f(0.0f, 0.3f, -1.0f), camera_look_at, 1.0f / camera_look_at);
 
     var hit = ray_scene_intersection(camera_ray);
 

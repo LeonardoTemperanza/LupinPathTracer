@@ -13,13 +13,9 @@ pub fn load_scene_custom_format(path: &str)
 pub fn load_scene_obj(path: &str, renderer: &mut Renderer)->Scene
 {
     println!("Loading file from disk...");
-    let timer_start = std::time::Instant::now();
 
     let scene = tobj::load_obj(path, &tobj::GPU_LOAD_OPTIONS);
     assert!(scene.is_ok());
-
-    let elapsed: f32 = timer_start.elapsed().as_nanos() as f32 / 1_000_000_000.0;
-    println!("Done! Took: {}(s)", elapsed);
 
     let (mut models, materials) = scene.expect("Failed to load OBJ file");
 
@@ -39,7 +35,7 @@ pub fn load_scene_obj(path: &str, renderer: &mut Renderer)->Scene
             verts_pos.push(0.0);
         }
 
-        let bvh = create_bvh(verts_pos.as_slice(), &mut mesh.indices);
+        let bvh = build_bvh(verts_pos.as_slice(), &mut mesh.indices);
 
         let bvh_buf = renderer.upload_buffer(to_u8_slice(&bvh));
         let verts_pos_buf = renderer.upload_buffer(to_u8_slice(&verts_pos));
@@ -109,18 +105,34 @@ pub fn load_image(path: &str, required_channels: i32)
 // @performance This can be greatly improved, this first implementation
 // is just a simple working one, but this could probably be easily SIMD-ized
 // and parallelized.
-pub fn create_bvh(verts: &[f32], indices: &mut[u32])->Vec<BvhNode>
+pub fn build_bvh(verts: &[f32], indices: &mut[u32])->Vec<BvhNode>
 {
-    println!("Building bvh...");
-    let timer_start = std::time::Instant::now();
+    let num_tris: u32 = indices.len() as u32 / 3;
 
-    let (aabb_min, aabb_max) = compute_aabb(verts, indices, 0, indices.len() as u32 / 3);
+    // Auxiliary arrays for speed
+    let mut centroids: Vec<Vec3> = Vec::default();
+    centroids.reserve_exact(num_tris as usize);
+    let mut tri_bounds: Vec<Aabb> = Vec::default();
+    tri_bounds.reserve_exact(num_tris as usize);
+
+    // Build auxiliary arrays
+    for tri in 0..num_tris
+    {
+        let (t0, t1, t2) = get_tri(verts, indices, tri as usize);
+
+        let centroid = compute_tri_centroid(t0, t1, t2);
+        let bounds = compute_tri_bounds(t0, t1, t2);
+        centroids.push(centroid);
+        tri_bounds.push(bounds);
+    }
+
+    let (aabb_min, aabb_max) = compute_aabb(indices, tri_bounds.as_mut_slice(), 0, num_tris);
     let bvh_root = BvhNode
     {
         aabb_min,
         aabb_max,
         tri_begin_or_first_child: 0,  // Set tri_begin to 0
-        tri_count: indices.len() as u32 / 3
+        tri_count: num_tris
     };
 
     let mut bvh: Vec<BvhNode> = Vec::new();
@@ -129,21 +141,25 @@ pub fn create_bvh(verts: &[f32], indices: &mut[u32])->Vec<BvhNode>
     // NOTE: Push a fictitious element so that
     // both of a node's children will reside
     // in the same cache line
-    //bvh_nodes.push(Default::default());
+    bvh.push(Default::default());
 
-    const BVH_MAX_DEPTH: u32 = 20;
-    bvh_split(&mut bvh, verts, indices, 0, BVH_MAX_DEPTH, 0);
+    const BVH_MAX_DEPTH: i32 = 20;
+    bvh_split(&mut bvh, verts, indices, centroids.as_mut_slice(), tri_bounds.as_mut_slice(), 0, BVH_MAX_DEPTH, 0);
 
-    let elapsed: f32 = timer_start.elapsed().as_nanos() as f32 / 1_000_000_000.0;
-    println!("Done! Took: {}(s)", elapsed);
     return bvh;
 }
 
-pub fn bvh_split(bvh: &mut Vec<BvhNode>, verts: &[f32], indices: &mut[u32], node: usize, max_depth: u32, depth: u32)
+// This could be turned into an iterative function with some
+// performance gains
+pub fn bvh_split(bvh: &mut Vec<BvhNode>, verts: &[f32],
+                 indices: &mut[u32],
+                 centroids: &mut[Vec3],
+                 tri_bounds: &mut[Aabb],
+                 node: usize, max_depth: i32, depth: i32)
 {
     if depth == max_depth { return; }
 
-    let split = choose_split(bvh.as_slice(), verts, indices, node);
+    let split = choose_split(bvh.as_slice(), verts, indices, centroids, tri_bounds, node);
     if !split.performed_split { return; }
 
     let cur_tri_begin = bvh[node].tri_begin_or_first_child;
@@ -158,16 +174,14 @@ pub fn bvh_split(bvh: &mut Vec<BvhNode>, verts: &[f32], indices: &mut[u32], node
 
     for tri in cur_tri_begin..cur_tri_end
     {
-        let (t0, t1, t2) = get_tri(verts, indices, tri as usize);
-
-        let center = compute_tri_centroid(t0, t1, t2);
-        if center[split.axis] <= split.pos
+        let centroid = centroids[tri as usize];
+        if centroid[split.axis] <= split.pos
         {
             if tri != tri_left_idx
             {
                 // Swap triangle of index tri_left_idx with
                 // triangle of index tri_idx
-                swap_tris(indices, tri_left_idx, tri);
+                swap_tris(indices, centroids, tri_bounds, tri_left_idx, tri);
             }
 
             tri_left_idx += 1;
@@ -182,7 +196,7 @@ pub fn bvh_split(bvh: &mut Vec<BvhNode>, verts: &[f32], indices: &mut[u32], node
 
     // Only proceed if there is a meaningful subdivision
     // (also, if tri_count is 0 it will be interpreted
-    // as a non-leaf by the shader)
+    // as a non-leaf by the shader, which would be a problem)
     if left_count == 0 || right_count == 0 { return; }
 
     // We've decided to split
@@ -204,14 +218,18 @@ pub fn bvh_split(bvh: &mut Vec<BvhNode>, verts: &[f32], indices: &mut[u32], node
     bvh[node].tri_begin_or_first_child = left as u32;  // Set first_child
     bvh[node].tri_count = 0;
 
-    //println!("Depth {}", depth);
-    /*println!("Performed split, parent: {} {}, left: {} {}, right: {} {}", cur_tri_begin, cur_tri_count,
-                                                                          bvh[left].tri_begin_or_first_child, bvh[left].tri_count,
-                                                                          bvh[right].tri_begin_or_first_child, bvh[right].tri_count);
-    */
+    // If we're at a certain depth, instead of recursing like this, start one thread for
+    // each split.
+    let num_nodes_prev_depth: i32 = if depth == 0 {0} else {2_i32.pow((depth - 1) as u32)};
+    let num_nodes_current_depth = 2_i32.pow(depth as u32);
+    let num_nodes_next_depth: i32 = 2_i32.pow(depth as u32 + 1);
 
-    bvh_split(bvh, verts, indices, left, max_depth, depth + 1);
-    bvh_split(bvh, verts, indices, right, max_depth, depth + 1);
+    //static mut count: i32 = 0;
+    //if depth == 3 { println!("count: {}\ndepth: {}", unsafe { count }, depth); unsafe { count = 0; } }
+    //if depth > 3 { unsafe { count += 1; } }
+
+    bvh_split(bvh, verts, indices, centroids, tri_bounds, left, max_depth, depth + 1);
+    bvh_split(bvh, verts, indices, centroids, tri_bounds, right, max_depth, depth + 1);
 }
 
 #[derive(Default)]
@@ -231,93 +249,118 @@ pub struct BvhSplit
     num_tris_left: u32,
     num_tris_right: u32
 }
-pub fn choose_split(bvh: &[BvhNode], verts: &[f32], indices: &mut[u32], node: usize)->BvhSplit
-{
-    const NUM_TESTS_PER_AXIS: u32 = 5;
 
-    let mut res: BvhSplit = Default::default();
+// Binned BVH building.
+// For more info, see: https://jacco.ompf2.com/2022/04/21/how-to-build-a-bvh-part-3-quick-builds/
+pub struct Bin
+{
+    bounds: Aabb,
+    tri_count: u32
+}
+
+impl Default for Bin
+{
+    fn default()->Bin
+    {
+        return Bin
+        {
+            bounds: Aabb::neutral(),
+            tri_count: 0,
+        }
+    }
+}
+
+// From: https://jacco.ompf2.com/2022/04/21/how-to-build-a-bvh-part-3-quick-builds/
+pub fn choose_split(bvh: &[BvhNode], verts: &[f32],
+                    indices: &mut[u32],
+                    centroids: &mut[Vec3],
+                    tri_bounds: &mut[Aabb],
+                    node: usize)->BvhSplit
+{
+    const NUM_BINS: usize = 5;
 
     let size = bvh[node].aabb_max - bvh[node].aabb_min;
-    let current_cost = node_cost(size, bvh[node].tri_count);
+    let tri_begin: usize = bvh[node].tri_begin_or_first_child as usize;
+    let tri_count: usize = bvh[node].tri_count as usize;
 
     // Initialize the cost as the cost of the parent
     // node by itself. Only split if the cost is actually lower
     // after the split.
-    res.cost = current_cost;
+    let mut res: BvhSplit = Default::default();
+    res.cost = node_cost(size, tri_count as u32);
+
     for axis in 0..3usize
     {
-        let bounds_start = bvh[node].aabb_min[axis];
-        let bounds_end   = bvh[node].aabb_max[axis];
-        for i in 0..NUM_TESTS_PER_AXIS
+        // Compute centroid bounds because it slightly
+        // improves the quality of the resulting tree
+        // with little additional building cost
+        let mut centroid_min = f32::MAX;
+        let mut centroid_max = f32::MIN;
+        for tri in tri_begin..tri_begin+tri_count
         {
-            // Test a fraction of the bounding box each iteration (1/tests, 2/tests, ... 1)
-            let split_t: f32   = (i + 1) as f32 / (NUM_TESTS_PER_AXIS) as f32;
-            let split_pos: f32 = lerp_f32(bounds_start, bounds_end, split_t);
+            let centroid: Vec3 = centroids[tri];
+            centroid_min = centroid_min.min(centroid[axis]);
+            centroid_max = centroid_max.max(centroid[axis]);
+        }
 
-            // Compute cost of this split
+        // Can't split anything here...
+        if centroid_min == centroid_max { continue; }
+
+        // Construct bins, for faster cost computation
+        let mut bins: [Bin; NUM_BINS] = Default::default();
+
+        // Populate the bins
+        let scale = NUM_BINS as f32 / (centroid_max - centroid_min);  // To avoid repeated division
+        for tri in tri_begin..tri_begin+tri_count
+        {
+            let centroid = centroids[tri];
+            let bounds = tri_bounds[tri];
+            let bin_idx: usize = (NUM_BINS - 1).min(((centroid[axis] - centroid_min) * scale) as usize);
+            grow_aabb_to_include_aabb(&mut bins[bin_idx].bounds, bounds); 
+            bins[bin_idx].tri_count += 1;
+        }
+
+        // Gather data for the N-1 planes between the N bins
+        let mut left_aabbs:  [Aabb; NUM_BINS - 1] = Default::default();
+        let mut right_aabbs: [Aabb; NUM_BINS - 1] = Default::default();
+        let mut left_count:  [u32; NUM_BINS - 1] = Default::default();
+        let mut right_count: [u32; NUM_BINS - 1] = Default::default();
+        let mut left_aabb: Aabb = Aabb::neutral();
+        let mut right_aabb: Aabb = Aabb::neutral();
+        let mut left_sum = 0;
+        let mut right_sum = 0;
+        for i in 0..NUM_BINS - 1
+        {
+            left_sum += bins[i].tri_count;
+            left_count[i] = left_sum;
+            grow_aabb_to_include_aabb(&mut left_aabb, bins[i].bounds);
+            left_aabbs[i] = left_aabb;
+
+            right_sum += bins[NUM_BINS - 1 - i].tri_count;
+            right_count[NUM_BINS - 2 - i] = right_sum;
+            grow_aabb_to_include_aabb(&mut right_aabb, bins[NUM_BINS - 1 - i].bounds);
+            right_aabbs[NUM_BINS - 2 - i] = right_aabb;
+        }
+
+        // Calculate the SAH cost for the N-1 planes
+        let scale: f32 = (centroid_max - centroid_min) / NUM_BINS as f32;
+        for i in 0..NUM_BINS - 1
+        {
+            let left_size = left_aabbs[i].max - left_aabbs[i].min;
+            let right_size = right_aabbs[i].max - right_aabbs[i].min;
+            let plane_cost = node_cost(left_size, left_count[i]) + node_cost(right_size, right_count[i]);
+            if plane_cost < res.cost
             {
-                let tri_begin = bvh[node].tri_begin_or_first_child as usize;
-                let tri_count = bvh[node].tri_count as usize;
-                let tri_end   = tri_begin + tri_count as usize;
-
-                let mut aabb_left_min:  Vec3 = Default::default();
-                let mut aabb_left_max:  Vec3 = Default::default();
-                let mut aabb_right_min: Vec3 = Default::default();
-                let mut aabb_right_max: Vec3 = Default::default();
-                let mut first_left  = true;
-                let mut first_right = true;
-                let mut num_tris_left = 0;
-                let mut num_tris_right = 0;
-
-                // Count number of triangles and encompassing bounding box size
-                for tri in tri_begin..tri_end
-                {
-                    let (t0, t1, t2) = get_tri(verts, indices, tri);
-                    let tri_center = compute_tri_centroid(t0, t1, t2);
-                    if tri_center[axis] <= split_pos
-                    {
-                        if first_left
-                        {
-                            aabb_left_min = t0;
-                            aabb_left_max = t0;
-                            first_left = false;
-                        }
-
-                        grow_aabb_to_include_tri(&mut aabb_left_min, &mut aabb_left_max, t0, t1, t2);
-                        num_tris_left += 1;
-                    }
-                    else
-                    {
-                        if first_right
-                        {
-                            aabb_right_min = t0;
-                            aabb_right_max = t0;
-                            first_right = false;
-                        }
-
-                        grow_aabb_to_include_tri(&mut aabb_right_min, &mut aabb_right_max, t0, t1, t2);
-                        num_tris_right += 1;
-                    }
-                }
-
-                let size_left  = aabb_left_max - aabb_left_min;
-                let size_right = aabb_right_max - aabb_right_min;
-
-                let cost = node_cost(size_left, num_tris_left) + node_cost(size_right, num_tris_right);
-
-                if cost < res.cost && num_tris_left > 0 && num_tris_right > 0
-                {
-                    res.performed_split = true;
-                    res.cost = cost;
-                    res.axis = axis;
-                    res.pos = split_pos;
-                    res.aabb_left_min = aabb_left_min;
-                    res.aabb_right_min = aabb_right_min;
-                    res.aabb_left_max = aabb_left_max;
-                    res.aabb_right_max = aabb_right_max;
-                    res.num_tris_left = num_tris_left;
-                    res.num_tris_right = num_tris_right;
-                }
+                res.performed_split = true;
+                res.cost = plane_cost;
+                res.axis = axis;
+                res.pos = centroid_min + scale * (i + 1) as f32;
+                res.aabb_left_min = left_aabbs[i].min;
+                res.aabb_right_min = right_aabbs[i].min;
+                res.aabb_left_max = left_aabbs[i].max;
+                res.aabb_right_max = right_aabbs[i].max;
+                res.num_tris_left = left_count[i];
+                res.num_tris_right = right_count[i];
             }
         }
     }
@@ -333,6 +376,8 @@ pub fn node_cost(size: Vec3, num_tris: u32)->f32
     let half_area: f32 = size.x * (size.y * size.z) + size.y * size.z;
     return half_area * num_tris as f32;
 }
+
+//pub fn get_split_bounds_and_tri_count(bins: &[Bin], )->
 
 pub fn get_tri(verts: &[f32], indices: &[u32], tri_idx: usize)->(Vec3, Vec3, Vec3)
 {
@@ -362,33 +407,42 @@ pub fn get_tri(verts: &[f32], indices: &[u32], tri_idx: usize)->(Vec3, Vec3, Vec
     return (t0, t1, t2);
 }
 
-pub fn swap_tris(indices: &mut[u32], tri_a: u32, tri_b: u32)
+pub fn swap_tris(indices: &mut[u32], centroids: &mut[Vec3], tri_bounds: &mut[Aabb], tri_a: u32, tri_b: u32)
 {
     let tri_a = tri_a as usize;
     let tri_b = tri_b as usize;
     let idx0 = indices[tri_a*3+0];
     let idx1 = indices[tri_a*3+1];
     let idx2 = indices[tri_a*3+2];
+
+    // Swap indices
     indices[tri_a*3 + 0] = indices[tri_b*3 + 0];
     indices[tri_a*3 + 1] = indices[tri_b*3 + 1];
     indices[tri_a*3 + 2] = indices[tri_b*3 + 2];
     indices[tri_b*3 + 0] = idx0 as u32;
     indices[tri_b*3 + 1] = idx1 as u32;
     indices[tri_b*3 + 2] = idx2 as u32;
+
+    // Swap centroids
+    let tmp = centroids[tri_a];
+    centroids[tri_a] = centroids[tri_b];
+    centroids[tri_b] = tmp;
+
+    // Swap tri bounds
+    let tmp = tri_bounds[tri_a];
+    tri_bounds[tri_a] = tri_bounds[tri_b];
+    tri_bounds[tri_b] = tmp;
 }
 
-pub fn compute_aabb(verts: &[f32], indices: &[u32], tri_begin: u32, tri_count: u32)->(Vec3, Vec3)
+pub fn compute_aabb(indices: &[u32], tri_bounds: &mut[Aabb], tri_begin: u32, tri_count: u32)->(Vec3, Vec3)
 {
-    let idx0 = indices[0] as usize;
-    let mut aabb_min = Vec3 { x: verts[idx0], y: verts[idx0 + 1], z: verts[idx0 + 2] };
-    let mut aabb_max = aabb_min;
-
+    let mut res = Aabb::default();
     let tri_end = tri_begin + tri_count;
     for tri in tri_begin..tri_end
     {
-        let (t0, t1, t2) = get_tri(verts, indices, tri as usize);
-        grow_aabb_to_include_tri(&mut aabb_min, &mut aabb_max, t0, t1, t2);
+        let bounds = tri_bounds[tri as usize];
+        grow_aabb_to_include_aabb(&mut res, bounds);
     }
 
-    return (aabb_min, aabb_max);
+    return (res.min, res.max);
 }

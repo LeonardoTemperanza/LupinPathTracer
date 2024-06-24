@@ -115,7 +115,7 @@ impl<'a> RendererImpl<'a> for Renderer<'a>
         configure_surface(&mut surface, &device, swapchain_format, init_width, init_height);
 
         // Get first frame to render to
-        let next_frame = try_get_next_frame(&surface);
+        let next_frame = None; //try_get_next_frame(&surface);
 
         // Compile all shader variations
         let pathtracer_module = device.create_shader_module(ShaderModuleDescriptor

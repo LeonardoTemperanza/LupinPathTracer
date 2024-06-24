@@ -18,8 +18,6 @@ use ::egui::FontDefinitions;
 mod base;
 pub use base::*;
 
-//mod renderer_wgpu;
-//pub use renderer_wgpu::{Renderer};
 mod renderer;
 pub use renderer::*;
 
@@ -40,17 +38,14 @@ fn main()
 
     let initial_win_size = window.inner_size();
 
-    // Initialize renderer
     let mut renderer = Renderer::new(&window, initial_win_size.width as i32, initial_win_size.height as i32);
     renderer.log_backend();
 
-    // Initialize egui
     let mut egui_ctx = egui::Context::default();
     let viewport_id = egui_ctx.viewport_id();
 
     let mut egui_state = egui_winit::State::new(egui_ctx.clone(), viewport_id, &window, None, None);
 
-    // Init Core state
     let mut core = core::Core::new(&mut renderer);
 
     window.set_visible(true);

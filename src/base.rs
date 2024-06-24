@@ -75,6 +75,28 @@ pub struct Vec4
     pub w: f32
 }
 
+#[derive(Debug, Default, Clone, Copy)]
+#[repr(C)]
+pub struct Aabb
+{
+    pub min: Vec3,
+    pub max: Vec3
+}
+
+impl Aabb
+{
+    // Initialization for a neutral value with
+    // respect to "grow" types of operations
+    pub fn neutral()->Self
+    {
+        return Aabb
+        {
+            min: Vec3 { x: f32::MAX, y: f32::MAX, z: f32::MAX },
+            max: Vec3 { x: f32::MIN, y: f32::MIN, z: f32::MIN },
+        }
+    }
+}
+
 pub fn lerp_f32(a: f32, b: f32, t: f32)->f32
 {
     return a + (b - a) * t;
@@ -106,6 +128,21 @@ impl std::ops::Sub for Vec3
             x: self.x - other.x,
             y: self.y - other.y,
             z: self.z - other.z
+        };
+    }
+}
+
+impl std::ops::Mul<f32> for Vec3
+{
+    type Output = Vec3;
+
+    fn mul(self, rhs: f32)->Vec3
+    {
+        return Self
+        {
+            x: self.x * rhs,
+            y: self.y * rhs,
+            z: self.z * rhs
         };
     }
 }
@@ -211,33 +248,62 @@ pub fn to_u64_slice<T>(slice: &[T])->&[u64]
     };
 }
 
-pub fn grow_aabb_to_include_tri(aabb_min: &mut Vec3, aabb_max: &mut Vec3, t0: Vec3, t1: Vec3, t2: Vec3)
+pub fn grow_aabb_to_include_tri(aabb: &mut Aabb, t0: Vec3, t1: Vec3, t2: Vec3)
 {
-    aabb_min.x = aabb_min.x.min(t0.x);
-    aabb_min.x = aabb_min.x.min(t1.x);
-    aabb_min.x = aabb_min.x.min(t2.x);
-    aabb_max.x = aabb_max.x.max(t0.x);
-    aabb_max.x = aabb_max.x.max(t1.x);
-    aabb_max.x = aabb_max.x.max(t2.x);
+    aabb.min.x = aabb.min.x.min(t0.x);
+    aabb.min.x = aabb.min.x.min(t1.x);
+    aabb.min.x = aabb.min.x.min(t2.x);
+    aabb.max.x = aabb.max.x.max(t0.x);
+    aabb.max.x = aabb.max.x.max(t1.x);
+    aabb.max.x = aabb.max.x.max(t2.x);
 
-    aabb_min.y = aabb_min.y.min(t0.y);
-    aabb_min.y = aabb_min.y.min(t1.y);
-    aabb_min.y = aabb_min.y.min(t2.y);
-    aabb_max.y = aabb_max.y.max(t0.y);
-    aabb_max.y = aabb_max.y.max(t1.y);
-    aabb_max.y = aabb_max.y.max(t2.y);
+    aabb.min.y = aabb.min.y.min(t0.y);
+    aabb.min.y = aabb.min.y.min(t1.y);
+    aabb.min.y = aabb.min.y.min(t2.y);
+    aabb.max.y = aabb.max.y.max(t0.y);
+    aabb.max.y = aabb.max.y.max(t1.y);
+    aabb.max.y = aabb.max.y.max(t2.y);
 
-    aabb_min.z = aabb_min.z.min(t0.z);
-    aabb_min.z = aabb_min.z.min(t1.z);
-    aabb_min.z = aabb_min.z.min(t2.z);
-    aabb_max.z = aabb_max.z.max(t0.z);
-    aabb_max.z = aabb_max.z.max(t1.z);
-    aabb_max.z = aabb_max.z.max(t2.z);
+    aabb.min.z = aabb.min.z.min(t0.z);
+    aabb.min.z = aabb.min.z.min(t1.z);
+    aabb.min.z = aabb.min.z.min(t2.z);
+    aabb.max.z = aabb.max.z.max(t0.z);
+    aabb.max.z = aabb.max.z.max(t1.z);
+    aabb.max.z = aabb.max.z.max(t2.z);
+}
+
+pub fn grow_aabb_to_include_aabb(aabb: &mut Aabb, to_include: Aabb)
+{
+    aabb.min.x = aabb.min.x.min(to_include.min.x);
+    aabb.min.y = aabb.min.y.min(to_include.min.y);
+    aabb.min.z = aabb.min.z.min(to_include.min.z);
+    aabb.max.x = aabb.max.x.max(to_include.max.x);
+    aabb.max.y = aabb.max.y.max(to_include.max.y);
+    aabb.max.z = aabb.max.z.max(to_include.max.z);
+}
+
+pub fn compute_tri_bounds(t0: Vec3, t1: Vec3, t2: Vec3)->Aabb
+{
+    return Aabb
+    {
+        min: Vec3
+        {
+            x: t0.x.min(t1.x.min(t2.x)),
+            y: t0.y.min(t1.y.min(t2.y)),
+            z: t0.z.min(t1.z.min(t2.z)),
+        },
+        max: Vec3
+        {
+            x: t0.x.max(t1.x.max(t2.x)),
+            y: t0.y.max(t1.y.max(t2.y)),
+            z: t0.z.max(t1.z.max(t2.z)),
+        }
+    };
 }
 
 pub fn compute_tri_centroid(t0: Vec3, t1: Vec3, t2: Vec3)->Vec3
 {
-    return (t0 + t1 + t2) / 3.0;
+    return (t0 + t1 + t2) * 0.33333333333;
 }
 
 pub fn is_point_in_aabb(v: Vec3, aabb_min: Vec3, aabb_max: Vec3)->bool
