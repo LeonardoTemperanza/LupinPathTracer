@@ -379,6 +379,7 @@ pub fn rotate_vec3_with_quat(q: Quat, v: Vec3)->Vec3
     };
 }
 
+// Applies b first, a second
 #[inline]
 pub fn quat_mul(a: Quat, b: Quat)->Quat
 {

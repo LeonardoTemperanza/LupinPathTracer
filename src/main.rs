@@ -51,8 +51,9 @@ fn main()
     window.set_visible(true);
 
     let min_delta_time: f32 = 1.0/20.0;  // Reasonable min value to prevent degeneracies when updating state
-    let mut delta_time: f32 = 0.0;
-    let time_begin = Instant::now();
+    let mut delta_time: f32 = 1.0/60.0;
+    let mut time_begin = Instant::now();
+    let mut first_frame = true;
     event_loop.run(|event, target|
     {
         if let Event::WindowEvent { window_id, event } = event
@@ -77,9 +78,13 @@ fn main()
                 },
                 WindowEvent::RedrawRequested =>
                 {
-                    delta_time = min_delta_time.max(time_begin.elapsed().as_secs_f32());
+                    if !first_frame
+                    {
+                        delta_time = min_delta_time.max(time_begin.elapsed().as_secs_f32());
+                    }
+                    time_begin = Instant::now();
 
-                    core.main_update(&mut renderer, &window, &mut egui_ctx, &mut egui_state);
+                    core.main_update(&mut renderer, &window, &mut egui_ctx, &mut egui_state, delta_time);
 
                     // Continuously request drawing messages to let the main loop continue
                     window.request_redraw();

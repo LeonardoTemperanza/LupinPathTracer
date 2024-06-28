@@ -286,7 +286,6 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>)
 
     var camera_ray = Ray(vec3f(0.0f, 0.0f, 0.0f), camera_look_at, 1.0f / camera_look_at);
     camera_ray.ori = transform_point(camera_ray.ori, camera_transform);
-    //camera_ray.ori.z -= 3.0f;
     camera_ray.dir = transform_dir(camera_ray.dir, camera_transform);
     camera_ray.inv_dir = 1.0f / camera_ray.dir;
 

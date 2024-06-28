@@ -48,6 +48,14 @@ impl Core
         println!("Loading scene from disk...");
         let (scene, _) = load_scene_obj(obj_path.into_os_string().to_str().unwrap(), renderer);
         println!("Done!");
+
+        let camera_transform = Transform
+        {
+            pos: Vec3 { x: 0.0, y: 0.0, z: -0.5 },
+            rot: Default::default(),
+            scale: Vec3 { x: 1.0, y: 1.0, z: 1.0 }
+        };
+
         return Core
         {
             render_image_id,
@@ -59,7 +67,7 @@ impl Core
 
             // Scene info
             scene,
-            camera_transform: Default::default(),
+            camera_transform,
 
             // Input
             right_click_down: false,
@@ -69,7 +77,7 @@ impl Core
     }
 
     pub fn main_update(&mut self, renderer: &mut Renderer, window: &Window,
-                       egui_ctx: &mut egui::Context, egui_state: &mut State)
+                       egui_ctx: &mut egui::Context, egui_state: &mut State, delta_time: f32)
     {
         // Poll input
         // Consume the accumulated egui inputs
@@ -82,7 +90,7 @@ impl Core
         });
 
         // Update scene entities
-        self.camera_transform = camera_first_person_update(self.camera_transform, self.mouse_delta);
+        self.camera_transform = camera_first_person_update(self.camera_transform, delta_time, self.mouse_delta);
 
         // Rendering
         {
@@ -207,17 +215,19 @@ impl Core
     }
 }
 
-pub fn camera_first_person_update(prev: Transform, mouse_delta: Vec2)->Transform
+pub fn camera_first_person_update(prev: Transform, delta_time: f32, mouse_delta: Vec2)->Transform
 {
     // Camera rotation
     const ROTATE_X_SPEED: f32 = 120.0 * DEG_TO_RAD;
     const ROTATE_Y_SPEED: f32 = 80.0 * DEG_TO_RAD;
-    const MOUSE_SENSITIVITY: f32 = 0.1 * DEG_TO_RAD;
+    const MOUSE_SENSITIVITY: f32 = 0.2 * DEG_TO_RAD;
     static mut angle_x: f32 = 0.0;
     static mut angle_y: f32 = 0.0;
+    static mut time: f32 = 0.0;
+    unsafe { time += delta_time; }
 
     let mouse_x = mouse_delta.x * MOUSE_SENSITIVITY;
-    let mouse_y = mouse_delta.y * MOUSE_SENSITIVITY;
+    let mouse_y = -mouse_delta.y * MOUSE_SENSITIVITY;
 
     let mut new_transform = prev;
 
@@ -232,13 +242,11 @@ pub fn camera_first_person_update(prev: Transform, mouse_delta: Vec2)->Transform
 
     unsafe
     {
-        let y_rot = angle_axis(Vec3::RIGHT, angle_y);
+        let y_rot = angle_axis(Vec3::LEFT, angle_y);
         let x_rot = angle_axis(Vec3::UP,   angle_x);
 
         new_transform.rot = quat_mul(x_rot, y_rot);
-
-        println!("{}", new_transform.rot);
-        println!("Angle x {} angle y {}", angle_x, angle_y);
+        new_transform.pos.z = time.sin();
 
         return new_transform;
     }
