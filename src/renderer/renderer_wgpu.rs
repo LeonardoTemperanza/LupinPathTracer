@@ -69,12 +69,12 @@ impl<'a> RendererImpl<'a> for Renderer<'a>
             // The Vulkan backend seems to be
             // the best when debugging with RenderDoc,
             // but its resizing behavior is the worst
-            // by far compared to opengl and dx12.
-            // dx12 resizes fine with few artifacts but
-            // takes a while to start up (though that might
-            // be an implementation issue). The best one seems
-            // to be OpenGL (it doesn't have any issues)
-            // but it's not really debuggable.
+            // by far compared to opengl and dx12. It also
+            // seems to have a bit of input lag for some reason.
+            // (will have to double check on that.)
+            // dx12 resizes fine with few artifacts.
+            // The best one seems to be OpenGL (it doesn't
+            // have any issues) but it's not really debuggable.
             #[cfg(target_os = "windows")]
             backends: wgpu::Backends::VULKAN,
 
@@ -113,9 +113,6 @@ impl<'a> RendererImpl<'a> for Renderer<'a>
         let swapchain_format = swapchain_capabilities.formats[0];
 
         configure_surface(&mut surface, &device, swapchain_format, init_width, init_height);
-
-        // Get first frame to render to
-        let next_frame = None; //try_get_next_frame(&surface);
 
         // Compile all shader variations
         let pathtracer_module = device.create_shader_module(ShaderModuleDescriptor
@@ -189,6 +186,18 @@ impl<'a> RendererImpl<'a> for Renderer<'a>
                     },
                     count: None
                 },
+                BindGroupLayoutEntry
+                {
+                    binding: 5,
+                    visibility: ShaderStages::COMPUTE,
+                    ty: BindingType::Buffer
+                    {
+                        ty: BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None
+                },
             ]
         });
 
@@ -228,7 +237,7 @@ impl<'a> RendererImpl<'a> for Renderer<'a>
             queue,
             swapchain_format,
 
-            next_frame,
+            next_frame: None,
 
             // Egui
             egui_render_state,
@@ -343,9 +352,10 @@ impl<'a> RendererImpl<'a> for Renderer<'a>
     // Rendering
 
     // Will later take a scene as input
-    fn draw_scene(&mut self, scene: &Scene, render_to: &Texture)
+    fn draw_scene(&mut self, scene: &Scene, render_to: &Texture, camera_transform: Mat4)
     {
         use wgpu::*;
+        let camera_transform_buffer = self.upload_uniform(to_u8_slice(&[camera_transform]));
         let surface = &self.surface;
         let device  = &self.device;
         let queue   = &self.queue;
@@ -359,6 +369,7 @@ impl<'a> RendererImpl<'a> for Renderer<'a>
 
         // Compute pass to generate image
         {
+
             let bind_group = device.create_bind_group(&BindGroupDescriptor
             {
                 label: None,
@@ -370,6 +381,7 @@ impl<'a> RendererImpl<'a> for Renderer<'a>
                     BindGroupEntry { binding: 2, resource: buffer_resource(&scene.indices) },
                     BindGroupEntry { binding: 3, resource: buffer_resource(&scene.bvh_nodes) },
                     BindGroupEntry { binding: 4, resource: buffer_resource(&scene.verts) },
+                    BindGroupEntry { binding: 5, resource: buffer_resource(&camera_transform_buffer) }
                 ],
             });
 
@@ -482,6 +494,22 @@ impl<'a> RendererImpl<'a> for Renderer<'a>
             label: None,
             size: buffer.len() as u64,
             usage: BufferUsages::COPY_DST | BufferUsages::STORAGE,
+            mapped_at_creation: false,
+        });
+
+        self.queue.write_buffer(&wgpu_buffer, 0, buffer);
+
+        return wgpu_buffer;
+    }
+
+    fn upload_uniform(&mut self, buffer: &[u8])->wgpu::Buffer
+    {
+        use wgpu::*;
+        let wgpu_buffer = self.device.create_buffer(&BufferDescriptor
+        {
+            label: None,
+            size: buffer.len() as u64,
+            usage: BufferUsages::COPY_DST | BufferUsages::STORAGE | BufferUsages::UNIFORM,
             mapped_at_creation: false,
         });
 

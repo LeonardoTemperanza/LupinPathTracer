@@ -16,6 +16,7 @@
 @group(0) @binding(2) var<storage, read> indices: array<u32>;
 @group(0) @binding(3) var<storage, read> bvh_nodes: array<BvhNode>;
 @group(0) @binding(4) var<storage, read> verts: array<Vertex>;
+@group(0) @binding(5) var<uniform> camera_transform: mat4x4f;
 
 //@group(1) @binding(0) var atlas_1_channel: texture_2d<r8unorm, read>;
 // Like base color
@@ -64,6 +65,19 @@ struct Ray
     ori: vec3f,
     dir: vec3f,
     inv_dir: vec3f  // Precomputed inverse of the ray direction, for performance
+}
+
+fn transform_point(p: vec3f, transform: mat4x4f)->vec3f
+{
+    let p_vec4 = vec4f(p, 1.0f);
+    let transformed = transform * p_vec4;
+    return (transformed / transformed.w).xyz;
+}
+
+fn transform_dir(dir: vec3f, transform: mat4x4f)->vec3f
+{
+    let dir_vec4 = vec4f(dir, 0.0f);
+    return (transform * dir_vec4).xyz;
 }
 
 // NOTE: The odd ordering of the fields
@@ -150,13 +164,16 @@ struct HitInfo
 {
     dst: f32,
     normal: vec3f,
-    tex_coords: vec2f
+    tex_coords: vec2f,
+    num_boxes_hit: i32
 }
 fn ray_scene_intersection(ray: Ray)->HitInfo
 {
     var stack: array<u32, 40>;
     var stack_idx: i32 = 1;
     stack[0] = 0u;
+
+    var num_boxes_hit: i32 = 0;
 
     // t, u, v
     var min_hit = vec3f(f32_max, 0.0f, 0.0f);
@@ -202,12 +219,14 @@ fn ray_scene_intersection(ray: Ray)->HitInfo
             {
                 if right_dst < min_hit.x
                 {
+                    num_boxes_hit += 1;
                     stack[stack_idx] = right_child;
                     stack_idx++;
                 }
                 
                 if left_dst < min_hit.x
                 {
+                    num_boxes_hit += 1;
                     stack[stack_idx] = left_child;
                     stack_idx++;
                 }
@@ -216,12 +235,14 @@ fn ray_scene_intersection(ray: Ray)->HitInfo
             {
                 if left_dst < min_hit.x
                 {
+                    num_boxes_hit += 1;
                     stack[stack_idx] = left_child;
                     stack_idx++;
                 }
 
                 if right_dst < min_hit.x
                 {
+                    num_boxes_hit += 1;
                     stack[stack_idx] = right_child;
                     stack_idx++;
                 }
@@ -229,7 +250,7 @@ fn ray_scene_intersection(ray: Ray)->HitInfo
         }
     }
 
-    var hit_info: HitInfo = HitInfo(min_hit.x, vec3f(0.0f), vec2f(0.0f));
+    var hit_info: HitInfo = HitInfo(min_hit.x, vec3f(0.0f), vec2f(0.0f), num_boxes_hit);
     if hit_info.dst != f32_max
     {
         let vert0: Vertex = verts[indices[tri_idx*3 + 0]];
@@ -263,15 +284,19 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>)
     
     var camera_look_at = normalize(vec3(coord, 1.0f));
 
-    var camera_ray = Ray(vec3f(0.0f, 0.3f, -1.0f), camera_look_at, 1.0f / camera_look_at);
+    var camera_ray = Ray(vec3f(0.0f, 0.0f, 0.0f), camera_look_at, 1.0f / camera_look_at);
+    camera_ray.ori = transform_point(camera_ray.ori, camera_transform);
+    //camera_ray.ori.z -= 3.0f;
+    camera_ray.dir = transform_dir(camera_ray.dir, camera_transform);
+    camera_ray.inv_dir = 1.0f / camera_ray.dir;
 
     var hit = ray_scene_intersection(camera_ray);
 
+    //var color = vec4f(select(vec3f(0.0f), vec3f(f32(hit.num_boxes_hit) / 1000.0), hit.dst != f32_max), 1.0f);
     var color = vec4f(select(vec3f(0.0f), hit.normal, hit.dst != f32_max), 1.0f);
 
     if global_id.x < output_dim.x && global_id.y < output_dim.y
     {
-        var coord_color = vec4f(uv, 1.0f, 1.0f);
         textureStore(output_texture, global_id.xy, color);
     }
 }

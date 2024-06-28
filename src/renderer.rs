@@ -16,10 +16,10 @@ mod renderer_wgpu;
 // handles for the scene info
 pub struct Scene
 {
-    pub verts_pos: wgpu::Buffer,
-    pub indices: wgpu::Buffer,
-    pub bvh_nodes: wgpu::Buffer,
-    pub verts: wgpu::Buffer
+    pub verts_pos: Buffer,
+    pub indices: Buffer,
+    pub bvh_nodes: Buffer,
+    pub verts: Buffer
 
     /*
     // Texture atlases
@@ -56,6 +56,9 @@ pub struct BvhNode
     pub tri_count: u32
 }
 
+// Constants
+pub const BVH_MAX_DEPTH: i32 = 25;
+
 pub trait RendererImpl<'a>
 {
     // Initialization
@@ -69,7 +72,7 @@ pub trait RendererImpl<'a>
     fn update_egui_texture(&mut self, texture: &Texture, texture_id: egui::TextureId, filter_near: bool);
 
     // Rendering
-    fn draw_scene(&mut self, scene: &Scene, render_to: &Texture);
+    fn draw_scene(&mut self, scene: &Scene, render_to: &Texture, camera_transform: Mat4);
     fn draw_egui(&mut self,
                  tris: Vec<ClippedPrimitive>,
                  textures_delta: &TexturesDelta,
@@ -79,6 +82,7 @@ pub trait RendererImpl<'a>
 
     // CPU <-> GPU transfers
     fn upload_buffer(&mut self, buffer: &[u8])->Buffer;
+    fn upload_uniform(&mut self, buffer: &[u8])->Buffer;
     fn create_empty_buffer(&mut self)->Buffer;
     // Lets the user read a buffer from the GPU to the CPU. This will
     // cause latency so it should be used very sparingly if at all
@@ -100,7 +104,6 @@ pub trait TextureImpl
 {
     fn get_size(&self)->(u32, u32);
 }
-
 
 //#[cfg()]
 pub type Texture  = renderer_wgpu::Texture;

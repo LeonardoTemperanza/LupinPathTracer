@@ -24,7 +24,13 @@ pub struct Core
     slider_value: f32,
 
     // Scene info
-    scene: Scene
+    scene: Scene,
+    camera_transform: Transform,
+
+    // Input
+    right_click_down: bool,
+    mouse_delta: Vec2,
+    initial_mouse_pos: Vec2,  // Mouse position before dragging
 }
 
 impl Core
@@ -37,9 +43,11 @@ impl Core
         // Load scene
         let mut obj_path = std::env::current_exe().unwrap();
         obj_path.pop();
-        obj_path = append_to_path(obj_path, "/../assets/dragon.obj");
+        obj_path = append_to_path(obj_path, "/../assets/dragon_lowpoly.obj");
 
-        let scene: Scene = load_scene_obj(obj_path.into_os_string().to_str().unwrap(), renderer);
+        println!("Loading scene from disk...");
+        let (scene, _) = load_scene_obj(obj_path.into_os_string().to_str().unwrap(), renderer);
+        println!("Done!");
         return Core
         {
             render_image_id,
@@ -50,7 +58,13 @@ impl Core
             slider_value: 0.0,
 
             // Scene info
-            scene
+            scene,
+            camera_transform: Default::default(),
+
+            // Input
+            right_click_down: false,
+            mouse_delta: Default::default(),
+            initial_mouse_pos: Default::default()
         };
     }
 
@@ -64,11 +78,11 @@ impl Core
         // Update UI
         let gui_output = egui_ctx.run(egui_input, |ui|
         {
-            self.gui_update(renderer, &egui_ctx);
+            self.gui_update(renderer, &egui_ctx, window);
         });
 
         // Update scene entities
-        camera_first_person_update(2);
+        self.camera_transform = camera_first_person_update(self.camera_transform, self.mouse_delta);
 
         // Rendering
         {
@@ -82,7 +96,8 @@ impl Core
                                                                   gui_output.pixels_per_point);
 
             renderer.begin_frame();
-            renderer.draw_scene(&self.scene, &self.render_image);
+            renderer.draw_scene(&self.scene, &self.render_image, transform_to_matrix(self.camera_transform));
+            //renderer.draw_scene(&self.scene, &self.render_image, Mat4::IDENTITY);
 
             // Draw gui last, as an overlay
             renderer.draw_egui(tris, &gui_output.textures_delta, win_width, win_height, scale);
@@ -93,7 +108,7 @@ impl Core
         renderer.end_frame();
     }
 
-    pub fn gui_update(&mut self, renderer: &mut Renderer, ctx: &egui::Context)
+    pub fn gui_update(&mut self, renderer: &mut Renderer, ctx: &egui::Context, window: &Window)
     {
         menu_bar(ctx);
 
@@ -150,13 +165,83 @@ impl Core
                 };
 
                 ui.image(to_draw);
+
+                // Handle mouse movement for looking around in first person
+
+                let right_click_down = ctx.input(|i| i.pointer.secondary_down());
+                let right_clicked = right_click_down && !self.right_click_down;
+                let right_released = !right_click_down && self.right_click_down;
+                let mouse_pos = ctx.input(|i| i.pointer.interact_pos()).unwrap_or(egui::Pos2::ZERO);
+                let is_mouse_in_this_panel = ui.min_rect().contains(mouse_pos);
+
+                if is_mouse_in_this_panel
+                {
+                    if right_clicked
+                    {
+                        // Store the initial mouse position
+                        self.right_click_down = true;
+                        self.initial_mouse_pos = Vec2 { x: mouse_pos.x, y: mouse_pos.y };
+                    }
+
+                    if right_click_down && window.has_focus()
+                    {
+                        let mouse_delta = ctx.input(|i| i.pointer.delta());
+                        self.mouse_delta = Vec2 { x: mouse_delta.x, y: mouse_delta.y };
+                        ctx.output_mut(|i| i.cursor_icon = egui::CursorIcon::None);
+
+                        // Keep the mouse in place (using winit)
+                        //let winit_pos = winit::dpi::LogicalPosition::new(self.initial_mouse_pos.x, self.initial_mouse_pos.y);
+                        //let _ = window.set_cursor_position(winit_pos);
+                    }
+
+                    if right_released
+                    {
+                        self.right_click_down = false;
+                        self.mouse_delta = Vec2::default();
+
+                        // Reset cursor icon to default
+                        ctx.output_mut(|i| i.cursor_icon = egui::CursorIcon::Default);
+                    }
+                }
             });
     }
 }
 
-pub fn camera_first_person_update(prev: i32)->i32
+pub fn camera_first_person_update(prev: Transform, mouse_delta: Vec2)->Transform
 {
-    return 0;
+    // Camera rotation
+    const ROTATE_X_SPEED: f32 = 120.0 * DEG_TO_RAD;
+    const ROTATE_Y_SPEED: f32 = 80.0 * DEG_TO_RAD;
+    const MOUSE_SENSITIVITY: f32 = 0.1 * DEG_TO_RAD;
+    static mut angle_x: f32 = 0.0;
+    static mut angle_y: f32 = 0.0;
+
+    let mouse_x = mouse_delta.x * MOUSE_SENSITIVITY;
+    let mouse_y = mouse_delta.y * MOUSE_SENSITIVITY;
+
+    let mut new_transform = prev;
+
+    unsafe
+    {
+        angle_x += mouse_x;
+        angle_y += mouse_y;
+        angle_y = angle_y.clamp(-90.0 * DEG_TO_RAD, 90.0 * DEG_TO_RAD);
+    }
+
+    // TODO: Handle gamepad input
+
+    unsafe
+    {
+        let y_rot = angle_axis(Vec3::RIGHT, angle_y);
+        let x_rot = angle_axis(Vec3::UP,   angle_x);
+
+        new_transform.rot = quat_mul(x_rot, y_rot);
+
+        println!("{}", new_transform.rot);
+        println!("Angle x {} angle y {}", angle_x, angle_y);
+
+        return new_transform;
+    }
 }
 
 pub fn menu_bar(ctx: &egui::Context)
