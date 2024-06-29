@@ -13,6 +13,8 @@ use crate::base::*;
 //use crate::renderer_wgpu::*;
 use crate::renderer::*;
 
+use crate::winit_input::*;
+
 pub struct Core
 {
     // egui texture ids
@@ -28,6 +30,7 @@ pub struct Core
     camera_transform: Transform,
 
     // Input
+    input: InputState,
     right_click_down: bool,
     mouse_delta: Vec2,
     initial_mouse_pos: Vec2,  // Mouse position before dragging
@@ -70,6 +73,7 @@ impl Core
             camera_transform,
 
             // Input
+            input: Default::default(),
             right_click_down: false,
             mouse_delta: Default::default(),
             initial_mouse_pos: Default::default()
@@ -77,9 +81,11 @@ impl Core
     }
 
     pub fn main_update(&mut self, renderer: &mut Renderer, window: &Window,
-                       egui_ctx: &mut egui::Context, egui_state: &mut State, delta_time: f32)
+                       egui_ctx: &mut egui::Context, egui_state: &mut State, delta_time: f32, input_diff: &mut InputDiff)
     {
         // Poll input
+        poll_input(&mut self.input, input_diff);
+
         // Consume the accumulated egui inputs
         let egui_input = egui_state.take_egui_input(&window);
 
@@ -90,7 +96,7 @@ impl Core
         });
 
         // Update scene entities
-        self.camera_transform = camera_first_person_update(self.camera_transform, delta_time, self.mouse_delta);
+        self.camera_transform = camera_first_person_update(self.camera_transform, delta_time, self.mouse_delta, self.input);
 
         // Rendering
         {
@@ -198,8 +204,8 @@ impl Core
                         ctx.output_mut(|i| i.cursor_icon = egui::CursorIcon::None);
 
                         // Keep the mouse in place (using winit)
-                        //let winit_pos = winit::dpi::LogicalPosition::new(self.initial_mouse_pos.x, self.initial_mouse_pos.y);
-                        //let _ = window.set_cursor_position(winit_pos);
+                        let winit_pos = winit::dpi::LogicalPosition::new(self.initial_mouse_pos.x, self.initial_mouse_pos.y);
+                        let _ = window.set_cursor_position(winit_pos);
                     }
 
                     if right_released
@@ -215,11 +221,12 @@ impl Core
     }
 }
 
-pub fn camera_first_person_update(prev: Transform, delta_time: f32, mouse_delta: Vec2)->Transform
+pub fn camera_first_person_update(prev: Transform, delta_time: f32, mouse_delta: Vec2, input: InputState)->Transform
 {
     // Camera rotation
     const ROTATE_X_SPEED: f32 = 120.0 * DEG_TO_RAD;
     const ROTATE_Y_SPEED: f32 = 80.0 * DEG_TO_RAD;
+    const MOVE_SPEED: f32 = 1.0;
     const MOUSE_SENSITIVITY: f32 = 0.2 * DEG_TO_RAD;
     static mut angle_x: f32 = 0.0;
     static mut angle_y: f32 = 0.0;
@@ -230,6 +237,12 @@ pub fn camera_first_person_update(prev: Transform, delta_time: f32, mouse_delta:
     let mouse_y = -mouse_delta.y * MOUSE_SENSITIVITY;
 
     let mut new_transform = prev;
+    let input_z = (input.keyboard_state.keys[VirtualKeycode::W as usize] as i32 - input.keyboard_state.keys[VirtualKeycode::S as usize] as i32) as f32;
+    let input_x = (input.keyboard_state.keys[VirtualKeycode::D as usize] as i32 - input.keyboard_state.keys[VirtualKeycode::A as usize] as i32) as f32;
+    let input_y = (input.keyboard_state.keys[VirtualKeycode::E as usize] as i32 - input.keyboard_state.keys[VirtualKeycode::Q as usize] as i32) as f32;
+    new_transform.pos.z += input_z * MOVE_SPEED * delta_time;
+    new_transform.pos.x += input_x * MOVE_SPEED * delta_time;
+    new_transform.pos.y += input_y * MOVE_SPEED * delta_time;
 
     unsafe
     {
@@ -246,7 +259,7 @@ pub fn camera_first_person_update(prev: Transform, delta_time: f32, mouse_delta:
         let x_rot = angle_axis(Vec3::UP,   angle_x);
 
         new_transform.rot = quat_mul(x_rot, y_rot);
-        new_transform.pos.z = time.sin();
+        //new_transform.pos.z = time.sin();
 
         return new_transform;
     }

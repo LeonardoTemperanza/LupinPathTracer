@@ -26,6 +26,9 @@ mod core;
 mod loader;
 pub use loader::*;
 
+mod winit_input;
+pub use winit_input::*;
+
 fn main()
 {
     // Initialize window
@@ -50,25 +53,26 @@ fn main()
 
     window.set_visible(true);
 
+    let mut input_diff = InputDiff::default();
+
     let min_delta_time: f32 = 1.0/20.0;  // Reasonable min value to prevent degeneracies when updating state
     let mut delta_time: f32 = 1.0/60.0;
     let mut time_begin = Instant::now();
-    let mut first_frame = true;
     event_loop.run(|event, target|
     {
         if let Event::WindowEvent { window_id, event } = event
         {
             // Collect inputs
             let _ = egui_state.on_window_event(&window, &event);
+            collect_inputs_winit(&mut input_diff, &event);
             
             match event
             {
                 WindowEvent::Resized(new_size) =>
                 {
-                    // NOTE: There are some major and ugly artifacts when resizing on windows.
-                    // it seems to be a wgpu problem, not a winit problem?
-                    // https://github.com/gfx-rs/wgpu/issues/1168
-                    // This problem goes away using the opengl backend
+                    // NOTE: On vulkan and dx12 there are some artifacts when resizing
+                    // This is a wgpu problem, and it goes away completely when using
+                    // the opengl backend
                     renderer.resize(new_size.width as i32, new_size.height as i32);
                     window.request_redraw();
                 },
@@ -78,17 +82,15 @@ fn main()
                 },
                 WindowEvent::RedrawRequested =>
                 {
-                    if !first_frame
-                    {
-                        delta_time = min_delta_time.max(time_begin.elapsed().as_secs_f32());
-                    }
+                    delta_time = time_begin.elapsed().as_secs_f32();
+                    delta_time = delta_time.min(min_delta_time);
                     time_begin = Instant::now();
 
-                    core.main_update(&mut renderer, &window, &mut egui_ctx, &mut egui_state, delta_time);
+                    core.main_update(&mut renderer, &window, &mut egui_ctx, &mut egui_state, delta_time, &mut input_diff);
 
                     // Continuously request drawing messages to let the main loop continue
                     window.request_redraw();
-                }
+                },
                 _ => {},
             }
         }
