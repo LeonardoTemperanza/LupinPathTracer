@@ -349,7 +349,7 @@ pub fn bvh_split_bfs(bvh: &mut Vec<BvhNode>, verts: &[f32],
 pub struct BvhSplit
 {
     performed_split: bool,
-    axis: usize,
+    axis: isize,
     pos: f32,
     cost: f32,
 
@@ -402,7 +402,7 @@ pub fn choose_split(bvh: &[BvhNode], verts: &[f32],
     let mut res: BvhSplit = Default::default();
     res.cost = node_cost(size, tri_count as u32);
 
-    for axis in 0..3usize
+    for axis in 0..3isize
     {
         // Compute centroid bounds because it slightly
         // improves the quality of the resulting tree
@@ -419,6 +419,10 @@ pub fn choose_split(bvh: &[BvhNode], verts: &[f32],
         // Can't split anything here...
         if centroid_min == centroid_max { continue; }
 
+        const EPS: f32 = 0.001;
+        centroid_min -= EPS;
+        centroid_max += EPS;
+
         // Construct bins, for faster cost computation
         let mut bins: [Bin; NUM_BINS] = Default::default();
 
@@ -428,7 +432,7 @@ pub fn choose_split(bvh: &[BvhNode], verts: &[f32],
         {
             let centroid = centroids[tri];
             let bounds = tri_bounds[tri];
-            let bin_idx: usize = (NUM_BINS - 1).min(((centroid[axis] - centroid_min) * scale) as usize);
+            let bin_idx: usize = (((centroid[axis] - centroid_min) * scale).floor() as usize).clamp(0, NUM_BINS-1);
             grow_aabb_to_include_aabb(&mut bins[bin_idx].bounds, bounds); 
             bins[bin_idx].tri_count += 1;
         }
@@ -445,7 +449,7 @@ pub fn choose_split(bvh: &[BvhNode], verts: &[f32],
         for i in 0..NUM_BINS - 1
         {
             left_sum += bins[i].tri_count;
-            left_count[i] = left_sum + 1;
+            left_count[i] = left_sum;
             grow_aabb_to_include_aabb(&mut left_aabb, bins[i].bounds);
             left_aabbs[i] = left_aabb;
 
@@ -500,7 +504,7 @@ pub fn choose_split_simd(bvh: &[BvhNode], verts: &[f32],
     let mut res: BvhSplit = Default::default();
     res.cost = node_cost(size, tri_count as u32);
 
-    for axis in 0..3usize
+    for axis in 0..3isize
     {
         // Compute centroid bounds because it slightly
         // improves the quality of the resulting tree

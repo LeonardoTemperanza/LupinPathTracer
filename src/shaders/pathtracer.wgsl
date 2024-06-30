@@ -124,8 +124,8 @@ struct Scene
 // For misses, t = f32_max
 fn ray_aabb_dst(ray: Ray, aabb_min: vec3f, aabb_max: vec3f)->f32
 {
-    let t_min: vec3f = (aabb_min - ray.ori) * ray.inv_dir;
-    let t_max: vec3f = (aabb_max - ray.ori) * ray.inv_dir;
+    let t_min: vec3f = (aabb_min - 0.001 - ray.ori) * ray.inv_dir;
+    let t_max: vec3f = (aabb_max + 0.001 - ray.ori) * ray.inv_dir;
     let t1: vec3f = min(t_min, t_max);
     let t2: vec3f = max(t_min, t_max);
     let dst_far: f32  = min(min(t2.x, t2.y), t2.z);

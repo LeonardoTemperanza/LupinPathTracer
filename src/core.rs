@@ -46,7 +46,7 @@ impl Core
         // Load scene
         let mut obj_path = std::env::current_exe().unwrap();
         obj_path.pop();
-        obj_path = append_to_path(obj_path, "/../assets/dragon_lowpoly.obj");
+        obj_path = append_to_path(obj_path, "/../assets/dragon.obj");
 
         println!("Loading scene from disk...");
         let (scene, _) = load_scene_obj(obj_path.into_os_string().to_str().unwrap(), renderer);
@@ -226,7 +226,7 @@ pub fn camera_first_person_update(prev: Transform, delta_time: f32, mouse_delta:
     // Camera rotation
     const ROTATE_X_SPEED: f32 = 120.0 * DEG_TO_RAD;
     const ROTATE_Y_SPEED: f32 = 80.0 * DEG_TO_RAD;
-    const MOVE_SPEED: f32 = 1.0;
+    const MOVE_SPEED: f32 = 0.1;
     const MOUSE_SENSITIVITY: f32 = 0.2 * DEG_TO_RAD;
     static mut angle_x: f32 = 0.0;
     static mut angle_y: f32 = 0.0;

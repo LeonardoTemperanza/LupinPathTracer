@@ -198,26 +198,26 @@ impl std::ops::Div<f32> for Vec3
     }
 }
 
-impl std::ops::Index<usize> for Vec3
+impl std::ops::Index<isize> for Vec3
 {
     type Output = f32;
     #[inline]
-    fn index<'a>(&'a self, i: usize) -> &'a f32
+    fn index<'a>(&'a self, i: isize) -> &'a f32
     {
-        debug_assert!(i < 3);
+        debug_assert!(i < 3 && i >= 0);
         let ptr = &self.x as *const f32;
-        return unsafe { &*ptr.add(i) };
+        return unsafe { &*ptr.add(i as usize) };
     }
 }
 
-impl std::ops::IndexMut<usize> for Vec3
+impl std::ops::IndexMut<isize> for Vec3
 {
     #[inline]
-    fn index_mut<'a>(&'a mut self, i: usize) -> &'a mut f32
+    fn index_mut<'a>(&'a mut self, i: isize) -> &'a mut f32
     {
-        debug_assert!(i < 3);
+        debug_assert!(i < 3 && i >= 0);
         let ptr = &mut self.x as *mut f32;
-        return unsafe { &mut *ptr.add(i) };
+        return unsafe { &mut *ptr.add(i as usize) };
     }
 }
 
@@ -673,7 +673,7 @@ pub fn compute_tri_bounds(t0: Vec3, t1: Vec3, t2: Vec3)->Aabb
 #[inline]
 pub fn compute_tri_centroid(t0: Vec3, t1: Vec3, t2: Vec3)->Vec3
 {
-    return (t0 + t1 + t2) * 0.33333333333;
+    return (t0 + t1 + t2) / 3.0;
 }
 
 #[inline]
