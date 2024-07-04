@@ -1,4 +1,7 @@
 
+mod wgsl_preprocessor;
+use wgsl_preprocessor::*;
+
 use crate::base::*;
 //use crate::platform::*;
 
@@ -112,10 +115,10 @@ impl<'a> RendererImpl<'a> for Renderer<'a>
         configure_surface(&mut surface, &device, swapchain_format, init_width, init_height);
 
         // Compile all shader variations
-        let pathtracer_module = device.create_shader_module(ShaderModuleDescriptor
+        let pathtracer_module = compile_shader(&device, ShaderModuleDescriptor
         {
             label: Some("PathtracerShader"),
-            source: ShaderSource::Wgsl(include_str!("../shaders/pathtracer.wgsl").into()),
+            source: ShaderSource::Wgsl(include_str!("renderer_wgpu/shaders/pathtracer.wgsl").into()),
         });
 
         // Create shader pipeline
@@ -588,7 +591,7 @@ impl<'a> RendererImpl<'a> for Renderer<'a>
         }
         ";
 
-        let module = device.create_shader_module(ShaderModuleDescriptor
+        let module = compile_shader(&device, ShaderModuleDescriptor
         {
             label: None,
             source: ShaderSource::Wgsl(shader_source.into())
@@ -779,4 +782,14 @@ fn configure_surface(surface: &mut wgpu::Surface,
     // TODO: This panics if the surface config isn't supported.
     // How to select one that is closest to this one or default back to something else?
     surface.configure(&device, &surface_config);
+}
+
+// Omits runtime checks on shaders on release builds
+fn compile_shader(device: &wgpu::Device, desc: wgpu::ShaderModuleDescriptor)->wgpu::ShaderModule
+{
+    #[cfg(debug_assertions)]
+    return device.create_shader_module(desc);
+
+    #[cfg(not(debug_assertions))]
+    return unsafe { device.create_shader_module_unchecked(desc) };
 }
