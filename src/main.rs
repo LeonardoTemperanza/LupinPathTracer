@@ -26,8 +26,8 @@ mod core;
 mod loader;
 pub use loader::*;
 
-mod winit_input;
-pub use winit_input::*;
+mod input;
+pub use input::*;
 
 fn main()
 {
@@ -60,11 +60,12 @@ fn main()
     let mut time_begin = Instant::now();
     event_loop.run(|event, target|
     {
+        collect_inputs_winit(&mut input_diff, &event);
+        
         if let Event::WindowEvent { window_id, event } = event
         {
             // Collect inputs
             let _ = egui_state.on_window_event(&window, &event);
-            collect_inputs_winit(&mut input_diff, &event);
             
             match event
             {

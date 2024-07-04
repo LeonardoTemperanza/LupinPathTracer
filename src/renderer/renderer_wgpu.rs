@@ -56,9 +56,6 @@ pub struct TextureDesc
 
 impl<'a> RendererImpl<'a> for Renderer<'a>
 {
-    ////////
-    // Initialization
-
     fn new(window: &'a Window, init_width: i32, init_height: i32)->Self
     {
         use wgpu::*;
@@ -251,9 +248,6 @@ impl<'a> RendererImpl<'a> for Renderer<'a>
         };
     }
 
-    ////////
-    // Utils
-
     fn resize(&mut self, width: i32, height: i32)
     {
         use wgpu::*;
@@ -348,10 +342,6 @@ impl<'a> RendererImpl<'a> for Renderer<'a>
         egui_renderer.update_egui_texture_from_wgpu_texture(&self.device, &texture.view, filter_mode, texture_id)
     }
 
-    ////////
-    // Rendering
-
-    // Will later take a scene as input
     fn draw_scene(&mut self, scene: &Scene, render_to: &Texture, camera_transform: Mat4)
     {
         use wgpu::*;
@@ -483,9 +473,6 @@ impl<'a> RendererImpl<'a> for Renderer<'a>
         }
     }
 
-    ////////
-    // CPU <-> GPU transfers
-
     fn upload_buffer(&mut self, buffer: &[u8])->wgpu::Buffer
     {
         use wgpu::*;
@@ -563,9 +550,6 @@ impl<'a> RendererImpl<'a> for Renderer<'a>
         let data = buffer_slice.get_mapped_range();
         output[..].clone_from_slice(&data);
     }
-
-    ////////
-    // Miscellaneous
 
     fn draw_test_triangle(&self)
     {
@@ -678,11 +662,6 @@ impl<'a> RendererImpl<'a> for Renderer<'a>
         self.queue.submit(Some(command_buffer));
     }
 
-    // Returns GPU time spent between the begin and end calls,
-    // in milliseconds. This will make the CPU wait for
-    // all the calls to be finished on the GPU side, so it can only
-    // really be used for very simple profiling, and definitely not
-    // in release builds
     fn gpu_timer_end(&mut self)->f32
     {
         let encoder_desc = wgpu::CommandEncoderDescriptor { label: Some("TimerEncoder") };

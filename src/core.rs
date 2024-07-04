@@ -10,10 +10,9 @@ use egui::ClippedPrimitive;
 use crate::loader::*;
 use crate::base::*;
 
-//use crate::renderer_wgpu::*;
 use crate::renderer::*;
 
-use crate::winit_input::*;
+use crate::input::*;
 
 pub struct Core
 {
@@ -96,7 +95,10 @@ impl Core
         });
 
         // Update scene entities
-        self.camera_transform = camera_first_person_update(self.camera_transform, delta_time, self.mouse_delta, self.input);
+        if self.right_click_down
+        {
+            self.camera_transform = camera_first_person_update(self.camera_transform, delta_time, self.input);
+        }
 
         // Rendering
         {
@@ -221,45 +223,58 @@ impl Core
     }
 }
 
-pub fn camera_first_person_update(prev: Transform, delta_time: f32, mouse_delta: Vec2, input: InputState)->Transform
+pub fn camera_first_person_update(prev: Transform, delta_time: f32, input: InputState)->Transform
 {
     // Camera rotation
     const ROTATE_X_SPEED: f32 = 120.0 * DEG_TO_RAD;
     const ROTATE_Y_SPEED: f32 = 80.0 * DEG_TO_RAD;
-    const MOVE_SPEED: f32 = 0.1;
+    const MOVE_SPEED: f32 = 1.0;
     const MOUSE_SENSITIVITY: f32 = 0.2 * DEG_TO_RAD;
-    static mut angle_x: f32 = 0.0;
-    static mut angle_y: f32 = 0.0;
-    static mut time: f32 = 0.0;
-    unsafe { time += delta_time; }
+    // TODO: Remove these static vars because the compiler will complain about them
+    static mut ANGLE_X: f32 = 0.0;
+    static mut ANGLE_Y: f32 = 0.0;
+
+    let mouse_delta = input.mouse_state.delta;
 
     let mouse_x = mouse_delta.x * MOUSE_SENSITIVITY;
-    let mouse_y = -mouse_delta.y * MOUSE_SENSITIVITY;
+    let mouse_y = mouse_delta.y * MOUSE_SENSITIVITY;
 
     let mut new_transform = prev;
-    let input_z = (input.keyboard_state.keys[VirtualKeycode::W as usize] as i32 - input.keyboard_state.keys[VirtualKeycode::S as usize] as i32) as f32;
-    let input_x = (input.keyboard_state.keys[VirtualKeycode::D as usize] as i32 - input.keyboard_state.keys[VirtualKeycode::A as usize] as i32) as f32;
-    let input_y = (input.keyboard_state.keys[VirtualKeycode::E as usize] as i32 - input.keyboard_state.keys[VirtualKeycode::Q as usize] as i32) as f32;
-    new_transform.pos.z += input_z * MOVE_SPEED * delta_time;
-    new_transform.pos.x += input_x * MOVE_SPEED * delta_time;
-    new_transform.pos.y += input_y * MOVE_SPEED * delta_time;
+    let input = Vec3
+    {
+        x: (input.keyboard_state.keys[VirtualKeycode::D as usize] as i32 - input.keyboard_state.keys[VirtualKeycode::A as usize] as i32) as f32,
+        y: (input.keyboard_state.keys[VirtualKeycode::E as usize] as i32 - input.keyboard_state.keys[VirtualKeycode::Q as usize] as i32) as f32,
+        z: (input.keyboard_state.keys[VirtualKeycode::W as usize] as i32 - input.keyboard_state.keys[VirtualKeycode::S as usize] as i32) as f32
+    };
+
+    let mut local_movement = Vec3 { x: input.x, y: 0.0, z: input.z };
+    local_movement *= MOVE_SPEED;
+    // Movement cap
+    if dot2_vec3(local_movement) > MOVE_SPEED * MOVE_SPEED
+    {
+        local_movement = normalize_vec3(local_movement) * MOVE_SPEED;
+    }
+
+    local_movement *= delta_time;
 
     unsafe
     {
-        angle_x += mouse_x;
-        angle_y += mouse_y;
-        angle_y = angle_y.clamp(-90.0 * DEG_TO_RAD, 90.0 * DEG_TO_RAD);
+        ANGLE_X += mouse_x;
+        ANGLE_Y += mouse_y;
+        ANGLE_Y = ANGLE_Y.clamp(-90.0 * DEG_TO_RAD, 90.0 * DEG_TO_RAD);
     }
 
     // TODO: Handle gamepad input
 
     unsafe
     {
-        let y_rot = angle_axis(Vec3::LEFT, angle_y);
-        let x_rot = angle_axis(Vec3::UP,   angle_x);
+        let y_rot = angle_axis(Vec3::LEFT, ANGLE_Y);
+        let x_rot = angle_axis(Vec3::UP,   ANGLE_X);
 
         new_transform.rot = quat_mul(x_rot, y_rot);
-        //new_transform.pos.z = time.sin();
+        let global_movement = rotate_vec3_with_quat(new_transform.rot, local_movement);
+        new_transform.pos += global_movement;
+        new_transform.pos += Vec3::UP * input.y * MOVE_SPEED * delta_time;
 
         return new_transform;
     }

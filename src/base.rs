@@ -139,6 +139,17 @@ impl std::ops::Add for Vec3
     }
 }
 
+impl std::ops::AddAssign<Vec3> for Vec3
+{
+    #[inline]
+    fn add_assign(&mut self, rhs: Vec3)
+    {
+        self.x += rhs.x;
+        self.y += rhs.y;
+        self.z += rhs.z;
+    }
+}
+
 impl std::ops::Sub for Vec3
 {
     type Output = Self;
@@ -396,6 +407,18 @@ pub fn quat_mul(a: Quat, b: Quat)->Quat
 pub fn dot_vec3(v1: Vec3, v2: Vec3)->f32
 {
     return v1.x*v2.x + v1.y*v2.y + v1.z*v2.z;
+}
+
+#[inline]
+pub fn dot2_vec3(v: Vec3)->f32
+{
+    return v.x*v.x + v.y*v.y + v.z*v.z;
+}
+
+#[inline]
+pub fn magnitude_vec3(v: Vec3)->f32
+{
+    return (v.x*v.x + v.y*v.y + v.z*v.z).sqrt();
 }
 
 #[inline]
@@ -682,4 +705,12 @@ pub fn is_point_in_aabb(v: Vec3, aabb_min: Vec3, aabb_max: Vec3)->bool
     return v.x >= aabb_min.x && v.x <= aabb_max.x &&
            v.y >= aabb_min.y && v.y <= aabb_max.y &&
            v.z >= aabb_min.z && v.z <= aabb_max.z;
+}
+
+////////
+// Printing utils
+
+pub fn print_type<T>(_: &T)
+{
+    println!("{}", std::any::type_name::<T>());
 }

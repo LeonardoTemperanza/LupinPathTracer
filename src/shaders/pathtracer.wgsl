@@ -169,7 +169,7 @@ struct HitInfo
 }
 fn ray_scene_intersection(ray: Ray)->HitInfo
 {
-    var stack: array<u32, 40>;
+    var stack: array<u32, 40>;  // Max BVH depth is 40
     var stack_idx: i32 = 1;
     stack[0] = 0u;
 
