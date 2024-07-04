@@ -54,6 +54,12 @@ pub struct TextureDesc
     usage: wgpu::TextureUsages,
 }
 
+// All shader file names
+
+
+// All shader sources
+
+
 impl<'a> RendererImpl<'a> for Renderer<'a>
 {
     ////////
@@ -118,11 +124,18 @@ impl<'a> RendererImpl<'a> for Renderer<'a>
         let next_frame = try_get_next_frame(&surface);
 
         // Compile all shader variations
+<<<<<<< Updated upstream
         let pathtracer_module = device.create_shader_module(ShaderModuleDescriptor
         {
             label: Some("PathtracerShader"),
             source: ShaderSource::Wgsl(include_str!("../shaders/pathtracer.wgsl").into()),
         });
+=======
+        let pathtracer_module = compile_shader(&device,
+                                               Some("PathtracerShader"),
+                                               "renderer_wgpu/shaders/pathtracer.wgsl",
+                                               PreprocessorParams::default());
+>>>>>>> Stashed changes
 
         // Create shader pipeline
         let pathtracer_bind_group_layout = device.create_bind_group_layout(&BindGroupLayoutDescriptor {
@@ -772,4 +785,31 @@ fn configure_surface(surface: &mut wgpu::Surface,
     // TODO: This panics if the surface config isn't supported.
     // How to select one that is closest to this one or default back to something else?
     surface.configure(&device, &surface_config);
+<<<<<<< Updated upstream
 }
+=======
+}
+
+fn compile_shader(device: &wgpu::Device, label: Option<&str>, shader_name: &str, preprocessor_params: PreprocessorParams)->wgpu::ShaderModule
+{
+    use wgpu::*;    
+    let (preprocessed_shader, source_map) = preprocess_shader(shader_name, preprocessor_params);
+
+    let desc = ShaderModuleDescriptor
+    {
+        label: label,
+        source: ShaderSource::Wgsl(preprocessed_shader.into()),
+    };
+
+    // Omit runtime checks on shaders on release builds
+    #[cfg(debug_assertions)]
+    let module = device.create_shader_module(desc);
+    #[cfg(not(debug_assertions))]
+    let module = unsafe { device.create_shader_module_unchecked(desc) };
+
+    // TODO: Catch the error here, translate it and print it to stderr
+
+
+    return module;
+}
+>>>>>>> Stashed changes

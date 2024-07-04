@@ -1,6 +1,6 @@
 
-// There should be a wgsl custom preprocessor which implements:
-// #assert(expression), should write to a debug texture (only in debug)
+#include "base"
+#include "bvh_traversal"
 
 // NOTE: Early returns are heavily discouraged here because it
 // will lead to thread divergence, and that in turn will cause
