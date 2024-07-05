@@ -67,6 +67,7 @@ pub trait RendererImpl<'a>
 
     // Utils
     fn create_texture(&mut self, width: u32, height: u32)->Texture;
+    fn get_texture_size(texture: &Texture)->(i32, i32);
     fn resize_texture(&mut self, texture: &mut Texture, width: i32, height: i32);
     fn texture_to_egui_texture(&mut self, texture: &Texture, filter_near: bool)->egui::TextureId;
     fn update_egui_texture(&mut self, texture: &Texture, texture_id: egui::TextureId, filter_near: bool);
@@ -77,6 +78,7 @@ pub trait RendererImpl<'a>
                  tris: Vec<ClippedPrimitive>,
                  textures_delta: &TexturesDelta,
                  width: i32, height: i32, scale: f32);
+    fn show_texture(&mut self, texture: &Texture);  // Renders texture to screen
     fn begin_frame(&mut self);
     fn end_frame(&mut self);
 
@@ -100,12 +102,8 @@ pub trait RendererImpl<'a>
     fn log_backend(&self);  // Logs the currently used renderer. In the case of WGPU, logs the used backend
 }
 
-pub trait TextureImpl
-{
-    fn get_size(&self)->(u32, u32);
-}
-
 //#[cfg()]
-pub type Texture  = renderer_wgpu::Texture;
+pub type Texture  = wgpu::Texture;
+pub type TextureView = wgpu::TextureView;
 pub type Renderer<'a> = renderer_wgpu::Renderer<'a>;
 pub type Buffer   = wgpu::Buffer;

@@ -31,6 +31,7 @@ pub struct Renderer<'a>
     //pathtrace_pipelines: [wgpu::ComputePipeline; PathtraceMode::Count as usize],
     pathtracer: wgpu::ComputePipeline,
     pathtracer_layout: wgpu::BindGroupLayout,
+    show_texture: wgpu::RenderPipeline,
 
     // Profiling
     timer_query_set: wgpu::QuerySet
@@ -39,24 +40,6 @@ pub struct Renderer<'a>
 pub struct EGUIRenderState
 {
     renderer: egui_wgpu::Renderer,
-}
-
-pub struct Texture
-{
-    desc:   TextureDesc,
-    handle: wgpu::Texture,
-    view:   wgpu::TextureView,
-}
-
-pub struct TextureDesc
-{
-    label: Option<String>,
-    size: wgpu::Extent3d,
-    mip_level_count: u32,
-    sample_count: u32,
-    dimension: wgpu::TextureDimension,
-    format: wgpu::TextureFormat,
-    usage: wgpu::TextureUsages,
 }
 
 impl<'a> RendererImpl<'a> for Renderer<'a>
@@ -124,6 +107,11 @@ impl<'a> RendererImpl<'a> for Renderer<'a>
                                                Some("PathtracerShader"),
                                                "pathtracer.wgsl",
                                                preprocessor_params);
+
+        let show_texture_module = compile_shader(&device,
+                                                 Some("ShowTextureShader"),
+                                                 "show_texture.wgsl",
+                                                 preprocessor_params);
 
         // Create shader pipeline
         let pathtracer_bind_group_layout = device.create_bind_group_layout(&BindGroupLayoutDescriptor {
@@ -220,6 +208,37 @@ impl<'a> RendererImpl<'a> for Renderer<'a>
             entry_point: "cs_main"
         });
 
+        let show_texture = device.create_render_pipeline(&RenderPipelineDescriptor
+        {
+            label: None,
+            layout: None,
+            vertex: VertexState
+            {
+                module: &show_texture_module,
+                entry_point: "vs_main",
+                buffers: &[]
+            },
+            fragment: Some(FragmentState
+            {
+                module: &show_texture_module,
+                entry_point: "fs_main",
+                targets: &[Some(ColorTargetState
+                {
+                    format: swapchain_format,
+                    blend: Some(BlendState::REPLACE),
+                    write_mask: ColorWrites::ALL,
+                })],
+            }),
+            depth_stencil: None,
+            multisample: MultisampleState::default(),
+            multiview: None,
+            primitive: PrimitiveState
+            {
+                topology: PrimitiveTopology::TriangleList,
+                ..Default::default()
+            }
+        });
+
         // Init egui info
         let renderer = egui_wgpu::Renderer::new(&device, swapchain_format, None, 1);
         let egui_render_state = EGUIRenderState { renderer };
@@ -249,6 +268,7 @@ impl<'a> RendererImpl<'a> for Renderer<'a>
             // Common shader pipelines
             pathtracer,
             pathtracer_layout: pathtracer_bind_group_layout,
+            show_texture,
 
             // Profiling
             timer_query_set,
@@ -267,86 +287,65 @@ impl<'a> RendererImpl<'a> for Renderer<'a>
         configure_surface(&mut self.surface, &self.device, self.swapchain_format, width, height);
     }
 
-    fn create_texture(&mut self, width: u32, height: u32)->Texture
+    fn create_texture(&mut self, width: u32, height: u32)->wgpu::Texture
     {
         let format = wgpu::TextureFormat::Rgba8Unorm;
-
         let view_formats: Vec<wgpu::TextureFormat> = vec![format];
-        let texture_desc = TextureDesc
+        let wgpu_desc = wgpu::TextureDescriptor
         {
             label: None,
             dimension: wgpu::TextureDimension::D2,
             format: format,
             mip_level_count: 1,
             sample_count: 1,
-            size: wgpu::Extent3d { width: width, height: height, depth_or_array_layers: 1 },
+            size:  wgpu::Extent3d { width: width, height: height, depth_or_array_layers: 1 },
             usage: wgpu::TextureUsages::TEXTURE_BINDING |
                    wgpu::TextureUsages::STORAGE_BINDING |
                    wgpu::TextureUsages::RENDER_ATTACHMENT,
+            view_formats: &[format]
         };
 
-        let wgpu_desc = wgpu::TextureDescriptor
-        {
-            label: texture_desc.label.as_deref(),
-            dimension: texture_desc.dimension,
-            format: texture_desc.format,
-            mip_level_count: texture_desc.mip_level_count,
-            sample_count: texture_desc.sample_count,
-            size:  texture_desc.size,
-            usage: texture_desc.usage,
-            view_formats: &[texture_desc.format]
-        };
+        return self.device.create_texture(&wgpu_desc);
+    }
 
-        let texture = self.device.create_texture(&wgpu_desc);
-
-        let view = texture.create_view(&wgpu::TextureViewDescriptor
-        {
-            format: Some(format),
-            ..Default::default()
-        });
-
-        return Texture { desc: texture_desc, handle: texture, view };
+    fn get_texture_size(texture: &Texture)->(i32, i32)
+    {
+        return (texture.width() as i32, texture.height() as i32);
     }
 
     fn resize_texture(&mut self, texture: &mut Texture, width: i32, height: i32)
     {
-        texture.desc.size.width  = width.max(1) as u32;
-        texture.desc.size.height = height.max(1) as u32;
-        texture.handle.destroy();
+        let width = width.max(0) as u32;
+        let height = height.max(0) as u32;
 
-        let texture_desc = &texture.desc;
         let wgpu_desc = wgpu::TextureDescriptor
         {
-            label: texture_desc.label.as_deref(),
-            dimension: texture_desc.dimension,
-            format: texture_desc.format,
-            mip_level_count: texture_desc.mip_level_count,
-            sample_count: texture_desc.sample_count,
-            size:  texture_desc.size,
-            usage: texture_desc.usage,
-            view_formats: &[texture_desc.format]
+            label: None,
+            dimension: texture.dimension(),
+            format: texture.format(),
+            mip_level_count: texture.mip_level_count(),
+            sample_count: texture.sample_count(),
+            size:  wgpu::Extent3d { width: width, height: height, depth_or_array_layers: 1 },
+            usage: texture.usage(),
+            view_formats: &[texture.format()]
         };
 
-        texture.handle = self.device.create_texture(&wgpu_desc);
-
-        texture.view = texture.handle.create_view(&wgpu::TextureViewDescriptor
-        {
-            format: Some(texture.desc.format),
-            ..Default::default()
-        });
+        *texture = self.device.create_texture(&wgpu_desc);
     }
 
     fn texture_to_egui_texture(&mut self, texture: &Texture, filter_near: bool)->egui::TextureId
     {
         let filter_mode = if filter_near { wgpu::FilterMode::Nearest } else { wgpu::FilterMode::Linear };
-        return self.egui_render_state.renderer.register_native_texture(&self.device, &texture.view, filter_mode);
+        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+        return self.egui_render_state.renderer.register_native_texture(&self.device, &view, filter_mode);
     }
 
     fn update_egui_texture(&mut self, texture: &Texture, texture_id: egui::TextureId, filter_near: bool)
     {
         let filter_mode = if filter_near { wgpu::FilterMode::Nearest } else { wgpu::FilterMode::Linear };
         let egui_renderer = &mut self.egui_render_state.renderer;
-        egui_renderer.update_egui_texture_from_wgpu_texture(&self.device, &texture.view, filter_mode, texture_id)
+        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+        egui_renderer.update_egui_texture_from_wgpu_texture(&self.device, &view, filter_mode, texture_id)
     }
 
     fn draw_scene(&mut self, scene: &Scene, render_to: &Texture, camera_transform: Mat4)
@@ -356,7 +355,7 @@ impl<'a> RendererImpl<'a> for Renderer<'a>
         let surface = &self.surface;
         let device  = &self.device;
         let queue   = &self.queue;
-        let (width, height) = (render_to.desc.size.width, render_to.desc.size.height);
+        let (width, height) = (render_to.width(), render_to.height());
 
         let encoder_desc = CommandEncoderDescriptor
         {
@@ -366,6 +365,7 @@ impl<'a> RendererImpl<'a> for Renderer<'a>
 
         // Compute pass to generate image
         {
+            let view = render_to.create_view(&wgpu::TextureViewDescriptor::default());
 
             let bind_group = device.create_bind_group(&BindGroupDescriptor
             {
@@ -373,7 +373,7 @@ impl<'a> RendererImpl<'a> for Renderer<'a>
                 layout: &self.pathtracer_layout,
                 entries:
                 &[
-                    BindGroupEntry { binding: 0, resource: BindingResource::TextureView(&render_to.view) },
+                    BindGroupEntry { binding: 0, resource: BindingResource::TextureView(&view) },
                     BindGroupEntry { binding: 1, resource: buffer_resource(&scene.verts_pos) },
                     BindGroupEntry { binding: 2, resource: buffer_resource(&scene.indices) },
                     BindGroupEntry { binding: 3, resource: buffer_resource(&scene.bvh_nodes) },
@@ -390,14 +390,58 @@ impl<'a> RendererImpl<'a> for Renderer<'a>
 
             compute_pass.set_pipeline(&self.pathtracer);
             compute_pass.set_bind_group(0, &bind_group, &[]);
-            const WORKGROUP_SIZE_X: u32 = 16;
-            const WORKGROUP_SIZE_Y: u32 = 16;
+            const WORKGROUP_SIZE_X: u32 = 8;
+            const WORKGROUP_SIZE_Y: u32 = 8;
             let num_workers_x = (width + WORKGROUP_SIZE_X - 1) / WORKGROUP_SIZE_X;
             let num_workers_y = (height + WORKGROUP_SIZE_Y - 1) / WORKGROUP_SIZE_Y;
             compute_pass.dispatch_workgroups(num_workers_x, num_workers_y, 1);
         }
 
         self.queue.submit(Some(encoder.finish()));
+    }
+
+    fn show_texture(&mut self, texture: &Texture)
+    {
+        use wgpu::*;        
+        let surface = &self.surface;
+        let device  = &self.device;
+        let queue   = &self.queue;
+
+        if self.next_frame.is_none() { return; }
+        let next_frame = self.next_frame.as_ref().unwrap();
+        let frame_view = next_frame.texture.create_view(&TextureViewDescriptor::default());
+
+        let encoder_desc = CommandEncoderDescriptor
+        {
+            label: None,
+        };
+        let mut encoder = device.create_command_encoder(&encoder_desc);
+
+        {
+            let mut render_pass = encoder.begin_render_pass(&RenderPassDescriptor
+            {
+                label: None,
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment
+                {
+                    view: &frame_view,
+                    resolve_target: None,
+                    ops: wgpu::Operations
+                    {
+                        load: LoadOp::Clear(Color::BLACK),
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None
+            });
+            
+            render_pass.set_pipeline(&self.show_texture);
+            render_pass.draw(0..6, 0..1);
+        }
+
+        let command_buffer = encoder.finish();
+        self.queue.submit(Some(command_buffer));
     }
 
     fn draw_egui(&mut self,
@@ -589,7 +633,7 @@ impl<'a> RendererImpl<'a> for Renderer<'a>
         }
 
         @fragment
-        fn fs_main(@builtin )->@location(0) vec4f
+        fn fs_main()->@location(0) vec4f
         {
           return vec4(1.0, 0.0, 0.0, 1.0);
         }
@@ -720,19 +764,6 @@ impl<'a> RendererImpl<'a> for Renderer<'a>
     }
 } 
 
-impl TextureImpl for Texture
-{
-    fn get_size(&self)->(u32, u32)
-    {
-        return (self.desc.size.width, self.desc.size.height);
-    }
-}
-
-pub fn get_texture_size(texture: &Texture)->(u32, u32)
-{
-    return (texture.desc.size.width, texture.desc.size.height);
-}
-
 ////////
 // WGPU specific utils
 fn buffer_resource(buffer: &wgpu::Buffer)->wgpu::BindingResource
@@ -783,8 +814,9 @@ fn configure_surface(surface: &mut wgpu::Surface,
         view_formats: vec![format],
     };
 
-    // TODO: This panics if the surface config isn't supported.
-    // How to select one that is closest to this one or default back to something else?
+    // TODO: This should be better. We should check if this was successful
+    // and if not, revert to the default configuration for the surface
+    // (surface.get_default_config)
     surface.configure(&device, &surface_config);
 }
 

@@ -165,14 +165,25 @@ struct HitInfo
     normal: vec3f,
     tex_coords: vec2f
 }
-fn ray_scene_intersection(ray: Ray)->HitInfo
+
+const MAX_BVH_DEPTH: u32 = 25;
+const STACK_SIZE: u32 = (MAX_BVH_DEPTH + 1) * 8 * 8;
+// NOTE: First value in the stack is fictitious and
+// can be used to write any value.
+//var stack: array<u32, 26>;
+var<workgroup> stack: array<u32, STACK_SIZE>;
+
+fn ray_scene_intersection(local_id: vec3u, ray: Ray)->HitInfo
 {
-    // NOTE: First value in the stack is fictitious and
-    // can be used to write any value.
-    var stack: array<u32, 40>;  // Max BVH depth is 40
+    // Comment/Uncomment to test the performance of shared memory
+    // vs local array (registers or global memory)
+    //let offset: u32 = 0u;
+    let offset = (local_id.y * 8 + local_id.x) * (MAX_BVH_DEPTH + 1);
+
+    //var stack: array<u32, 26>;
     var stack_idx: u32 = 2;
-    stack[0] = 0u;
-    stack[1] = 0u;
+    stack[0 + offset] = 0u;
+    stack[1 + offset] = 0u;
 
     var num_boxes_hit: i32 = 0;
 
@@ -182,7 +193,7 @@ fn ray_scene_intersection(ray: Ray)->HitInfo
     while stack_idx > 1
     {
         stack_idx--;
-        let node = bvh_nodes[stack[stack_idx]];
+        let node = bvh_nodes[stack[stack_idx + offset]];
 
         if node.tri_count > 0u  // Leaf node
         {
@@ -225,13 +236,13 @@ fn ray_scene_intersection(ray: Ray)->HitInfo
             {
                 if push_right
                 {
-                    stack[stack_idx] = right_child;
+                    stack[stack_idx + offset] = right_child;
                     stack_idx++;
                 }
                 
                 if push_left
                 {
-                    stack[stack_idx] = left_child;
+                    stack[stack_idx + offset] = left_child;
                     stack_idx++;
                 }
             }
@@ -239,13 +250,13 @@ fn ray_scene_intersection(ray: Ray)->HitInfo
             {
                 if push_left
                 {
-                    stack[stack_idx] = left_child;
+                    stack[stack_idx + offset] = left_child;
                     stack_idx++;
                 }
 
                 if push_right
                 {
-                    stack[stack_idx] = right_child;
+                    stack[stack_idx + offset] = right_child;
                     stack_idx++;
                 }
             }
@@ -270,8 +281,8 @@ fn ray_scene_intersection(ray: Ray)->HitInfo
 }
 
 @compute
-@workgroup_size(16, 16, 1)
-fn cs_main(@builtin(global_invocation_id) global_id: vec3<u32>)
+@workgroup_size(8, 8, 1)
+fn cs_main(@builtin(local_invocation_id) local_id: vec3u, @builtin(global_invocation_id) global_id: vec3<u32>)
 {
     var frag_coord = vec2f(global_id.xy) + 0.5f;
     var output_dim = textureDimensions(output_texture).xy;
@@ -288,7 +299,7 @@ fn cs_main(@builtin(global_invocation_id) global_id: vec3<u32>)
     camera_ray.dir = transform_dir(camera_ray.dir, camera_transform);
     camera_ray.inv_dir = 1.0f / camera_ray.dir;
 
-    var hit = ray_scene_intersection(camera_ray);
+    var hit = ray_scene_intersection(local_id, camera_ray);
 
     var color = vec4f(select(vec3f(0.0f), hit.normal, hit.dst != f32_max), 1.0f);
 
