@@ -5,7 +5,6 @@
 use crate::renderer::*;
 
 use winit::window::Window;
-use egui_winit::State;
 use egui::ClippedPrimitive;
 use crate::loader::*;
 use crate::base::*;
@@ -14,7 +13,7 @@ use crate::renderer::*;
 
 use crate::input::*;
 
-pub struct Core
+pub struct State
 {
     // egui texture ids
     render_image_id: egui::TextureId,
@@ -35,9 +34,9 @@ pub struct Core
     initial_mouse_pos: Vec2,  // Mouse position before dragging
 }
 
-impl Core
+impl State
 {
-    pub fn new(renderer: &mut Renderer)->Core
+    pub fn new(renderer: &mut Renderer)->State
     {
         let render_image = renderer.create_texture(1, 1);
         let render_image_id = renderer.texture_to_egui_texture(&render_image, true);
@@ -58,7 +57,7 @@ impl Core
             scale: Vec3 { x: 1.0, y: 1.0, z: 1.0 }
         };
 
-        return Core
+        return State
         {
             render_image_id,
             render_image,
@@ -80,7 +79,7 @@ impl Core
     }
 
     pub fn main_update(&mut self, renderer: &mut Renderer, window: &Window,
-                       egui_ctx: &mut egui::Context, egui_state: &mut State, delta_time: f32, input_diff: &mut InputDiff)
+                       egui_ctx: &mut egui::Context, egui_state: &mut egui_winit::State, delta_time: f32, input_diff: &mut InputDiff)
     {
         // Poll input
         poll_input(&mut self.input, input_diff);
@@ -293,7 +292,16 @@ pub fn menu_bar(ctx: &egui::Context)
                 {
                     println!("Clicked open!");
                 }
-            })
+            });
+
+            ui.menu_button("Window", |ui|
+            {
+                #[cfg(debug_assertions)]
+                if ui.button("GPU Asserts").clicked()
+                {
+                    println!("Clicked debug!");
+                }
+            });
         })
     });
 }

@@ -1,6 +1,5 @@
 
-// There should be a wgsl custom preprocessor which implements:
-// #assert(expression), should write to a debug texture (only in debug)
+//#include "base.wgsl"
 
 // NOTE: Early returns are heavily discouraged here because it
 // will lead to thread divergence, and that in turn will cause
@@ -164,21 +163,23 @@ struct HitInfo
 {
     dst: f32,
     normal: vec3f,
-    tex_coords: vec2f,
-    num_boxes_hit: i32
+    tex_coords: vec2f
 }
 fn ray_scene_intersection(ray: Ray)->HitInfo
 {
+    // NOTE: First value in the stack is fictitious and
+    // can be used to write any value.
     var stack: array<u32, 40>;  // Max BVH depth is 40
-    var stack_idx: i32 = 1;
+    var stack_idx: u32 = 2;
     stack[0] = 0u;
+    stack[1] = 0u;
 
     var num_boxes_hit: i32 = 0;
 
     // t, u, v
     var min_hit = vec3f(f32_max, 0.0f, 0.0f);
     var tri_idx: u32 = 0;
-    while stack_idx > 0
+    while stack_idx > 1
     {
         stack_idx--;
         let node = bvh_nodes[stack[stack_idx]];
@@ -215,34 +216,35 @@ fn ray_scene_intersection(ray: Ray)->HitInfo
             // first. This order is chosen so that it's more
             // likely that the second child will never need
             // to be queried
-            if left_dst <= right_dst
+
+            let left_first: bool = left_dst <= right_dst;
+            let push_left:  bool = left_dst < min_hit.x;
+            let push_right: bool = right_dst < min_hit.x;
+
+            if left_first
             {
-                if right_dst < min_hit.x
+                if push_right
                 {
-                    num_boxes_hit += 1;
                     stack[stack_idx] = right_child;
                     stack_idx++;
                 }
                 
-                if left_dst < min_hit.x
+                if push_left
                 {
-                    num_boxes_hit += 1;
                     stack[stack_idx] = left_child;
                     stack_idx++;
                 }
             }
             else
             {
-                if left_dst < min_hit.x
+                if push_left
                 {
-                    num_boxes_hit += 1;
                     stack[stack_idx] = left_child;
                     stack_idx++;
                 }
 
-                if right_dst < min_hit.x
+                if push_right
                 {
-                    num_boxes_hit += 1;
                     stack[stack_idx] = right_child;
                     stack_idx++;
                 }
@@ -250,7 +252,7 @@ fn ray_scene_intersection(ray: Ray)->HitInfo
         }
     }
 
-    var hit_info: HitInfo = HitInfo(min_hit.x, vec3f(0.0f), vec2f(0.0f), num_boxes_hit);
+    var hit_info: HitInfo = HitInfo(min_hit.x, vec3f(0.0f), vec2f(0.0f));
     if hit_info.dst != f32_max
     {
         let vert0: Vertex = verts[indices[tri_idx*3 + 0]];
@@ -268,11 +270,8 @@ fn ray_scene_intersection(ray: Ray)->HitInfo
 }
 
 @compute
-//#compute_workgroup_1d
-//#compute_workgroup_2d
-//#compute_workgroup_3d
 @workgroup_size(16, 16, 1)
-fn main(@builtin(global_invocation_id) global_id: vec3<u32>)
+fn cs_main(@builtin(global_invocation_id) global_id: vec3<u32>)
 {
     var frag_coord = vec2f(global_id.xy) + 0.5f;
     var output_dim = textureDimensions(output_texture).xy;
@@ -291,7 +290,6 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>)
 
     var hit = ray_scene_intersection(camera_ray);
 
-    //var color = vec4f(select(vec3f(0.0f), vec3f(f32(hit.num_boxes_hit) / 1000.0), hit.dst != f32_max), 1.0f);
     var color = vec4f(select(vec3f(0.0f), hit.normal, hit.dst != f32_max), 1.0f);
 
     if global_id.x < output_dim.x && global_id.y < output_dim.y

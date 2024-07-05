@@ -11,6 +11,8 @@ use egui::{ClippedPrimitive, TexturesDelta};
 
 use crate::renderer::*;
 
+include!("renderer_wgpu/shaders.rs");
+
 pub struct Renderer<'a>
 {
     instance: wgpu::Instance,
@@ -114,12 +116,14 @@ impl<'a> RendererImpl<'a> for Renderer<'a>
 
         configure_surface(&mut surface, &device, swapchain_format, init_width, init_height);
 
-        // Compile all shader variations
-        let pathtracer_module = compile_shader(&device, ShaderModuleDescriptor
-        {
-            label: Some("PathtracerShader"),
-            source: ShaderSource::Wgsl(include_str!("renderer_wgpu/shaders/pathtracer.wgsl").into()),
-        });
+        // Compile shaders
+        let mut preprocessor_params = PreprocessorParams::default();
+        preprocessor_params.all_shader_names = &SHADER_NAMES;
+        preprocessor_params.all_shader_contents = &SHADER_CONTENTS;
+        let pathtracer_module = compile_shader(&device,
+                                               Some("PathtracerShader"),
+                                               "pathtracer.wgsl",
+                                               preprocessor_params);
 
         // Create shader pipeline
         let pathtracer_bind_group_layout = device.create_bind_group_layout(&BindGroupLayoutDescriptor {
@@ -213,7 +217,7 @@ impl<'a> RendererImpl<'a> for Renderer<'a>
             label: Some("PathtracerPipeline"),
             layout: Some(&pathtracer_layout),
             module: &pathtracer_module,
-            entry_point: "main"
+            entry_point: "cs_main"
         });
 
         // Init egui info
@@ -247,7 +251,7 @@ impl<'a> RendererImpl<'a> for Renderer<'a>
             pathtracer_layout: pathtracer_bind_group_layout,
 
             // Profiling
-            timer_query_set
+            timer_query_set,
         };
     }
 
@@ -573,7 +577,7 @@ impl<'a> RendererImpl<'a> for Renderer<'a>
 
         let shader_source = "
         @vertex
-        fn vert_main(@builtin(vertex_index) VertexIndex : u32)->@builtin(position) vec4f {
+        fn vs_main(@builtin(vertex_index) VertexIndex : u32)->@builtin(position) vec4f {
           var pos = array<vec2f, 3>
           (
             vec2(-1.0, 1),
@@ -585,13 +589,13 @@ impl<'a> RendererImpl<'a> for Renderer<'a>
         }
 
         @fragment
-        fn frag_main(@builtin )->@location(0) vec4f
+        fn fs_main(@builtin )->@location(0) vec4f
         {
           return vec4(1.0, 0.0, 0.0, 1.0);
         }
         ";
 
-        let module = compile_shader(&device, ShaderModuleDescriptor
+        let module = device.create_shader_module(ShaderModuleDescriptor
         {
             label: None,
             source: ShaderSource::Wgsl(shader_source.into())
@@ -604,13 +608,13 @@ impl<'a> RendererImpl<'a> for Renderer<'a>
             vertex: VertexState
             {
                 module: &module,
-                entry_point: "vert_main",
+                entry_point: "vs_main",
                 buffers: &[]
             },
             fragment: Some(FragmentState
             {
                 module: &module,
-                entry_point: "frag_main",
+                entry_point: "fs_main",
                 targets: &[Some(ColorTargetState
                 {
                     format: self.swapchain_format,
@@ -784,12 +788,54 @@ fn configure_surface(surface: &mut wgpu::Surface,
     surface.configure(&device, &surface_config);
 }
 
-// Omits runtime checks on shaders on release builds
-fn compile_shader(device: &wgpu::Device, desc: wgpu::ShaderModuleDescriptor)->wgpu::ShaderModule
+fn compile_shader(device: &wgpu::Device,
+                  label: Option<&str>,
+                  shader_name: &str,
+                  preprocessor_params: PreprocessorParams)->wgpu::ShaderModule
 {
-    #[cfg(debug_assertions)]
-    return device.create_shader_module(desc);
+    use wgpu::*;
 
+    let default_shader = "@compute @workgroup_size(1, 1, 1) fn cs_main() {}
+                          @vertex fn vs_main()->@builtin(position) vec4f { return vec4f(0.0f); }
+                          @fragment fn fs_main() {}";
+
+    let (preprocessed_src, src_map) = preprocess_shader(shader_name, default_shader, preprocessor_params);
+
+    let desc = ShaderModuleDescriptor
+    {
+        label: label,
+        source: ShaderSource::Wgsl(preprocessed_src.into()),
+    };
+
+    // Catch compilation errors
+    device.push_error_scope(ErrorFilter::Validation);
+
+    // Omit runtime checks on shaders on release builds
+    #[cfg(debug_assertions)]
+    let module = device.create_shader_module(desc);
     #[cfg(not(debug_assertions))]
-    return unsafe { device.create_shader_module_unchecked(desc) };
+    let module = unsafe { device.create_shader_module_unchecked(desc) };
+
+    let error_future = device.pop_error_scope();
+    // Shaders are compiled on the CPU synchronously so we're not really waiting for anything
+    let error = wait_for(error_future);
+
+    if error.is_some()
+    {
+        let error = error.unwrap();
+        
+        // TODO: Translate shader error
+        println!("Shader Compilation Error: {}", error);
+
+        // Compile a default shader instead
+        let module = device.create_shader_module(ShaderModuleDescriptor
+        {
+            label: Some("DefaultShader"),
+            source: ShaderSource::Wgsl(default_shader.into())
+        });
+
+        return module;
+    }
+
+    return module;
 }

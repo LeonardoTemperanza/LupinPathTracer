@@ -1,28 +1,31 @@
 
-pub struct ShaderInfo
-{
-    pub name: &'static str,
-    pub content: &'static str
-}
-
 #[derive(Default, Clone, Copy)]
 pub struct PreprocessorParams
 {
     // These are needed for "#include"
-    all_shaders: &'static [ShaderInfo],
+    pub all_shader_names: &'static [&'static str],
+    pub all_shader_contents: &'static [&'static str],
 
     // Pertaining to compute shaders only
     // (these can be ignored otherwise)
 
-    desired_workgroup_size_x: u32,
-    desired_workgroup_size_y: u32,
-    desired_workgroup_size_z: u32,
+    pub desired_workgroup_size_x: u32,
+    pub desired_workgroup_size_y: u32,
+    pub desired_workgroup_size_z: u32,
 
     // Device dependent limits
-    max_workgroup_size_x: u32,
-    max_workgroup_size_y: u32,
-    max_workgroup_size_z: u32,
-    max_workgroup_invocations: u32
+    pub max_workgroup_size_x: u32,
+    pub max_workgroup_size_y: u32,
+    pub max_workgroup_size_z: u32,
+    pub max_workgroup_invocations: u32
+}
+
+impl PreprocessorParams
+{
+    pub fn set_compute_limits(&self, device: &wgpu::Device)
+    {
+
+    }
 }
 
 pub struct SourceTransformation
@@ -53,26 +56,29 @@ pub struct SourceMap
     transforms: Vec<SourceTransformation>
 }
 
-struct Tokenizer
+pub struct Tokenizer
 {
     line_num: i32,
     file: &'static str,
     at: usize
 }
 
-pub fn preprocess_shader(shader_name: &str, params: PreprocessorParams)->(String, SourceMap)
+pub fn preprocess_shader(shader_name: &str, default_shader: &str, params: PreprocessorParams)->(String, SourceMap)
 {
+    assert!(params.all_shader_names.len() == params.all_shader_contents.len());
+
     let mut res = String::default();
-    let mut source_map = SourceMap { transforms: vec![] };
+    let source_map = SourceMap { transforms: vec![] };
 
     // Find the shader name in the list of shaders
     let mut shader_content: &str = "";
     let mut found = false;
-    for i in 0..params.all_shaders.len()
+    let num_shaders = params.all_shader_names.len();
+    for i in 0..num_shaders
     {
-        if shader_name == params.all_shaders[i].name
+        if shader_name.eq(params.all_shader_names[i])
         {
-            shader_content = params.all_shaders[i].content;
+            shader_content = params.all_shader_contents[i];
             found = true;
             break;
         }
@@ -80,10 +86,11 @@ pub fn preprocess_shader(shader_name: &str, params: PreprocessorParams)->(String
 
     if !found
     {
-        eprintln!("Shader '{}' not found!", shader_name);
-        return (res, source_map);
+        eprintln!("Preprocessor error: shader '{}' not found!", shader_name);
+        return (default_shader.to_string(), source_map);
     }
 
+    /*
     let mut tokenizer = Tokenizer { line_num: 0, file: shader_content, at: 0 };
     while tokenizer.at < shader_content.len()
     {
@@ -114,7 +121,9 @@ pub fn preprocess_shader(shader_name: &str, params: PreprocessorParams)->(String
             tokenizer.at += 1;
         }
     }
+    */
 
+    res = String::from(shader_content);
     return (res, source_map);
 }
 

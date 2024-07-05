@@ -21,7 +21,7 @@ pub use base::*;
 mod renderer;
 pub use renderer::*;
 
-mod core;
+mod editor;
 
 mod loader;
 pub use loader::*;
@@ -49,7 +49,7 @@ fn main()
 
     let mut egui_state = egui_winit::State::new(egui_ctx.clone(), viewport_id, &window, None, None);
 
-    let mut core = core::Core::new(&mut renderer);
+    let mut core = editor::State::new(&mut renderer);
 
     window.set_visible(true);
 
