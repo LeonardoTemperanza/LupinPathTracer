@@ -26,9 +26,12 @@ fn main()
 
     let mut renderer = Renderer::new(&window, initial_win_size.width as i32, initial_win_size.height as i32);
 
+    let (res_x, res_y) = (1920, 1080);
+
     println!("BVH Traversal Benchmark");
     println!("The BVH currently has maximum depth equal to {}.", BVH_MAX_DEPTH);
-    const NUM_TESTS: i32 = 400;
+    println!("The model is being rendered at a resolution of {}x{}, with vsync turned off.", res_x, res_y);
+    const NUM_TESTS: u32 = 400;
     println!("Performing {} measurements...", NUM_TESTS);
 
     // Load model
@@ -43,7 +46,9 @@ fn main()
 
     window.set_visible(true);
 
-    let texture = renderer.create_texture(1920, 1080);
+    let texture = renderer.create_texture(res_x, res_y);
+    let mut gpu_timer = renderer.create_gpu_timer(NUM_TESTS + 1);
+    let mut times: [f32; NUM_TESTS as usize] = [0.0; NUM_TESTS as usize];
 
     let mut i = 0;
 
@@ -55,6 +60,7 @@ fn main()
             {
                 WindowEvent::Resized(new_size) =>
                 {
+                    renderer.resize(new_size.width as i32, new_size.height as i32);
                     window.request_redraw();
                 },
                 WindowEvent::CloseRequested =>
@@ -71,16 +77,29 @@ fn main()
                     cam_transform.pos = rotate_vec3_with_quat(cam_transform.rot, Vec3::BACKWARD);
                     cam_transform.pos.y = 0.35;
 
+                    renderer.add_timestamp(&mut gpu_timer);
                     renderer.begin_frame();
                     renderer.draw_scene(&scene, &texture, transform_to_matrix(cam_transform));
                     renderer.show_texture(&texture);
                     renderer.end_frame();
 
                     i += 1;
-                    if i >= NUM_TESTS { target.exit(); }
+                    if i >= NUM_TESTS  // Terminate the application
+                    {
+                        renderer.add_timestamp(&mut gpu_timer);
+                        renderer.get_gpu_times(&mut gpu_timer, &mut times);
 
-                    // Continuously request drawing messages to let the main loop continue
-                    window.request_redraw();
+                        for i in 0..NUM_TESTS as usize
+                        {
+                            println!("{}", times[i]);
+                        }
+
+                        target.exit();
+                    }
+                    else  // Continue the loop
+                    {
+                        window.request_redraw();
+                    }
                 },
                 _ => {},
             }

@@ -43,6 +43,7 @@ fn main()
 
     let mut renderer = Renderer::new(&window, initial_win_size.width as i32, initial_win_size.height as i32);
     renderer.log_backend();
+    renderer.set_vsync(true);
 
     let mut egui_ctx = egui::Context::default();
     let viewport_id = egui_ctx.viewport_id();

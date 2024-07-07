@@ -30,7 +30,8 @@ fn fs_main(@location(0) tex_coords: vec2f)->@location(0) vec4f
     var texture_size: vec2u = textureDimensions(to_show).xy;
     let aspect_ratio: f32 = f32(texture_size.y) / f32(texture_size.x);
     let texture_scale = vec2f(1.0f / aspect_ratio, 1.0f);
-    let texture_coord = texture_scale * (tex_coords - 0.5f) + 0.5f;
+    //let texture_coord = texture_scale * (tex_coords - 0.5f) + 0.5f;
+    let texture_coord = tex_coords;
 
     if (texture_coord.x < 0.0 || texture_coord.x > 1.0 ||
         texture_coord.y < 0.0 || texture_coord.y > 1.0)

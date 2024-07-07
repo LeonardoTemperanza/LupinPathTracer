@@ -65,13 +65,6 @@ pub trait RendererImpl<'a>
     fn new(window: &'a Window, init_width: i32, init_height: i32)->Self;
     fn resize(&mut self, width: i32, height: i32);
 
-    // Utils
-    fn create_texture(&mut self, width: u32, height: u32)->Texture;
-    fn get_texture_size(texture: &Texture)->(i32, i32);
-    fn resize_texture(&mut self, texture: &mut Texture, width: i32, height: i32);
-    fn texture_to_egui_texture(&mut self, texture: &Texture, filter_near: bool)->egui::TextureId;
-    fn update_egui_texture(&mut self, texture: &Texture, texture_id: egui::TextureId, filter_near: bool);
-
     // Rendering
     fn draw_scene(&mut self, scene: &Scene, render_to: &Texture, camera_transform: Mat4);
     fn draw_egui(&mut self,
@@ -90,20 +83,32 @@ pub trait RendererImpl<'a>
     // cause latency so it should be used very sparingly if at all
     fn read_buffer(&mut self, buffer: Buffer, output: &mut[u8]);
 
+    // Textures
+    fn create_texture(&mut self, width: u32, height: u32)->Texture;
+    fn get_texture_size(texture: &Texture)->(i32, i32);
+    fn resize_texture(&mut self, texture: &mut Texture, width: i32, height: i32);
+    fn texture_to_egui_texture(&mut self, texture: &Texture, filter_near: bool)->egui::TextureId;
+    fn update_egui_texture(&mut self, texture: &Texture, texture_id: egui::TextureId, filter_near: bool);
+
+    // GPU Timer
+    fn create_gpu_timer(&mut self, num_timestamps: u32)->GPUTimer;
+    fn add_timestamp(&mut self, timer: &mut GPUTimer);
+    // Returns an array of values, each of which represents the time
+    // spent between two timestamps added, in milliseconds. This will
+    // make the CPU wait for all the calls to be finished on the GPU side,
+    // so it should be used sparingly, perhaps at the end of a benchmark
+    // or for profiling
+    fn get_gpu_times(&mut self, timer: &GPUTimer, times: &mut [f32]);
+
     // Miscellaneous
-    fn draw_test_triangle(&self);
-    fn gpu_timer_begin(&self);
-    // Returns GPU time spent between the begin and end calls,
-    // in milliseconds. This will make the CPU wait for
-    // all the calls to be finished on the GPU side, so it can only
-    // really be used for very simple profiling, and definitely not
-    // in release builds
-    fn gpu_timer_end(&mut self)->f32;
+    fn set_vsync(&mut self, flag: bool);  // Off by default
     fn log_backend(&self);  // Logs the currently used renderer. In the case of WGPU, logs the used backend
 }
 
+// TODO: Add cfg flag for wgpu
 //#[cfg()]
 pub type Texture  = wgpu::Texture;
 pub type TextureView = wgpu::TextureView;
 pub type Renderer<'a> = renderer_wgpu::Renderer<'a>;
 pub type Buffer   = wgpu::Buffer;
+pub type GPUTimer = renderer_wgpu::GPUTimer;

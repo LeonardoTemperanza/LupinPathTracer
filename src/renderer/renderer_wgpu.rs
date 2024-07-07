@@ -21,6 +21,9 @@ pub struct Renderer<'a>
     device:   wgpu::Device,
     queue:    wgpu::Queue,
     swapchain_format: wgpu::TextureFormat,
+    present_mode: wgpu::PresentMode,
+    width: i32,
+    height: i32,
 
     next_frame: Option<wgpu::SurfaceTexture>,
 
@@ -28,17 +31,20 @@ pub struct Renderer<'a>
     egui_render_state: EGUIRenderState,
 
     // Common shader pipelines
-    //pathtrace_pipelines: [wgpu::ComputePipeline; PathtraceMode::Count as usize],
     pathtracer: wgpu::ComputePipeline,
-    show_texture: wgpu::RenderPipeline,
-
-    // Profiling
-    timer_query_set: wgpu::QuerySet
+    show_texture: wgpu::RenderPipeline
 }
 
 pub struct EGUIRenderState
 {
     renderer: egui_wgpu::Renderer,
+}
+
+pub struct GPUTimer
+{
+    query_set: wgpu::QuerySet,
+    num_added_timestamps: u32,
+    max_timestamps: u32
 }
 
 impl<'a> RendererImpl<'a> for Renderer<'a>
@@ -96,7 +102,8 @@ impl<'a> RendererImpl<'a> for Renderer<'a>
         let swapchain_capabilities = surface.get_capabilities(&adapter);
         let swapchain_format = swapchain_capabilities.formats[0];
 
-        configure_surface(&mut surface, &device, swapchain_format, init_width, init_height);
+        let default_present_mode = PresentMode::Immediate;
+        configure_surface(&mut surface, &device, swapchain_format, default_present_mode, init_width, init_height);
 
         // Compile shaders
         let mut preprocessor_params = PreprocessorParams::default();
@@ -277,14 +284,6 @@ impl<'a> RendererImpl<'a> for Renderer<'a>
         let renderer = egui_wgpu::Renderer::new(&device, swapchain_format, None, 1);
         let egui_render_state = EGUIRenderState { renderer };
 
-        // Profiling
-        let timer_query_set = device.create_query_set(&wgpu::QuerySetDescriptor
-        {
-            label: Some("TimerQuerySet"),
-            ty: wgpu::QueryType::Timestamp,
-            count: 2,  // Two queries are used, one for start time and one for end time
-        });
-
         return Renderer
         {
             instance,
@@ -293,6 +292,9 @@ impl<'a> RendererImpl<'a> for Renderer<'a>
             device,
             queue,
             swapchain_format,
+            present_mode: default_present_mode,
+            width: init_width,
+            height: init_height,
 
             next_frame: None,
 
@@ -302,14 +304,14 @@ impl<'a> RendererImpl<'a> for Renderer<'a>
             // Common shader pipelines
             pathtracer,
             show_texture,
-
-            // Profiling
-            timer_query_set,
         };
     }
 
     fn resize(&mut self, width: i32, height: i32)
     {
+        self.width = width;
+        self.height = height;
+
         use wgpu::*;
         if self.next_frame.is_some()
         {
@@ -317,74 +319,13 @@ impl<'a> RendererImpl<'a> for Renderer<'a>
             drop(next_frame);
         }
 
-        configure_surface(&mut self.surface, &self.device, self.swapchain_format, width, height);
+        configure_surface(&mut self.surface, &self.device, self.swapchain_format, self.present_mode, width, height);
     }
-
-    fn create_texture(&mut self, width: u32, height: u32)->wgpu::Texture
-    {
-        let format = wgpu::TextureFormat::Rgba8Unorm;
-        let view_formats: Vec<wgpu::TextureFormat> = vec![format];
-        let wgpu_desc = wgpu::TextureDescriptor
-        {
-            label: None,
-            dimension: wgpu::TextureDimension::D2,
-            format: format,
-            mip_level_count: 1,
-            sample_count: 1,
-            size:  wgpu::Extent3d { width: width, height: height, depth_or_array_layers: 1 },
-            usage: wgpu::TextureUsages::TEXTURE_BINDING |
-                   wgpu::TextureUsages::STORAGE_BINDING |
-                   wgpu::TextureUsages::RENDER_ATTACHMENT,
-            view_formats: &[format]
-        };
-
-        return self.device.create_texture(&wgpu_desc);
-    }
-
-    fn get_texture_size(texture: &Texture)->(i32, i32)
-    {
-        return (texture.width() as i32, texture.height() as i32);
-    }
-
-    fn resize_texture(&mut self, texture: &mut Texture, width: i32, height: i32)
-    {
-        let width = width.max(0) as u32;
-        let height = height.max(0) as u32;
-
-        let wgpu_desc = wgpu::TextureDescriptor
-        {
-            label: None,
-            dimension: texture.dimension(),
-            format: texture.format(),
-            mip_level_count: texture.mip_level_count(),
-            sample_count: texture.sample_count(),
-            size:  wgpu::Extent3d { width: width, height: height, depth_or_array_layers: 1 },
-            usage: texture.usage(),
-            view_formats: &[texture.format()]
-        };
-
-        *texture = self.device.create_texture(&wgpu_desc);
-    }
-
-    fn texture_to_egui_texture(&mut self, texture: &Texture, filter_near: bool)->egui::TextureId
-    {
-        let filter_mode = if filter_near { wgpu::FilterMode::Nearest } else { wgpu::FilterMode::Linear };
-        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
-        return self.egui_render_state.renderer.register_native_texture(&self.device, &view, filter_mode);
-    }
-
-    fn update_egui_texture(&mut self, texture: &Texture, texture_id: egui::TextureId, filter_near: bool)
-    {
-        let filter_mode = if filter_near { wgpu::FilterMode::Nearest } else { wgpu::FilterMode::Linear };
-        let egui_renderer = &mut self.egui_render_state.renderer;
-        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
-        egui_renderer.update_egui_texture_from_wgpu_texture(&self.device, &view, filter_mode, texture_id)
-    }
-
+    
     fn draw_scene(&mut self, scene: &Scene, render_to: &Texture, camera_transform: Mat4)
     {
         use wgpu::*;
-        let camera_transform_buffer = self.upload_uniform(to_u8_slice(&[camera_transform]));
+        let camera_transform_uniform = self.upload_uniform(to_u8_slice(&[camera_transform]));
         let surface = &self.surface;
         let device  = &self.device;
         let queue   = &self.queue;
@@ -411,7 +352,7 @@ impl<'a> RendererImpl<'a> for Renderer<'a>
                     BindGroupEntry { binding: 2, resource: buffer_resource(&scene.indices) },
                     BindGroupEntry { binding: 3, resource: buffer_resource(&scene.bvh_nodes) },
                     BindGroupEntry { binding: 4, resource: buffer_resource(&scene.verts) },
-                    BindGroupEntry { binding: 5, resource: buffer_resource(&camera_transform_buffer) }
+                    BindGroupEntry { binding: 5, resource: buffer_resource(&camera_transform_uniform) }
                 ],
             });
 
@@ -650,150 +591,144 @@ impl<'a> RendererImpl<'a> for Renderer<'a>
         output[..].clone_from_slice(&data);
     }
 
-    fn draw_test_triangle(&self)
+    fn create_texture(&mut self, width: u32, height: u32)->wgpu::Texture
     {
-        use wgpu::*;        
-        let surface = &self.surface;
-        let device  = &self.device;
-        let queue   = &self.queue;
-
-        if self.next_frame.is_none() { return; }
-        let next_frame = self.next_frame.as_ref().unwrap();
-        let frame_view = next_frame.texture.create_view(&TextureViewDescriptor::default());
-
-        let encoder_desc = CommandEncoderDescriptor
+        let format = wgpu::TextureFormat::Rgba8Unorm;
+        let view_formats: Vec<wgpu::TextureFormat> = vec![format];
+        let wgpu_desc = wgpu::TextureDescriptor
         {
             label: None,
+            dimension: wgpu::TextureDimension::D2,
+            format: format,
+            mip_level_count: 1,
+            sample_count: 1,
+            size:  wgpu::Extent3d { width: width, height: height, depth_or_array_layers: 1 },
+            usage: wgpu::TextureUsages::TEXTURE_BINDING |
+                   wgpu::TextureUsages::STORAGE_BINDING |
+                   wgpu::TextureUsages::RENDER_ATTACHMENT,
+            view_formats: &[format]
         };
-        let mut encoder = device.create_command_encoder(&encoder_desc);
 
-        let shader_source = "
-        @vertex
-        fn vs_main(@builtin(vertex_index) VertexIndex : u32)->@builtin(position) vec4f {
-          var pos = array<vec2f, 3>
-          (
-            vec2(-1.0, 1),
-            vec2(-1.0, 0.0),
-            vec2(0.0, 1.0)
-          );
+        return self.device.create_texture(&wgpu_desc);
+    }
 
-          return vec4f(pos[VertexIndex], 0.0, 1.0);
-        }
+    fn get_texture_size(texture: &Texture)->(i32, i32)
+    {
+        return (texture.width() as i32, texture.height() as i32);
+    }
 
-        @fragment
-        fn fs_main()->@location(0) vec4f
-        {
-          return vec4(1.0, 0.0, 0.0, 1.0);
-        }
-        ";
+    fn resize_texture(&mut self, texture: &mut Texture, width: i32, height: i32)
+    {
+        let width = width.max(0) as u32;
+        let height = height.max(0) as u32;
 
-        let module = device.create_shader_module(ShaderModuleDescriptor
+        let wgpu_desc = wgpu::TextureDescriptor
         {
             label: None,
-            source: ShaderSource::Wgsl(shader_source.into())
+            dimension: texture.dimension(),
+            format: texture.format(),
+            mip_level_count: texture.mip_level_count(),
+            sample_count: texture.sample_count(),
+            size:  wgpu::Extent3d { width: width, height: height, depth_or_array_layers: 1 },
+            usage: texture.usage(),
+            view_formats: &[texture.format()]
+        };
+
+        *texture = self.device.create_texture(&wgpu_desc);
+    }
+
+    fn texture_to_egui_texture(&mut self, texture: &Texture, filter_near: bool)->egui::TextureId
+    {
+        let filter_mode = if filter_near { wgpu::FilterMode::Nearest } else { wgpu::FilterMode::Linear };
+        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+        return self.egui_render_state.renderer.register_native_texture(&self.device, &view, filter_mode);
+    }
+
+    fn update_egui_texture(&mut self, texture: &Texture, texture_id: egui::TextureId, filter_near: bool)
+    {
+        let filter_mode = if filter_near { wgpu::FilterMode::Nearest } else { wgpu::FilterMode::Linear };
+        let egui_renderer = &mut self.egui_render_state.renderer;
+        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+        egui_renderer.update_egui_texture_from_wgpu_texture(&self.device, &view, filter_mode, texture_id)
+    }
+
+    fn create_gpu_timer(&mut self, num_timestamps: u32)->GPUTimer
+    {
+        let query_set = self.device.create_query_set(&wgpu::QuerySetDescriptor
+        {
+            label: Some("TimerQuerySet"),
+            ty: wgpu::QueryType::Timestamp,
+            count: num_timestamps,
         });
 
-        let pipeline = device.create_render_pipeline(&RenderPipelineDescriptor
-        {
-            label: None,
-            layout: None,
-            vertex: VertexState
-            {
-                module: &module,
-                entry_point: "vs_main",
-                buffers: &[]
-            },
-            fragment: Some(FragmentState
-            {
-                module: &module,
-                entry_point: "fs_main",
-                targets: &[Some(ColorTargetState
-                {
-                    format: self.swapchain_format,
-                    blend: Some(BlendState::REPLACE),
-                    write_mask: ColorWrites::ALL,
-                })],
-            }),
-            depth_stencil: None,
-            multisample: MultisampleState::default(),
-            multiview: None,
-            primitive: PrimitiveState
-            {
-                topology: PrimitiveTopology::TriangleList,
-                ..Default::default()
-            }
-        });
+        return GPUTimer { query_set, num_added_timestamps: 0, max_timestamps: num_timestamps }
+    }
 
-        {
-            let mut render_pass = encoder.begin_render_pass(&RenderPassDescriptor
-            {
-                label: None,
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment
-                {
-                    view: &frame_view,
-                    resolve_target: None,
-                    ops: wgpu::Operations
-                    {
-                        load: LoadOp::Clear(Color::BLACK),
-                        store: wgpu::StoreOp::Store,
-                    },
-                })],
-                depth_stencil_attachment: None,
-                timestamp_writes: None,
-                occlusion_query_set: None
-            });
-            
-            render_pass.set_pipeline(&pipeline);
-            render_pass.draw(0..3, 0..1);
-        }
+    fn add_timestamp(&mut self, timer: &mut GPUTimer)
+    {
+        assert!(timer.num_added_timestamps < timer.max_timestamps);
+
+        let encoder_desc = wgpu::CommandEncoderDescriptor { label: Some("TimerEncoder") };
+        let mut encoder = self.device.create_command_encoder(&encoder_desc);
+        encoder.write_timestamp(&timer.query_set, timer.num_added_timestamps);
 
         let command_buffer = encoder.finish();
         self.queue.submit(Some(command_buffer));
+
+        timer.num_added_timestamps += 1;
     }
 
-    fn gpu_timer_begin(&self)
+    fn get_gpu_times(&mut self, timer: &GPUTimer, times: &mut [f32])
     {
-        let encoder_desc = wgpu::CommandEncoderDescriptor { label: Some("TimerEncoder") };
-        let mut encoder = self.device.create_command_encoder(&encoder_desc);
-        encoder.write_timestamp(&self.timer_query_set, 0);
-        
-        let command_buffer = encoder.finish();
-        self.queue.submit(Some(command_buffer));
-    }
-
-    fn gpu_timer_end(&mut self)->f32
-    {
-        let encoder_desc = wgpu::CommandEncoderDescriptor { label: Some("TimerEncoder") };
-        let mut encoder = self.device.create_command_encoder(&encoder_desc);
-        encoder.write_timestamp(&self.timer_query_set, 1);
+        assert!(times.len() == timer.max_timestamps as usize - 1);
 
         // Create a buffer to resolve query results
         let query_buffer = self.device.create_buffer(&wgpu::BufferDescriptor
         {
             label: Some("TimerQueryBuffer"),
-            size: 16,
+            size: 8 * timer.max_timestamps as u64,
             usage: wgpu::BufferUsages::QUERY_RESOLVE | wgpu::BufferUsages::COPY_SRC |
                    wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::STORAGE,
             mapped_at_creation: false,
         });
 
+        let encoder_desc = wgpu::CommandEncoderDescriptor { label: Some("TimerEncoder") };
+        let mut encoder = self.device.create_command_encoder(&encoder_desc);
+
         // Resolve the query set to the buffer
-        encoder.resolve_query_set(&self.timer_query_set, 0..2, &query_buffer, 0);
+        encoder.resolve_query_set(&timer.query_set, 0..timer.max_timestamps as u32, &query_buffer, 0);
         let command_buffer = encoder.finish();
         self.queue.submit(Some(command_buffer));
 
         // Read the result back on the CPU
-        let mut read_data = Vec::<u8>::new();
-        read_data.resize(query_buffer.size() as usize, 0);
+        let mut read_data: Vec<u8> = vec![0; query_buffer.size() as usize];
         self.read_buffer(query_buffer, &mut read_data);
 
         let timestamps: &[u64] = to_u64_slice(&read_data);
 
-        // This elapsed time is in nanoseconds
-        let elapsed_time = timestamps[1] - timestamps[0];
+        for i in 0..(timer.max_timestamps - 1) as usize
+        {
+            // This elapsed time is in nanoseconds
+            let elapsed = timestamps[i+1] - timestamps[i];
+            // Convert to milliseconds
+            times[i] = elapsed as f32 / 1_000_000.0;
+        }
+    }
 
-        // Convert to milliseconds
-        return elapsed_time as f32 / 1_000_000.0;
+    fn set_vsync(&mut self, flag: bool)
+    {
+        use wgpu::*;
+
+        if flag
+        {
+            self.present_mode = PresentMode::Fifo;
+        }
+        else
+        {
+            self.present_mode = PresentMode::Immediate;
+        }
+
+        configure_surface(&mut self.surface, &self.device, self.swapchain_format, self.present_mode, self.width, self.height);
     }
 
     fn log_backend(&self)
@@ -843,6 +778,7 @@ fn try_get_next_frame(surface: &wgpu::Surface)->Option<wgpu::SurfaceTexture>
 fn configure_surface(surface: &mut wgpu::Surface,
                      device: &wgpu::Device,
                      format: wgpu::TextureFormat,
+                     present_mode: wgpu::PresentMode,
                      width: i32, height: i32)
 {
     use wgpu::*;
@@ -856,7 +792,7 @@ fn configure_surface(surface: &mut wgpu::Surface,
         format: format,
         width: des_width,
         height: des_height,
-        present_mode: PresentMode::Fifo,
+        present_mode: present_mode,
         desired_maximum_frame_latency: 0,
         alpha_mode: CompositeAlphaMode::Auto,
         view_formats: vec![format],
