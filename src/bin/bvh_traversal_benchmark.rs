@@ -26,12 +26,15 @@ fn main()
 
     let mut renderer = Renderer::new(&window, initial_win_size.width as i32, initial_win_size.height as i32);
 
-    let (res_x, res_y) = (1920, 1080);
+    const RES_X: u32 = 1920;
+    const RES_Y: u32 = 1080;
+    const NUM_TESTS: u32 = 400;
+    const NUM_REPEATS: u32 = 3;
 
     println!("BVH Traversal Benchmark");
     println!("The BVH currently has maximum depth equal to {}.", BVH_MAX_DEPTH);
-    println!("The model is being rendered at a resolution of {}x{}, with vsync turned off.", res_x, res_y);
-    const NUM_TESTS: u32 = 400;
+    println!("The model is being rendered at a resolution of {}x{}, with vsync turned off.", RES_X, RES_Y);
+    println!("Each frame will be repeated {} times.", NUM_REPEATS);
     println!("Performing {} measurements...", NUM_TESTS);
 
     // Load model
@@ -46,7 +49,7 @@ fn main()
 
     window.set_visible(true);
 
-    let texture = renderer.create_texture(res_x, res_y);
+    let texture = renderer.create_texture(RES_X, RES_Y);
     let mut gpu_timer = renderer.create_gpu_timer(NUM_TESTS + 1);
     let mut times: [f32; NUM_TESTS as usize] = [0.0; NUM_TESTS as usize];
 
@@ -79,7 +82,10 @@ fn main()
 
                     renderer.add_timestamp(&mut gpu_timer);
                     renderer.begin_frame();
-                    renderer.draw_scene(&scene, &texture, transform_to_matrix(cam_transform));
+                    for i in 0..NUM_REPEATS
+                    {
+                        renderer.draw_scene(&scene, &texture, transform_to_matrix(cam_transform));
+                    }
                     renderer.show_texture(&texture);
                     renderer.end_frame();
 
@@ -91,7 +97,8 @@ fn main()
 
                         for i in 0..NUM_TESTS as usize
                         {
-                            println!("{}", times[i]);
+                            let time = times[i] / NUM_REPEATS as f32;
+                            println!("{}", time);
                         }
 
                         target.exit();

@@ -238,6 +238,18 @@ impl<'a> RendererImpl<'a> for Renderer<'a>
                     visibility: ShaderStages::VERTEX | ShaderStages::FRAGMENT,
                     ty: BindingType::Sampler(SamplerBindingType::Filtering),
                     count: None
+                },
+                BindGroupLayoutEntry
+                {
+                    binding: 2,
+                    visibility: ShaderStages::VERTEX | ShaderStages::FRAGMENT,
+                    ty: BindingType::Buffer
+                    {
+                        ty: BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None
                 }
             ]
         });
@@ -377,6 +389,8 @@ impl<'a> RendererImpl<'a> for Renderer<'a>
     fn show_texture(&mut self, texture: &Texture)
     {
         use wgpu::*;        
+        
+        let res_uniform = self.upload_uniform(to_u8_slice(&[self.width, self.height]));
         let surface = &self.surface;
         let device  = &self.device;
         let queue   = &self.queue;
@@ -403,6 +417,7 @@ impl<'a> RendererImpl<'a> for Renderer<'a>
                 &[
                     BindGroupEntry { binding: 0, resource: BindingResource::TextureView(&texture_view) },
                     BindGroupEntry { binding: 1, resource: BindingResource::Sampler(&sampler) },
+                    BindGroupEntry { binding: 2, resource: buffer_resource(&res_uniform) },
                 ],
             });
 
