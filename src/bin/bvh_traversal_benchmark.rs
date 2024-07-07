@@ -43,7 +43,7 @@ fn main()
 
     window.set_visible(true);
 
-    let texture = renderer.create_texture(1290, 1080);
+    let texture = renderer.create_texture(1920, 1080);
 
     let mut i = 0;
 
@@ -63,11 +63,13 @@ fn main()
                 },
                 WindowEvent::RedrawRequested =>
                 {
-                    let angle_x = 360.0 / NUM_TESTS as f32 * DEG_TO_RAD as f32;
+                    let angle_diff = 360.0 / NUM_TESTS as f32 * DEG_TO_RAD as f32;
+                    let angle_x = angle_diff * i as f32;
 
                     let mut cam_transform = Transform::default();
                     cam_transform.rot = angle_axis(Vec3::UP, angle_x);
                     cam_transform.pos = rotate_vec3_with_quat(cam_transform.rot, Vec3::BACKWARD);
+                    cam_transform.pos.y = 0.35;
 
                     renderer.begin_frame();
                     renderer.draw_scene(&scene, &texture, transform_to_matrix(cam_transform));

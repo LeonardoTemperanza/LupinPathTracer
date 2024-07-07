@@ -30,7 +30,6 @@ pub struct Renderer<'a>
     // Common shader pipelines
     //pathtrace_pipelines: [wgpu::ComputePipeline; PathtraceMode::Count as usize],
     pathtracer: wgpu::ComputePipeline,
-    pathtracer_layout: wgpu::BindGroupLayout,
     show_texture: wgpu::RenderPipeline,
 
     // Profiling
@@ -114,7 +113,8 @@ impl<'a> RendererImpl<'a> for Renderer<'a>
                                                  preprocessor_params);
 
         // Create shader pipeline
-        let pathtracer_bind_group_layout = device.create_bind_group_layout(&BindGroupLayoutDescriptor {
+        let pathtracer_bind_group_layout = device.create_bind_group_layout(&BindGroupLayoutDescriptor
+        {
             label: None,
             entries:
             &[
@@ -208,10 +208,44 @@ impl<'a> RendererImpl<'a> for Renderer<'a>
             entry_point: "cs_main"
         });
 
-        let show_texture = device.create_render_pipeline(&RenderPipelineDescriptor
+        let show_texture_bind_group_layout = device.create_bind_group_layout(&BindGroupLayoutDescriptor
         {
             label: None,
-            layout: None,
+            entries:
+            &[
+                BindGroupLayoutEntry
+                {
+                    binding: 0,
+                    visibility: ShaderStages::VERTEX | ShaderStages::FRAGMENT,
+                    ty: BindingType::Texture
+                    {
+                        sample_type: TextureSampleType::Float { filterable: true },
+                        multisampled: false,
+                        view_dimension: TextureViewDimension::D2
+                    },
+                    count: None
+                },
+                BindGroupLayoutEntry
+                {
+                    binding: 1,
+                    visibility: ShaderStages::VERTEX | ShaderStages::FRAGMENT,
+                    ty: BindingType::Sampler(SamplerBindingType::Filtering),
+                    count: None
+                }
+            ]
+        });
+
+        let show_texture_layout = device.create_pipeline_layout(&PipelineLayoutDescriptor
+        {
+            label: None,
+            bind_group_layouts: &[&show_texture_bind_group_layout],
+            push_constant_ranges: &[]
+        });
+
+        let show_texture = device.create_render_pipeline(&RenderPipelineDescriptor
+        {
+            label: Some("ShowTexturePipeline"),
+            layout: Some(&show_texture_layout),
             vertex: VertexState
             {
                 module: &show_texture_module,
@@ -267,7 +301,6 @@ impl<'a> RendererImpl<'a> for Renderer<'a>
 
             // Common shader pipelines
             pathtracer,
-            pathtracer_layout: pathtracer_bind_group_layout,
             show_texture,
 
             // Profiling
@@ -370,7 +403,7 @@ impl<'a> RendererImpl<'a> for Renderer<'a>
             let bind_group = device.create_bind_group(&BindGroupDescriptor
             {
                 label: None,
-                layout: &self.pathtracer_layout,
+                layout: &self.pathtracer.get_bind_group_layout(0),
                 entries:
                 &[
                     BindGroupEntry { binding: 0, resource: BindingResource::TextureView(&view) },
@@ -418,6 +451,20 @@ impl<'a> RendererImpl<'a> for Renderer<'a>
         let mut encoder = device.create_command_encoder(&encoder_desc);
 
         {
+            let texture_view = texture.create_view(&Default::default());
+            let sampler = device.create_sampler(&Default::default());
+
+            let bind_group = device.create_bind_group(&BindGroupDescriptor
+            {
+                label: Some("Bind group"),
+                layout: &self.show_texture.get_bind_group_layout(0),
+                entries:
+                &[
+                    BindGroupEntry { binding: 0, resource: BindingResource::TextureView(&texture_view) },
+                    BindGroupEntry { binding: 1, resource: BindingResource::Sampler(&sampler) },
+                ],
+            });
+
             let mut render_pass = encoder.begin_render_pass(&RenderPassDescriptor
             {
                 label: None,
@@ -437,6 +484,7 @@ impl<'a> RendererImpl<'a> for Renderer<'a>
             });
             
             render_pass.set_pipeline(&self.show_texture);
+            render_pass.set_bind_group(0, &bind_group, &[]);
             render_pass.draw(0..6, 0..1);
         }
 
