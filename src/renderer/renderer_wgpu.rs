@@ -93,7 +93,9 @@ impl<'a> RendererImpl<'a> for Renderer<'a>
         let device_desc = DeviceDescriptor
         {
             label: None,
-            required_features: Features::TIMESTAMP_QUERY,
+            required_features: Features::TIMESTAMP_QUERY |  // For profiling
+                               Features::TEXTURE_BINDING_ARRAY |  // For arrays of textures (pathtracer)
+                               Features::SAMPLED_TEXTURE_AND_STORAGE_BUFFER_ARRAY_NON_UNIFORM_INDEXING,  // (pathtracer)
             required_limits: Limits::default(),
         };
         let maybe_device_queue = wait_for(adapter.request_device(&device_desc, None));
@@ -407,7 +409,21 @@ impl<'a> RendererImpl<'a> for Renderer<'a>
 
         {
             let texture_view = texture.create_view(&Default::default());
-            let sampler = device.create_sampler(&Default::default());
+            let sampler = device.create_sampler(&SamplerDescriptor
+            {
+                label: None,
+                address_mode_u: AddressMode::ClampToEdge,
+                address_mode_v: AddressMode::ClampToEdge,
+                address_mode_w: AddressMode::ClampToEdge,
+                mag_filter: FilterMode::Linear,
+                min_filter: FilterMode::Linear,
+                mipmap_filter: FilterMode::Linear,
+                lod_min_clamp: 0.0,
+                lod_max_clamp: 0.0,
+                compare: None,
+                anisotropy_clamp: 1,
+                border_color: None
+            });
 
             let bind_group = device.create_bind_group(&BindGroupDescriptor
             {
@@ -451,7 +467,7 @@ impl<'a> RendererImpl<'a> for Renderer<'a>
     fn draw_egui(&mut self,
                      tris: Vec<ClippedPrimitive>,
                      textures_delta: &TexturesDelta,
-                     width: i32, height: i32, scale: f32)
+                     scale: f32)
     {
         let egui: &mut EGUIRenderState = &mut self.egui_render_state;
 
@@ -461,8 +477,8 @@ impl<'a> RendererImpl<'a> for Renderer<'a>
         let next_frame = self.next_frame.as_ref().unwrap();
         let frame_view = next_frame.texture.create_view(&TextureViewDescriptor::default());
 
-        let win_width = width.max(1) as u32;
-        let win_height = height.max(1) as u32;
+        let win_width = self.width.max(1) as u32;
+        let win_height = self.height.max(1) as u32;
 
         let encoder_desc = wgpu::CommandEncoderDescriptor { label: Some("EGUI Encoder") };
         let mut encoder = self.device.create_command_encoder(&encoder_desc);
@@ -483,6 +499,64 @@ impl<'a> RendererImpl<'a> for Renderer<'a>
             color_attachments: &[Some(wgpu::RenderPassColorAttachment
             {
                 view: &frame_view,
+                resolve_target: None,
+                ops: wgpu::Operations
+                {
+                    load: wgpu::LoadOp::Load,
+                    store: wgpu::StoreOp::Store,
+                },
+            })],
+            depth_stencil_attachment: None,
+            label: Some("EGUI Main Render Pass"),
+            timestamp_writes: None,
+            occlusion_query_set: None,
+        });
+
+        egui.renderer.render(&mut egui_pass, &tris, &screen_descriptor);
+        drop(egui_pass);
+
+        for x in &textures_delta.free
+        {
+            egui.renderer.free_texture(x)
+        }
+
+        self.queue.submit(Some(encoder.finish()));
+    }
+
+    fn draw_egui_to_texture(&mut self,
+                            tris: Vec<ClippedPrimitive>,
+                            textures_delta: &TexturesDelta,
+                            target: &Texture,
+                            scale: f32)
+    {
+        use wgpu::*;
+        assert!(target.format() == TextureFormat::Bgra8UnormSrgb);
+
+        let egui: &mut EGUIRenderState = &mut self.egui_render_state;
+
+        let view = target.create_view(&Default::default());
+        let win_width = target.width().max(1) as u32;
+        let win_height = target.height().max(1) as u32;
+
+        let encoder_desc = wgpu::CommandEncoderDescriptor { label: Some("EGUI Encoder") };
+        let mut encoder = self.device.create_command_encoder(&encoder_desc);
+        for (id, image_delta) in &textures_delta.set
+        {
+            egui.renderer.update_texture(&self.device, &self.queue, *id, &image_delta);
+        }
+
+        let screen_descriptor = egui_wgpu::ScreenDescriptor
+        {
+            size_in_pixels: [win_width, win_height],
+            pixels_per_point: scale
+        };
+        egui.renderer.update_buffers(&self.device, &self.queue, &mut encoder, &tris, &screen_descriptor);
+
+        let mut egui_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor
+        {
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment
+            {
+                view: &view,
                 resolve_target: None,
                 ops: wgpu::Operations
                 {
@@ -606,9 +680,36 @@ impl<'a> RendererImpl<'a> for Renderer<'a>
         output[..].clone_from_slice(&data);
     }
 
+    fn read_texture(&mut self, texture: Texture, output: &mut[u8])
+    {
+        
+    }
+
     fn create_texture(&mut self, width: u32, height: u32)->wgpu::Texture
     {
-        let format = wgpu::TextureFormat::Rgba8Unorm;
+        use wgpu::*;
+        let format = TextureFormat::Rgba8Unorm;
+        let view_formats: Vec<TextureFormat> = vec![format];
+        let wgpu_desc = TextureDescriptor
+        {
+            label: None,
+            dimension: TextureDimension::D2,
+            format: format,
+            mip_level_count: 1,
+            sample_count: 1,
+            size:  Extent3d { width: width, height: height, depth_or_array_layers: 1 },
+            usage: TextureUsages::TEXTURE_BINDING |
+                   TextureUsages::STORAGE_BINDING |
+                   TextureUsages::RENDER_ATTACHMENT,
+            view_formats: &[format]
+        };
+
+        return self.device.create_texture(&wgpu_desc);
+    }
+
+    fn create_egui_output_texture(&mut self, width: u32, height: u32)->wgpu::Texture
+    {
+        let format = wgpu::TextureFormat::Bgra8UnormSrgb;
         let view_formats: Vec<wgpu::TextureFormat> = vec![format];
         let wgpu_desc = wgpu::TextureDescriptor
         {
@@ -618,9 +719,7 @@ impl<'a> RendererImpl<'a> for Renderer<'a>
             mip_level_count: 1,
             sample_count: 1,
             size:  wgpu::Extent3d { width: width, height: height, depth_or_array_layers: 1 },
-            usage: wgpu::TextureUsages::TEXTURE_BINDING |
-                   wgpu::TextureUsages::STORAGE_BINDING |
-                   wgpu::TextureUsages::RENDER_ATTACHMENT,
+            usage: wgpu::TextureUsages::COPY_SRC | wgpu::TextureUsages::RENDER_ATTACHMENT,
             view_formats: &[format]
         };
 

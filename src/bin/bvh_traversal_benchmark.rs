@@ -18,9 +18,11 @@ fn main()
 {
     let event_loop = EventLoop::new().unwrap();
     let window = WindowBuilder::new().with_visible(false)
-                                     .with_inner_size(LogicalSize::new(1080.0, 720.0))
-                                     .build(&event_loop)
-                                     .unwrap();
+    .with_inner_size(LogicalSize::new(1280.0, 720.0))
+    .with_title("Ray Query Benchmark")
+    .with_resizable(false)
+    .build(&event_loop)
+    .unwrap();
 
     let initial_win_size = window.inner_size();
 
@@ -65,55 +67,111 @@ fn main()
                 {
                     renderer.resize(new_size.width as i32, new_size.height as i32);
                     window.request_redraw();
-                },
-                WindowEvent::CloseRequested =>
-                {
-                    target.exit();
-                },
-                WindowEvent::RedrawRequested =>
-                {
-                    let angle_diff = 360.0 / NUM_TESTS as f32 * DEG_TO_RAD as f32;
-                    let angle_x = angle_diff * i as f32;
-
-                    let mut cam_transform = Transform::default();
-                    cam_transform.rot = angle_axis(Vec3::UP, angle_x);
-                    cam_transform.pos = rotate_vec3_with_quat(cam_transform.rot, Vec3::BACKWARD);
-                    cam_transform.pos.y = 0.35;
-
-                    renderer.add_timestamp(&mut gpu_timer);
-                    renderer.begin_frame();
-                    for i in 0..NUM_REPEATS
+                    },
+                    WindowEvent::CloseRequested =>
                     {
-                        renderer.draw_scene(&scene, &texture, transform_to_matrix(cam_transform));
-                    }
-                    renderer.show_texture(&texture);
-                    renderer.end_frame();
+                        target.exit();
+                        },
+                        WindowEvent::RedrawRequested =>
+                        {
+                            let angle_diff = 360.0 / NUM_TESTS as f32 * DEG_TO_RAD as f32;
+                            let angle_x = angle_diff * i as f32;
 
-                    i += 1;
+                            let mut cam_transform = Transform::default();
+                            cam_transform.rot = angle_axis(Vec3::UP, angle_x);
+                            cam_transform.pos = rotate_vec3_with_quat(cam_transform.rot, Vec3::BACKWARD);
+                            cam_transform.pos.y = 0.35;
+
+                            renderer.add_timestamp(&mut gpu_timer);
+                            renderer.begin_frame();
+                            for i in 0..NUM_REPEATS
+                            {
+                                renderer.draw_scene(&scene, &texture, transform_to_matrix(cam_transform));
+                            }
+                            renderer.show_texture(&texture);
+                            renderer.end_frame();
+
+                            i += 1;
                     if i >= NUM_TESTS  // Terminate the application
                     {
                         renderer.add_timestamp(&mut gpu_timer);
                         renderer.get_gpu_times(&mut gpu_timer, &mut times);
 
-                        for i in 0..NUM_TESTS as usize
-                        {
-                            let time = times[i] / NUM_REPEATS as f32;
-                            println!("{}", time);
-                        }
-
+                        save_plot(&times, NUM_REPEATS);
                         target.exit();
                     }
                     else  // Continue the loop
                     {
                         window.request_redraw();
                     }
-                },
-                _ => {},
+                    },
+                    _ => {},
+                }
             }
-        }
-    }).unwrap();
+            }).unwrap();
+}
 
-    println!("");
-    println!("Average: {}", 0.0);
-    println!("Standard Deviation: {}", 0.0);
+use plotters::prelude::*;
+pub fn save_plot(times: &[f32], num_repeats: u32)
+{
+    // Prepare output file name
+    let output_path = generate_unique_filename("src/bin/benchmark_result", "png");
+
+    let root_area = BitMapBackend::new(&output_path, (1920, 1080)).into_drawing_area();
+    root_area.fill(&WHITE).unwrap();
+
+    let root_area = root_area.titled("Benchmark Results", ("sans-serif", 60)).unwrap();
+
+    let (upper, lower) = root_area.split_vertically(512);
+
+    let angles = (0.0f32..360.0).step(360.0 / times.len() as f32);
+
+    let mut cc = ChartBuilder::on(&upper)
+    .margin(5)
+    .set_all_label_area_size(50)
+    .build_cartesian_2d(0.0f32..360.0, 0.0f32..24.0f32).unwrap();
+    
+    cc.configure_mesh()
+    .x_labels(25)
+    .y_labels(20)
+    .disable_mesh()
+    .x_label_formatter(&|v| format!("{:.1}", v))
+    .y_label_formatter(&|v| format!("{:.1}", v))
+    .x_desc("Angle (degrees)")
+    .y_desc("Time (ms)")
+    .draw().unwrap();
+
+    let angles: Vec<f32> = (0..times.len())
+        .map(|i| i as f32 * 360.0 / times.len() as f32)
+        .collect();
+
+    let time_per_repeat: Vec<f32> = times.iter().map(|&t| t / num_repeats as f32).collect();
+    let data: Vec<(f32, f32)> = angles.iter().zip(time_per_repeat.iter()).map(|(&a, &t)| (a, t)).collect();
+
+    cc.draw_series(LineSeries::new(data, &BLACK));
+
+    cc.configure_series_labels().border_style(BLACK).draw().unwrap();
+
+    let drawing_areas = lower.split_evenly((1, 2));
+
+    root_area.present().expect("Unable to save benchmark result");
+    println!("Result has been saved to {}", output_path.display());
+}
+
+fn generate_unique_filename(base_name: &str, extension: &str)->std::path::PathBuf
+{
+    use std::path::PathBuf;
+
+    let mut counter = 0;
+    let mut filename = format!("{}.{}", base_name, extension);
+    let mut path = PathBuf::from(&filename);
+
+    while path.exists()
+    {
+        filename = format!("{}_{}.{}", base_name, counter, extension);
+        path = PathBuf::from(&filename);
+        counter += 1;
+    }
+
+    return path;
 }

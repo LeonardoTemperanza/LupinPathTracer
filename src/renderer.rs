@@ -70,7 +70,12 @@ pub trait RendererImpl<'a>
     fn draw_egui(&mut self,
                  tris: Vec<ClippedPrimitive>,
                  textures_delta: &TexturesDelta,
-                 width: i32, height: i32, scale: f32);
+                 scale: f32);
+    fn draw_egui_to_texture(&mut self,
+                            tris: Vec<ClippedPrimitive>,
+                            textures_delta: &TexturesDelta,
+                            target: &Texture,
+                            scale: f32);
     fn show_texture(&mut self, texture: &Texture);  // Renders texture to screen
     fn begin_frame(&mut self);
     fn end_frame(&mut self);
@@ -82,9 +87,11 @@ pub trait RendererImpl<'a>
     // Lets the user read a buffer from the GPU to the CPU. This will
     // cause latency so it should be used very sparingly if at all
     fn read_buffer(&mut self, buffer: Buffer, output: &mut[u8]);
+    fn read_texture(&mut self, texture: Texture, output: &mut[u8]);
 
     // Textures
     fn create_texture(&mut self, width: u32, height: u32)->Texture;
+    fn create_egui_output_texture(&mut self, width: u32, height: u32)->Texture;
     fn get_texture_size(texture: &Texture)->(i32, i32);
     fn resize_texture(&mut self, texture: &mut Texture, width: i32, height: i32);
     fn texture_to_egui_texture(&mut self, texture: &Texture, filter_near: bool)->egui::TextureId;
@@ -108,7 +115,6 @@ pub trait RendererImpl<'a>
 // TODO: Add cfg flag for wgpu
 //#[cfg()]
 pub type Texture  = wgpu::Texture;
-pub type TextureView = wgpu::TextureView;
 pub type Renderer<'a> = renderer_wgpu::Renderer<'a>;
 pub type Buffer   = wgpu::Buffer;
 pub type GPUTimer = renderer_wgpu::GPUTimer;

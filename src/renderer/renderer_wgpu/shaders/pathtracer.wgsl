@@ -177,10 +177,11 @@ fn ray_scene_intersection(local_id: vec3u, ray: Ray)->HitInfo
 {
     // Comment/Uncomment to test the performance of shared memory
     // vs local array (registers or global memory)
-    //let offset: u32 = 0u;
-    let offset = (local_id.y * 8 + local_id.x) * (MAX_BVH_DEPTH + 1);
+    // Shared memory is much, much faster.
+    let offset: u32 = 0u;
+    //let offset = (local_id.y * 8 + local_id.x) * (MAX_BVH_DEPTH + 1);
 
-    //var stack: array<u32, 26>;
+    var stack: array<u32, 26>;
     var stack_idx: u32 = 2;
     stack[0 + offset] = 0u;
     stack[1 + offset] = 0u;

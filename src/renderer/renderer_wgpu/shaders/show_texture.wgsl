@@ -29,22 +29,25 @@ fn vs_main(@builtin(vertex_index) vert_idx: u32)->VertexOutput
 fn fs_main(@location(0) tex_coords: vec2f)->@location(0) vec4f
 {
     var texture_size: vec2u = textureDimensions(to_show).xy;
-    let image_aspect_ratio: f32 = f32(texture_size.y) / f32(texture_size.x);
-    let screen_aspect_ratio: f32 = f32(res.y) / f32(res.x);
+    let image_aspect_ratio: f32 = f32(texture_size.x) / f32(texture_size.y);
+    let screen_aspect_ratio: f32 = f32(res.x) / f32(res.y);
 
     // Scale UVs so that it fits the screen while keeping
     // original aspect ratio.
-    var texture_scale = vec2f(1.0f);
-    if screen_aspect_ratio < 1.0f
+    var texture_scale  = vec2f(1.0f);
+    var texture_offset = vec2f(0.0f);
+    if screen_aspect_ratio > image_aspect_ratio
     {
-        texture_scale = vec2f(1.0f / screen_aspect_ratio, 1.0f);
+        // Vertical bars
+        texture_scale = vec2f(screen_aspect_ratio / image_aspect_ratio, 1.0f);
     }
     else
     {
-        texture_scale = vec2f(1.0f, screen_aspect_ratio);
+        // Horizontal bars
+        texture_scale = vec2f(1.0f, image_aspect_ratio / screen_aspect_ratio);
     }
     
-    let texture_coord = texture_scale * (tex_coords - 0.5f) + 0.5f;
+    let texture_coord = (tex_coords - 0.5f) * texture_scale + 0.5f;
 
     if (texture_coord.x < 0.0 || texture_coord.x > 1.0 ||
         texture_coord.y < 0.0 || texture_coord.y > 1.0)
