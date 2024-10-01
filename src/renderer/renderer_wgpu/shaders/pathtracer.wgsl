@@ -23,8 +23,6 @@
 // Like environment maps
 //@group(1) @binding(4) var atlas_hdr_3_channels: texture_2d<rgbf32, read>;
 
-// Should add a per_frame here that i can use to send camera transform
-
 const f32_max: f32 = 0x1.fffffep+127;
 
 // This doesn't include positions, as that
@@ -168,20 +166,17 @@ struct HitInfo
 
 const MAX_BVH_DEPTH: u32 = 25;
 const STACK_SIZE: u32 = (MAX_BVH_DEPTH + 1) * 8 * 8;
-// NOTE: First value in the stack is fictitious and
-// can be used to write any value.
-//var stack: array<u32, 26>;
 var<workgroup> stack: array<u32, STACK_SIZE>;
 
 fn ray_scene_intersection(local_id: vec3u, ray: Ray)->HitInfo
 {
     // Comment/Uncomment to test the performance of shared memory
     // vs local array (registers or global memory)
-    // Shared memory is much, much faster.
-    let offset: u32 = 0u;
-    //let offset = (local_id.y * 8 + local_id.x) * (MAX_BVH_DEPTH + 1);
+    // Shared memory is much, much faster (on a GTX 1070).
+    //let offset: u32 = 0u;
+    let offset = (local_id.y * 8 + local_id.x) * (MAX_BVH_DEPTH + 1);
 
-    var stack: array<u32, 26>;
+    //var stack: array<u32, 26>;
     var stack_idx: u32 = 2;
     stack[0 + offset] = 0u;
     stack[1 + offset] = 0u;
@@ -227,13 +222,13 @@ fn ray_scene_intersection(local_id: vec3u, ray: Ray)->HitInfo
             // The closest child should be looked at
             // first. This order is chosen so that it's more
             // likely that the second child will never need
-            // to be queried
+            // to be visited in depth.
 
-            let left_first: bool = left_dst <= right_dst;
+            let visit_left_first: bool = left_dst <= right_dst;
             let push_left:  bool = left_dst < min_hit.x;
             let push_right: bool = right_dst < min_hit.x;
 
-            if left_first
+            if visit_left_first
             {
                 if push_right
                 {

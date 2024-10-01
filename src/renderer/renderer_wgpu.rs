@@ -55,7 +55,7 @@ impl<'a> RendererImpl<'a> for Renderer<'a>
 
         let instance_desc = InstanceDescriptor
         {
-            // Windows considerations:
+            // Backend considerations on windows:
             // The Vulkan backend seems to be
             // the best when debugging with RenderDoc,
             // but its resizing behavior is the worst
@@ -947,6 +947,7 @@ fn compile_shader(device: &wgpu::Device,
     let module = unsafe { device.create_shader_module_unchecked(desc) };
 
     let error_future = device.pop_error_scope();
+
     // Shaders are compiled on the CPU synchronously so we're not really waiting for anything
     let error = wait_for(error_future);
 

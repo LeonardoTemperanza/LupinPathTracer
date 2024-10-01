@@ -18,11 +18,11 @@ fn main()
 {
     let event_loop = EventLoop::new().unwrap();
     let window = WindowBuilder::new().with_visible(false)
-    .with_inner_size(LogicalSize::new(1280.0, 720.0))
-    .with_title("Ray Query Benchmark")
-    .with_resizable(false)
-    .build(&event_loop)
-    .unwrap();
+                                     .with_inner_size(LogicalSize::new(1280.0, 720.0))
+                                     .with_title("Ray Query Benchmark")
+                                     .with_resizable(false)
+                                     .build(&event_loop)
+                                     .unwrap();
 
     let initial_win_size = window.inner_size();
 
@@ -96,6 +96,7 @@ fn main()
                     {
                         renderer.add_timestamp(&mut gpu_timer);
                         renderer.get_gpu_times(&mut gpu_timer, &mut times);
+                        
 
                         save_plot(&times, NUM_REPEATS);
                         target.exit();
