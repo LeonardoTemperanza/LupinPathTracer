@@ -17,8 +17,10 @@ use ::egui::FontDefinitions;
 
 pub use lupin::base::*;
 pub use lupin::renderer::*;
-pub use lupin::loader::*;
-pub use lupin::input::*;
+mod loader;
+pub use loader::*;
+mod input;
+pub use input::*;
 
 fn main()
 {

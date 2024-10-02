@@ -4,7 +4,6 @@
 // for quickly comparing state.
 
 use winit::event::*;
-use crate::base::*;
 
 #[repr(C)]
 pub enum GamepadButtonField

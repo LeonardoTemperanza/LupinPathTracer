@@ -1,9 +1,9 @@
 
-use crate::base::*;
-
 use tobj::*;
 use std::ptr::NonNull;
-use crate::renderer::*;
+
+use lupin::base::*;
+use lupin::renderer::*;
 
 #[derive(Default)]
 pub struct LoadingTimes
@@ -17,7 +17,7 @@ pub fn load_scene_custom_format(path: &str)
 
 }
 
-pub fn load_scene_obj(path: &str, renderer: &mut Renderer)->(Scene, LoadingTimes)
+pub fn load_scene_obj(path: &str, device: wgpu::Device)->(Scene, LoadingTimes)
 {
     let mut loading_times: LoadingTimes = Default::default();
 
@@ -29,6 +29,33 @@ pub fn load_scene_obj(path: &str, renderer: &mut Renderer)->(Scene, LoadingTimes
 
     assert!(scene.is_ok());
     let (mut models, materials) = scene.expect("Failed to load OBJ file");
+
+    fn make_empty_buffer(device: &wgpu::Device)->wgpu::Buffer
+    {
+        use wgpu::*;
+        let buffer = device.create_buffer(&BufferDescriptor
+        {
+            label: None,
+            size: 0,
+            usage: BufferUsages::COPY_DST | BufferUsages::STORAGE,
+            mapped_at_creation: false,
+        });
+        return buffer;
+    }
+
+    fn upload_buffer(device: &wgpu::Device, buffer: &[u8])->wgpu::Buffer
+    {
+        use wgpu::*;
+        let wgpu_buffer = device.create_buffer(&BufferDescriptor
+        {
+            label: None,
+            size: buffer.len() as u64,
+            usage: BufferUsages::COPY_DST | BufferUsages::STORAGE,
+            mapped_at_creation: false,
+        });
+
+        queue.write_buffer(&wgpu_buffer, 0, buffer);
+    }
 
     if models.len() > 0
     {
@@ -51,9 +78,9 @@ pub fn load_scene_obj(path: &str, renderer: &mut Renderer)->(Scene, LoadingTimes
         let time = timer_start.elapsed().as_micros() as f32 / 1_000.0;
         loading_times.bvh_build = time;
 
-        let bvh_buf = renderer.upload_buffer(to_u8_slice(&bvh));
-        let verts_pos_buf = renderer.upload_buffer(to_u8_slice(&verts_pos));
-        let indices_buf = renderer.upload_buffer(to_u8_slice(&mesh.indices));
+        let bvh_buf = upload_buffer(&device, to_u8_slice(&bvh));
+        let verts_pos_buf = upload_buffer(&device, to_u8_slice(&verts_pos));
+        let indices_buf = upload_buffer(&device, to_u8_slice(&mesh.indices));
 
         let mut verts: Vec<Vertex> = Vec::new();
         verts.reserve_exact(mesh.positions.len() / 3);
@@ -81,7 +108,7 @@ pub fn load_scene_obj(path: &str, renderer: &mut Renderer)->(Scene, LoadingTimes
             verts.push(vert);
         }
 
-        let verts_buf = renderer.upload_buffer(to_u8_slice(&verts));
+        let verts_buf = upload_buffer(&device, to_u8_slice(&verts));
 
         return (Scene
         {
@@ -94,10 +121,10 @@ pub fn load_scene_obj(path: &str, renderer: &mut Renderer)->(Scene, LoadingTimes
 
     return (Scene
     {
-        verts_pos: renderer.create_empty_buffer(),
-        indices: renderer.create_empty_buffer(),
-        bvh_nodes: renderer.create_empty_buffer(),
-        verts: renderer.create_empty_buffer()
+        verts_pos: make_empty_buffer(device),
+        indices: make_empty_buffer(device),
+        bvh_nodes: make_empty_buffer(device),
+        verts: make_empty_buffer(device)
     }, loading_times);
 }
 
