@@ -17,6 +17,8 @@ use ::egui::FontDefinitions;
 
 pub use lupin::base::*;
 pub use lupin::renderer::*;
+pub use lupin::wgpu_utils::*;
+
 mod loader;
 pub use loader::*;
 mod input;
@@ -32,72 +34,83 @@ fn main()
                                      .build(&event_loop)
                                      .unwrap();
 
-    let initial_win_size = window.inner_size();
-
-    let mut renderer = Renderer::new(&window, initial_win_size.width as i32, initial_win_size.height as i32);
-    renderer.log_backend();
-    renderer.set_vsync(true);
-
-    let mut egui_ctx = egui::Context::default();
-    let viewport_id = egui_ctx.viewport_id();
-
-    let mut egui_state = egui_winit::State::new(egui_ctx.clone(), viewport_id, &window, None, None);
-
-    let mut core = State::new(&mut renderer);
+    let win_size = window.inner_size();
+    let (width, height) = (win_size.width, win_size.height);
+    let (device, queue, surface, adapter) = init_wgpu_context(get_device_spec(), &window, width as i32, height as i32);
+    log_backend(&adapter);
 
     window.set_visible(true);
+    use std::thread;
+    use std::time;
+    std::thread::sleep(std::time::Duration::from_millis(1000));
 
-    let mut input_diff = InputDiff::default();
-
-    let min_delta_time: f32 = 1.0/20.0;  // Reasonable min value to prevent degeneracies when updating state
-    let mut delta_time: f32 = 1.0/60.0;
-    let mut time_begin = Instant::now();
-    event_loop.run(|event, target|
+    #[cfg(disable)]
     {
-        collect_inputs_winit(&mut input_diff, &event);
-        
-        if let Event::WindowEvent { window_id, event } = event
+        //let mut renderer = Renderer::new(&window, initial_win_size.width as i32, initial_win_size.height as i32);
+        //renderer.log_backend();
+        //renderer.set_vsync(true);
+
+        let mut egui_ctx = egui::Context::default();
+        let viewport_id = egui_ctx.viewport_id();
+
+        let mut egui_state = egui_winit::State::new(egui_ctx.clone(), viewport_id, &window, None, None);
+
+        let mut core = State::new(&mut renderer);
+
+        window.set_visible(true);
+
+        let mut input_diff = InputDiff::default();
+
+        let min_delta_time: f32 = 1.0/20.0;  // Reasonable min value to prevent degeneracies when updating state
+        let mut delta_time: f32 = 1.0/60.0;
+        let mut time_begin = Instant::now();
+        event_loop.run(|event, target|
         {
-            // Collect inputs
-            let _ = egui_state.on_window_event(&window, &event);
+            collect_inputs_winit(&mut input_diff, &event);
             
-            match event
+            if let Event::WindowEvent { window_id, event } = event
             {
-                WindowEvent::Resized(new_size) =>
+                // Collect inputs
+                let _ = egui_state.on_window_event(&window, &event);
+                
+                match event
                 {
-                    // NOTE: On vulkan and dx12 there are some artifacts when resizing
-                    // This is a wgpu problem, and it goes away completely when using
-                    // the opengl backend
-                    renderer.resize(new_size.width as i32, new_size.height as i32);
-                    window.request_redraw();
-                },
-                WindowEvent::CloseRequested =>
-                {
-                    target.exit();
-                },
-                WindowEvent::RedrawRequested =>
-                {
-                    delta_time = time_begin.elapsed().as_secs_f32();
-                    delta_time = delta_time.min(min_delta_time);
-                    time_begin = Instant::now();
+                    WindowEvent::Resized(new_size) =>
+                    {
+                        // NOTE: On vulkan and dx12 there are some artifacts when resizing
+                        // This is a wgpu problem, and it goes away completely when using
+                        // the opengl backend
+                        renderer.resize(new_size.width as i32, new_size.height as i32);
+                        window.request_redraw();
+                    },
+                    WindowEvent::CloseRequested =>
+                    {
+                        target.exit();
+                    },
+                    WindowEvent::RedrawRequested =>
+                    {
+                        delta_time = time_begin.elapsed().as_secs_f32();
+                        delta_time = delta_time.min(min_delta_time);
+                        time_begin = Instant::now();
 
-                    core.main_update(&mut renderer, &window, &mut egui_ctx, &mut egui_state, delta_time, &mut input_diff);
+                        core.main_update(&mut renderer, &window, &mut egui_ctx, &mut egui_state, delta_time, &mut input_diff);
 
-                    // Continuously request drawing messages to let the main loop continue
-                    window.request_redraw();
-                },
-                _ => {},
+                        // Continuously request drawing messages to let the main loop continue
+                        window.request_redraw();
+                    },
+                    _ => {},
+                }
             }
-        }
-    }).unwrap();
+        }).unwrap();
+    }
 }
-
 
 // Contains all application logic that isn't already separated
 // into different modules (such as serialization and rendering)
 
 use egui::ClippedPrimitive;
 
+#[cfg(disable)]
 pub struct State
 {
     // egui texture ids
@@ -119,6 +132,7 @@ pub struct State
     initial_mouse_pos: Vec2,  // Mouse position before dragging
 }
 
+#[cfg(disable)]
 impl State
 {
     pub fn new(renderer: &mut Renderer)->State
@@ -304,6 +318,7 @@ impl State
     }
 }
 
+#[cfg(disable)]
 pub fn camera_first_person_update(prev: Transform, delta_time: f32, input: InputState)->Transform
 {
     // Camera rotation
@@ -361,6 +376,7 @@ pub fn camera_first_person_update(prev: Transform, delta_time: f32, input: Input
     }
 }
 
+#[cfg(disable)]
 pub fn menu_bar(ctx: &egui::Context)
 {
     use egui::{menu, Button};
@@ -388,6 +404,7 @@ pub fn menu_bar(ctx: &egui::Context)
     });
 }
 
+#[cfg(disable)]
 pub fn resize_egui_image(renderer: &mut Renderer, texture: &mut Texture, texture_id: egui::TextureId,
                          width: i32, height: i32, filter_near: bool)
 {

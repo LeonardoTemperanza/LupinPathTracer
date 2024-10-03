@@ -622,7 +622,7 @@ pub fn append_to_path(p: std::path::PathBuf, s: &str)->std::path::PathBuf
 }
 
 // Useful for passing buffers to the GPU
-pub fn to_u8_slice<T>(slice: &[T])->&[u8]
+pub unsafe fn to_u8_slice<T>(slice: &[T])->&[u8]
 {
     let buf_size = slice.len() * std::mem::size_of::<T>();
     return unsafe
