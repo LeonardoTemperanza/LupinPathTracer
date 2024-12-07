@@ -7,13 +7,13 @@ edition = "2021"
 name  = "bvh_build_benchmark"
 test  = false
 bench = true
-path  = "src/"
+path  = "src/bvh_build_benchmark.rs"
 
 [[bin]]
 name  = "bvh_traversal_benchmark"
 test  = false
 bench = true
-path  = "src/"
+path  = "src/bvh_traversal_benchmark.rs"
 
 [dependencies]
 lupin = { path = "../lupin" }
