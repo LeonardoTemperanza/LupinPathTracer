@@ -5,7 +5,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-wgpu  = "0.19.4"
+wgpu  = "24.0.1"
 
 # Shader debugging dependencies
 winapi = { version = "0.3", features = ["winuser"], optional = true }

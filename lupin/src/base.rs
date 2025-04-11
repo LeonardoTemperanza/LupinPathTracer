@@ -439,7 +439,7 @@ pub fn inverse(q: Quat)->Quat
 {
     let length_sqr: f32 = q.x*q.x + q.y*q.y + q.z*q.z + q.w*q.w;
     if length_sqr == 0.0 { return q; }
-    
+
     let i: f32 = 1.0 / length_sqr;
     return Quat { w: q.w*i, x: q.x*-i, y: q.y*-i, z: q.z*-i };
 }
@@ -455,14 +455,14 @@ pub fn slerp(q1: Quat, q2: Quat, t: f32)->Quat
         if length_sqr2 == 0.0
         {
             return Quat::IDENTITY;
-        }        
+        }
         return q2;
     }
     else if length_sqr2 == 0.0
     {
         return q1;
     }
-    
+
     let mut cos_half_angle: f32 = q1.w * q2.w + dot_vec3(q1.xyz(), q2.xyz());
     if cos_half_angle >= 1.0 || cos_half_angle <= -1.0
     {
@@ -474,9 +474,9 @@ pub fn slerp(q1: Quat, q2: Quat, t: f32)->Quat
         q2 = Quat { w: -q2.w, x: -q2.x, y: -q2.y, z: -q2.w };
         cos_half_angle = -cos_half_angle;
     }
-    
-    let mut blend_a = 0.0;
-    let mut blend_b = 0.0;
+
+    let blend_a;
+    let blend_b;
     if cos_half_angle < 0.99
     {
         // Do proper slerp for big angles
@@ -492,7 +492,6 @@ pub fn slerp(q1: Quat, q2: Quat, t: f32)->Quat
         blend_a = 1.0 - t;
         blend_b = t;
     }
-    
 
     let result = Quat { w: blend_a*q1.w + blend_b*q2.w,
                         x: blend_a*q1.x + blend_b*q2.x,
@@ -500,7 +499,7 @@ pub fn slerp(q1: Quat, q2: Quat, t: f32)->Quat
                         z: blend_a*q1.z + blend_b*q2.z };
     let length_sqr: f32 = q1.x*q1.x + q1.y*q1.y + q1.z*q1.z + q1.w*q1.w;
     if length_sqr > 0.0 { return normalize_quat(result); }
-    
+
     return Quat::IDENTITY;
 }
 
@@ -518,7 +517,7 @@ pub fn lerp_quat(q1: Quat, q2: Quat, t: f32)->Quat
         q2.z = -q2.z;
         q2.w = -q2.w;
     }
-    
+
     // res = q1 + t(q2 - q1)  -->  res = q1 - t(q1 - q2)
     // The latter is slightly better on x64
     let mut res = Quat::IDENTITY;
@@ -535,14 +534,14 @@ pub fn angle_axis(axis: Vec3, angle: f32)->Quat
     {
         return Quat::IDENTITY;
     }
-    
+
     let mut axis = axis;
     let mut angle = angle;
 
     angle *= 0.5;
     axis = normalize_vec3(axis);
     axis *= angle.sin();
-    
+
     return Quat { w: angle.cos(), x: axis.x, y: axis.y, z: axis.z };
 }
 
@@ -556,7 +555,7 @@ pub fn rotate_torwards_quat(current: Quat, target: Quat, delta: f32)->Quat
 {
     let angle: f32 = angle_diff_quat(current, target);
     if angle == 0.0 { return target; }
-    
+
     let t: f32 = (delta / angle).min(1.0);
     return slerp(current, target, t);
 }
@@ -567,7 +566,7 @@ pub fn rotation_matrix(q: Quat)->Mat4
     let xx = q.x * x;   let yy = q.y * y;   let zz = q.z * z;
     let xy = q.x * y;   let xz = q.x * z;   let yz = q.y * z;
     let wx = q.w * x;   let wy = q.w * y;   let wz = q.w * z;
-    
+
     // Calculate 3x3 matrix from orthonormal basis
     let res = Mat4
     {
@@ -601,7 +600,7 @@ pub fn position_matrix(pos: Vec3)->Mat4
     res.m[3][3] = 1.0;
     res.m[3][0] = pos.x;
     res.m[3][1] = pos.y;
-    res.m[3][2] = pos.z;    
+    res.m[3][2] = pos.z;
     return res;
 }
 

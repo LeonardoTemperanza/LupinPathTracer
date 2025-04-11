@@ -3,8 +3,6 @@
 // One could also fetch the previous frame's inputs
 // for quickly comparing state.
 
-use winit::event::*;
-
 // TODO: Do we want to use other types for vectors etc.?
 use lupin::base::*;
 
@@ -83,11 +81,11 @@ pub struct GamepadState
 {
     pub active: bool,
     pub buttons: u32,
-    
+
     // Values are normalized from 0 to 1.
     pub left_trigger: f32,
     pub right_trigger: f32,
-    
+
     // Values are normalized from -1 to 1.
     pub left_stick_x: f32,
     pub left_stick_y: f32,
@@ -128,9 +126,8 @@ pub fn collect_inputs_winit(diff: &mut InputDiff, event: &winit::event::Event<()
 {
     use winit::event::*;
     use winit::keyboard::*;
-    use winit::platform::modifier_supplement::*;
 
-    if let Event::WindowEvent { window_id, event } = event
+    if let Event::WindowEvent { window_id: _, event } = event
     {
         match event
         {
@@ -217,13 +214,13 @@ pub fn collect_inputs_winit(diff: &mut InputDiff, event: &winit::event::Event<()
                             }
                         }
                         _ => (),
-                    }                
+                    }
                 }
             },
             _ => {}
         }
     }
-    else if let Event::DeviceEvent { device_id, event } = event
+    else if let Event::DeviceEvent { device_id: _, event } = event
     {
         match event
         {

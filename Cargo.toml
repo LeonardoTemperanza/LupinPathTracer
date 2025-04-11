@@ -1,4 +1,4 @@
-	
+
 [workspace]
 members = [
     "lupin",
@@ -6,3 +6,4 @@ members = [
     "lupin_benchmarks",
     "lupin_editor"
 ]
+resolver = "2"

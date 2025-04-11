@@ -335,7 +335,7 @@ impl<'a> RendererImpl<'a> for Renderer<'a>
 
         configure_surface(&mut self.surface, &self.device, self.swapchain_format, self.present_mode, width, height);
     }
-    
+
     fn draw_scene(&mut self, scene: &Scene, render_to: &Texture, camera_transform: Mat4)
     {
         use wgpu::*;
@@ -390,8 +390,8 @@ impl<'a> RendererImpl<'a> for Renderer<'a>
 
     fn show_texture(&mut self, texture: &Texture)
     {
-        use wgpu::*;        
-        
+        use wgpu::*;
+
         let res_uniform = self.upload_uniform(to_u8_slice(&[self.width, self.height]));
         let surface = &self.surface;
         let device  = &self.device;
@@ -454,7 +454,7 @@ impl<'a> RendererImpl<'a> for Renderer<'a>
                 timestamp_writes: None,
                 occlusion_query_set: None
             });
-            
+
             render_pass.set_pipeline(&self.show_texture);
             render_pass.set_bind_group(0, &bind_group, &[]);
             render_pass.draw(0..6, 0..1);
@@ -668,7 +668,7 @@ impl<'a> RendererImpl<'a> for Renderer<'a>
         let command_buffer = encoder.finish();
         self.queue.submit(Some(command_buffer));
 
-        // Wait for read 
+        // Wait for read
         let buffer_slice = gpu_read_buffer.slice(..);
         buffer_slice.map_async(wgpu::MapMode::Read, |result|
         {
@@ -682,7 +682,7 @@ impl<'a> RendererImpl<'a> for Renderer<'a>
 
     fn read_texture(&mut self, texture: Texture, output: &mut[u8])
     {
-        
+
     }
 
     fn create_texture(&mut self, width: u32, height: u32)->wgpu::Texture
@@ -859,7 +859,7 @@ impl<'a> RendererImpl<'a> for Renderer<'a>
             wgpu::Backend::BrowserWebGpu => { println!("WebGPU"); }
         }
     }
-} 
+}
 
 ////////
 // WGPU specific utils

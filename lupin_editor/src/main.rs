@@ -1,28 +1,26 @@
 
+#![allow(dead_code)]
+#![allow(unused_variables)]
+#![allow(unused_imports)]
+
 // Don't spawn a terminal window on windows
-#![windows_subsystem = "windows"]
+//#![windows_subsystem = "windows"]
 
-use std::time::Instant;
-
-use winit::
+pub use winit::
 {
-    dpi::LogicalSize,
-    event::{Event, WindowEvent, StartCause},
-    event_loop::{ControlFlow, EventLoop},
-    window::Window,
-    window::WindowBuilder,
+    window::*,
+    event::*,
+    dpi::*,
+    event_loop::*
 };
 
-use ::egui::FontDefinitions;
-
-pub use lupin::base::*;
-pub use lupin::renderer::*;
-pub use lupin::wgpu_utils::*;
-
 mod loader;
-pub use loader::*;
+use loader::*;
 mod input;
-pub use input::*;
+use input::*;
+use lupin as lp;
+
+use std::time::Instant;
 
 fn main()
 {
@@ -36,14 +34,56 @@ fn main()
 
     let win_size = window.inner_size();
     let (width, height) = (win_size.width, win_size.height);
-    let (device, queue, surface, adapter) = init_wgpu_context(get_device_spec(), &window, width as i32, height as i32);
+    let (device, queue, _surface, adapter) = lp::init_default_wgpu_context(lupin::get_device_spec(), &window, width as i32, height as i32);
     log_backend(&adapter);
 
-    window.set_visible(true);
-    use std::thread;
-    use std::time;
-    std::thread::sleep(std::time::Duration::from_millis(1000));
+    // Load model, get verts and indices and some other things
 
+    // Load model
+    //let (scene, _) = load_scene_obj(&device, queue, "dragon.obj");
+
+    let mut input_diff = InputDiff::default();
+
+    window.set_visible(true);
+    let min_delta_time: f32 = 1.0/10.0;
+    let mut delta_time: f32 = 1.0/60.0;
+    let mut time_begin = Instant::now();
+    event_loop.run(|event, target|
+    {
+        collect_inputs_winit(&mut input_diff, &event);
+
+        if let Event::WindowEvent { window_id: _, event } = event
+        {
+            // Collect inputs
+            //let _ = egui_state.on_window_event(&window, &event);
+
+            match event
+            {
+                WindowEvent::Resized(new_size) =>
+                {
+                    // TODO: Handle resizing
+                    //renderer.resize(new_size.width as i32, new_size.height as i32);
+                    window.request_redraw();
+                },
+                WindowEvent::CloseRequested =>
+                {
+                    target.exit();
+                },
+                WindowEvent::RedrawRequested =>
+                {
+                    delta_time = time_begin.elapsed().as_secs_f32();
+                    delta_time = delta_time.min(min_delta_time);
+                    time_begin = Instant::now();
+
+                    // Continuously request drawing messages to let the main loop continue
+                    window.request_redraw();
+                },
+                _ => {},
+            }
+        }
+    }).unwrap();
+
+    /*
     #[cfg(disable)]
     {
         //let mut renderer = Renderer::new(&window, initial_win_size.width as i32, initial_win_size.height as i32);
@@ -67,12 +107,12 @@ fn main()
         event_loop.run(|event, target|
         {
             collect_inputs_winit(&mut input_diff, &event);
-            
+
             if let Event::WindowEvent { window_id, event } = event
             {
                 // Collect inputs
                 let _ = egui_state.on_window_event(&window, &event);
-                
+
                 match event
                 {
                     WindowEvent::Resized(new_size) =>
@@ -103,14 +143,30 @@ fn main()
             }
         }).unwrap();
     }
+    */
+}
+
+pub fn log_backend(adapter: &wgpu::Adapter)
+{
+    print!("WGPU backend: ");
+    let backend = adapter.get_info().backend;
+    match backend
+    {
+        wgpu::Backend::Empty  => { println!("Empty"); }
+        wgpu::Backend::Vulkan => { println!("Vulkan"); }
+        wgpu::Backend::Metal  => { println!("Metal"); }
+        wgpu::Backend::Dx12   => { println!("D3D12"); }
+        wgpu::Backend::Gl     => { println!("OpenGL"); }
+        wgpu::Backend::BrowserWebGpu => { println!("WebGPU"); }
+    }
 }
 
 // Contains all application logic that isn't already separated
 // into different modules (such as serialization and rendering)
 
-use egui::ClippedPrimitive;
+//use egui::ClippedPrimitive;
 
-#[cfg(disable)]
+/*
 pub struct State
 {
     // egui texture ids
@@ -272,7 +328,7 @@ impl State
                 let to_draw = egui::load::SizedTexture
                 {
                     id: self.render_image_id,
-                    size: size_in_points 
+                    size: size_in_points
                 };
 
                 ui.image(to_draw);
@@ -411,3 +467,5 @@ pub fn resize_egui_image(renderer: &mut Renderer, texture: &mut Texture, texture
     renderer.resize_texture(texture, width, height);
     renderer.update_egui_texture(texture, texture_id, filter_near);
 }
+
+*/

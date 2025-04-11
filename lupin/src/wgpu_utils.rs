@@ -1,24 +1,13 @@
 
 use crate::base::*;
 
-// As for the window, most windowing libraries already implement
-// this trait, but if not you can implement it yourself
-pub fn init_wgpu_context<'a>(device_desc: wgpu::DeviceDescriptor,
+// Windowing libraries tipically implement the Into<wgpu::SurfaceTarget> trait,
+// if not you can easily implement it yourself
+pub fn init_default_wgpu_context<'a>(device_desc: wgpu::DeviceDescriptor,
                              window: impl Into<wgpu::SurfaceTarget<'a>>,
                              window_width: i32, window_height: i32)->(wgpu::Device, wgpu::Queue, wgpu::Surface<'a>, wgpu::Adapter)
 {
-    let instance_desc = wgpu::InstanceDescriptor
-    {
-        // Backend considerations on windows:
-        // The Vulkan backend seems to be
-        // the best when debugging with RenderDoc,
-        // but its resizing behavior is the worst
-        // by far compared to opengl and dx12. It also
-        // seems to have a bit of input lag for some reason.
-        // (will have to double check on that.)
-        // dx12 resizes fine with few artifacts.
-        // The best one seems to be OpenGL (it doesn't
-        // have any issues) but it's not really debuggable.
+    let instance_desc = wgpu::InstanceDescriptor {
         #[cfg(target_os = "windows")]
         backends: wgpu::Backends::VULKAN,
 
@@ -35,8 +24,7 @@ pub fn init_wgpu_context<'a>(device_desc: wgpu::DeviceDescriptor,
     let maybe_surface = instance.create_surface(window);
     let mut surface: wgpu::Surface = maybe_surface.expect("Failed to create WGPU surface");
 
-    let adapter_options = wgpu::RequestAdapterOptions
-    {
+    let adapter_options = wgpu::RequestAdapterOptions {
         power_preference: wgpu::PowerPreference::default(),
         compatible_surface: Some(&surface),
         force_fallback_adapter: false,
@@ -58,8 +46,7 @@ pub fn init_wgpu_context<'a>(device_desc: wgpu::DeviceDescriptor,
 
 pub fn upload_storage_buffer(device: &wgpu::Device, queue: &wgpu::Queue, buf: &[u8])->wgpu::Buffer
 {
-    let wgpu_buffer = device.create_buffer(&wgpu::BufferDescriptor
-    {
+    let wgpu_buffer = device.create_buffer(&wgpu::BufferDescriptor {
         label: None,
         size: buf.len() as u64,
         usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::STORAGE,
@@ -70,10 +57,9 @@ pub fn upload_storage_buffer(device: &wgpu::Device, queue: &wgpu::Queue, buf: &[
     return wgpu_buffer
 }
 
-pub fn create_empty_storage_buffer(device: &wgpu::Device, queue: &wgpu::Queue)->wgpu::Buffer
+pub fn create_empty_storage_buffer(device: &wgpu::Device, _queue: &wgpu::Queue)->wgpu::Buffer
 {
-    let wgpu_buffer = device.create_buffer(&wgpu::BufferDescriptor
-    {
+    let wgpu_buffer = device.create_buffer(&wgpu::BufferDescriptor {
         label: None,
         size: 0,
         usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::STORAGE,
@@ -112,31 +98,10 @@ fn configure_surface(surface: &mut wgpu::Surface,
     surface.configure(&device, &surface_config);
 }
 
-
-
-pub fn log_backend(adapter: &wgpu::Adapter)
-{
-    print!("WGPU backend: ");
-    let backend = adapter.get_info().backend;
-    match backend
-    {
-        wgpu::Backend::Empty  => { println!("Empty"); }
-        wgpu::Backend::Vulkan => { println!("Vulkan"); }
-        wgpu::Backend::Metal  => { println!("Metal"); }
-        wgpu::Backend::Dx12   => { println!("D3D12"); }
-        wgpu::Backend::Gl     => { println!("OpenGL"); }
-        wgpu::Backend::BrowserWebGpu => { println!("WebGPU"); }
-    }
-}
-
-#[cfg(disable)]
-pub fn set_vsync(device: &wgpu::Device)
-{
-
-}
-
+// set_vsync function
 
 // Take a look at this and check which one should even be implemented
+
 
 /*
 fn upload_buffer(&mut self, buffer: &[u8])->wgpu::Buffer;

@@ -2,20 +2,15 @@
 use crate::base::*;
 use crate::wgpu_utils::*;
 
-// Contains the GPU resource
-// handles for the scene info
-pub struct Scene
+pub struct SceneDesc
 {
     pub verts_pos: wgpu::Buffer,
     pub indices: wgpu::Buffer,
     pub bvh_nodes: wgpu::Buffer,
     pub verts: wgpu::Buffer
 
-    /*
-    // Texture atlases
-    atlas_1_channel: u32,
-    atlas_3_channels: u32,
-    atlas_hdr_3_channels: u32,*/
+    // Textures
+
 }
 
 // This doesn't include positions, as that
@@ -53,26 +48,206 @@ pub const BVH_MAX_DEPTH: i32 = 25;
 pub fn get_device_spec()->wgpu::DeviceDescriptor<'static>
 {
     // We currently need these two features:
-    // 1) Arrays of texture bindings, to store textures of arbitrary sizes (do we actually want to do this?)
-    // 2) Texture sampling and buffer non uniform indexing, to access textures (do we actually want to do this?)
-    return wgpu::DeviceDescriptor
-    {
+    // 1) Arrays of texture bindings, to store textures of arbitrary sizes
+    // 2) Texture sampling and buffer non uniform indexing, to access textures
+    return wgpu::DeviceDescriptor {
         label: None,
         required_features: wgpu::Features::TEXTURE_BINDING_ARRAY |
                            wgpu::Features::SAMPLED_TEXTURE_AND_STORAGE_BUFFER_ARRAY_NON_UNIFORM_INDEXING,
         required_limits: wgpu::Limits::default(),
+        memory_hints: Default::default(),
     };
 }
 
+// Resources
+/*
+pub struct PathtracePipelineDesc<'a>
+{
+    //shader_source: &'a str,
+}
+
+impl<'a> Default for PathtracePipelineDesc<'a>
+{
+    fn default() -> Self
+    {
+        return Self {
+
+        }
+    }
+}
+
+pub fn create_pathtrace_pipeline(desc: PathtracePipelineDesc) -> Option<wgpu::ComputePipeline>
+{
+    return None;
+}
+
+pub fn create_vertex_buffer() -> Vec<>
+{
+
+}
+*/
+
 // Rendering
-pub fn draw_scene(scene: &Scene, render_to: &wgpu::Texture, camera_transform: Mat4) {}
+pub struct PathtraceDesc
+{
+    camera_transform: Mat4,
+    // progressive ?
+
+}
+
+impl Default for PathtraceDesc
+{
+    fn default() -> Self
+    {
+        return Self {
+            camera_transform: Mat4::IDENTITY,
+        }
+    }
+}
+
+
+
+pub fn pathtrace_scene(scene: &SceneDesc,
+                       device: &wgpu::Device, queue: &wgpu::Queue,
+                       cmd_enc: &mut wgpu::CommandEncoder, pipeline: &wgpu::ComputePipeline,
+                       target: &wgpu::Texture,
+                       pathtrace_desc: PathtraceDesc)
+{
+    use wgpu::*;
+
+    // TODO: Remove the TEXTURE_BINDING check if we're not doing progressive rendering.
+    assert!(target.usage().contains(TextureUsages::TEXTURE_BINDING) &&
+            target.usage().contains(TextureUsages::STORAGE_BINDING),
+            "Pathtrace target texture has invalid usage!");
+
+    let mut pass = cmd_enc.begin_compute_pass(&ComputePassDescriptor {
+        label: Some("Lupin Pathtrace Compute Pass"),
+        timestamp_writes: None
+    });
+
+    pass.set_pipeline(pipeline);
+
+    let bindgroup_layout = device.create_bind_group_layout(&BindGroupLayoutDescriptor {
+        label: None,
+        entries: &[
+            BindGroupLayoutEntry {  // Target Texture
+                binding: 0,
+                visibility: ShaderStages::COMPUTE,
+                ty: BindingType::StorageTexture {
+                    access: StorageTextureAccess::WriteOnly,
+                    format: target.format(),
+                    view_dimension: TextureViewDimension::D2,
+                },
+                count: None
+            },
+            wgpu::BindGroupLayoutEntry {  // Verts pos
+                binding: 1,
+                visibility: ShaderStages::COMPUTE,
+                ty: BindingType::Buffer {
+                    ty: BufferBindingType::Storage { read_only: true },
+                    has_dynamic_offset: false,
+                    min_binding_size: None
+                },
+                count: None
+            },
+            wgpu::BindGroupLayoutEntry {  // Indices
+                binding: 2,
+                visibility: ShaderStages::COMPUTE,
+                ty: BindingType::Buffer {
+                    ty: BufferBindingType::Storage { read_only: true },
+                    has_dynamic_offset: false,
+                    min_binding_size: None
+                },
+                count: None,
+            },
+            BindGroupLayoutEntry {  // BVH Nodes
+                binding: 3,
+                visibility: ShaderStages::COMPUTE,
+                ty: BindingType::Buffer {
+                    ty: BufferBindingType::Storage { read_only: true },
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None
+            },
+            BindGroupLayoutEntry {  // Verts pos
+                binding: 4,
+                visibility: ShaderStages::COMPUTE,
+                ty: BindingType::Buffer {
+                    ty: BufferBindingType::Storage { read_only: true },
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None
+            },
+            BindGroupLayoutEntry {
+                binding: 5,
+                visibility: ShaderStages::COMPUTE,
+                ty: BindingType::Buffer {
+                    ty: BufferBindingType::Uniform,
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None
+            },
+        ]
+    });
+
+    let target_view = target.create_view(&Default::default());
+
+    #[inline(always)]
+    fn buffer_resource(buffer: &Buffer) -> BindingResource
+    {
+        return BindingResource::Buffer(BufferBinding { buffer: buffer, offset: 0, size: None });
+    }
+
+    // TODO: Reuse this buffer
+    let uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("Lupin Pathtracing Uniform Buffer"),
+        contents: unsafe { to_u8_slice(&[pathtrace_desc.camera_transform]) },
+        usage: BufferUsages::UNIFORM,
+    });
+
+    let bind_group = device.create_bind_group(&BindGroupDescriptor {
+        label: None,
+        layout: &bindgroup_layout,
+        entries: &[
+            BindGroupEntry { binding: 0, resource: BindingResource::TextureView(&target_view) },
+            BindGroupEntry { binding: 1, resource: buffer_resource(&scene.verts_pos) },
+            BindGroupEntry { binding: 2, resource: buffer_resource(&scene.indices) },
+            BindGroupEntry { binding: 3, resource: buffer_resource(&scene.bvh_nodes) },
+            BindGroupEntry { binding: 4, resource: buffer_resource(&scene.verts) },
+            BindGroupEntry { binding: 5, resource: buffer_resource(&uniform_buffer) }
+        ]
+    });
+
+    pass.set_bind_group(0, &bind_group, &[]);
+    const WORKGROUP_SIZE_X: u32 = 8;
+    const WORKGROUP_SIZE_Y: u32 = 8;
+    let width  = target.width();
+    let height = target.height();
+    let num_workers_x = (width + WORKGROUP_SIZE_X - 1) / WORKGROUP_SIZE_X;
+    let num_workers_y = (height + WORKGROUP_SIZE_Y - 1) / WORKGROUP_SIZE_Y;
+    pass.dispatch_workgroups(num_workers_x, num_workers_y, 1);
+}
 
 ////////
 // BVH creation
 
+pub struct TLAS
+{
+    buf: wgpu::Buffer,
+}
+
+//pub fn build_tlas(device: &wgpu::Device, queue::Queue, instances) -> TLAS;
+
+// Maybe do this on the GPU
+//pub fn update_tlas(device: &wgpu::Device, queue::Queue, tlas: &mut TLAS, instances)
+//pub fn update_tlas_xform(device: &wgpu::Device, queue::Queue, tlas: &mut TLAS, instances_with_xform)
+
 // NOTE: This modifies the indices array to change the order of triangles
 // based on the BVH
-pub fn construct_bvh(device: &wgpu::Device, queue: &wgpu::Queue, verts: &[f32], indices: &mut[u32])->wgpu::Buffer
+pub fn build_bvh(device: &wgpu::Device, queue: &wgpu::Queue, verts: &[f32], indices: &mut[u32])->wgpu::Buffer
 {
     let num_tris: u32 = indices.len() as u32 / 3;
 
@@ -244,8 +419,8 @@ impl Default for Bin
 }
 
 // From: https://jacco.ompf2.com/2022/04/21/how-to-build-a-bvh-part-3-quick-builds/
-pub fn choose_split(bvh: &[BvhNode], verts: &[f32],
-                    indices: &mut[u32],
+pub fn choose_split(bvh: &[BvhNode], _verts: &[f32],
+                    _indices: &mut[u32],
                     centroids: &mut[Vec3],
                     tri_bounds: &mut[Aabb],
                     node: usize)->BvhSplit
@@ -293,7 +468,7 @@ pub fn choose_split(bvh: &[BvhNode], verts: &[f32],
             let centroid = centroids[tri];
             let bounds = tri_bounds[tri];
             let bin_idx: usize = (((centroid[axis] - centroid_min) * scale).floor() as usize).clamp(0, NUM_BINS-1);
-            grow_aabb_to_include_aabb(&mut bins[bin_idx].bounds, bounds); 
+            grow_aabb_to_include_aabb(&mut bins[bin_idx].bounds, bounds);
             bins[bin_idx].tri_count += 1;
         }
 
@@ -354,12 +529,6 @@ pub fn node_cost(size: Vec3, num_tris: u32)->f32
     return half_area * num_tris as f32;
 }
 
-#[cfg(disable)]
-pub fn construct_tlas()->wgpu::Buffer
-{
-
-}
-
 pub fn get_tri(verts: &[f32], indices: &[u32], tri_idx: usize)->(Vec3, Vec3, Vec3)
 {
     let idx0 = (indices[tri_idx*3+0]*4) as usize;
@@ -415,7 +584,7 @@ pub fn swap_tris(indices: &mut[u32], centroids: &mut[Vec3], tri_bounds: &mut[Aab
     tri_bounds[tri_b] = tmp;
 }
 
-pub fn compute_aabb(indices: &[u32], tri_bounds: &mut[Aabb], tri_begin: u32, tri_count: u32)->(Vec3, Vec3)
+pub fn compute_aabb(_indices: &[u32], tri_bounds: &mut[Aabb], tri_begin: u32, tri_count: u32)->(Vec3, Vec3)
 {
     let mut res = Aabb::default();
     let tri_end = tri_begin + tri_count;

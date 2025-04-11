@@ -1,35 +1,22 @@
 
-use tobj::*;
-use std::ptr::NonNull;
+use lupin as lp;
 
-use lupin::base::*;
-use lupin::renderer::*;
-use lupin::wgpu_utils::*;
-
-#[derive(Default)]
-pub struct LoadingTimes
+pub struct Scene
 {
-    pub parsing: f32,
-    pub bvh_build: f32
-}
+    verts: &[f32],
+    indices: &[u32],
+};
 
-pub fn load_scene_custom_format(path: &str)
-{
-
-}
-
-pub fn load_scene_obj(device: wgpu::Device, queue: wgpu::Queue, path: &str)->(Scene, LoadingTimes)
+pub fn load_scene_obj(device: &wgpu::Device, queue: wgpu::Queue, path: &str)->()
 {
     let mut loading_times: LoadingTimes = Default::default();
 
-    let timer_start = std::time::Instant::now();
     let scene = tobj::load_obj(path, &tobj::GPU_LOAD_OPTIONS);
-    let time = timer_start.elapsed().as_micros() as f32 / 1_000.0;
 
     loading_times.parsing = time;
 
     assert!(scene.is_ok());
-    let (mut models, materials) = scene.expect("Failed to load OBJ file");
+    let (mut models, _materials) = scene.expect("Failed to load OBJ file");
 
     let mut verts_pos: Vec<f32> = Vec::new();
 
@@ -39,7 +26,7 @@ pub fn load_scene_obj(device: wgpu::Device, queue: wgpu::Queue, path: &str)->(Sc
 
         // Construct the buffer to send to GPU. Include an extra float
         // for 16-byte padding (which seems to be required in WebGPU).
-        
+
         verts_pos.reserve_exact(mesh.positions.len() + mesh.positions.len() / 3);
         for i in (0..mesh.positions.len()).step_by(3)
         {
@@ -50,7 +37,7 @@ pub fn load_scene_obj(device: wgpu::Device, queue: wgpu::Queue, path: &str)->(Sc
         }
 
         let timer_start = std::time::Instant::now();
-        let bvh_buf = construct_bvh(&device, &queue, verts_pos.as_slice(), &mut mesh.indices);
+        let bvh_buf = build_bvh(&device, &queue, verts_pos.as_slice(), &mut mesh.indices);
         let time = timer_start.elapsed().as_micros() as f32 / 1_000.0;
         loading_times.bvh_build = time;
 
