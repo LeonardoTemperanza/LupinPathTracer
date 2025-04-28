@@ -2,15 +2,33 @@
 use crate::base::*;
 use crate::wgpu_utils::*;
 
+pub static DEFAULT_PATHTRACER_SRC: &str = include_str!("shaders/pathtracer.wgsl");
+
+#[derive(Debug, Default, Clone, Copy)]
+#[repr(C)]
+pub struct Vec2
+{
+    pub x: f32,
+    pub y: f32
+}
+
+#[repr(C)]
+#[derive(Debug, Default, Clone, Copy)]
+pub struct Vec3
+{
+    pub x: f32,
+    pub y: f32,
+    pub z: f32
+}
+
 pub struct SceneDesc
 {
     pub verts_pos: wgpu::Buffer,
     pub indices: wgpu::Buffer,
     pub bvh_nodes: wgpu::Buffer,
-    pub verts: wgpu::Buffer
+    pub verts: wgpu::Buffer,
 
-    // Textures
-
+    pub camera_transform: Mat4
 }
 
 // This doesn't include positions, as that
@@ -45,7 +63,7 @@ pub struct BvhNode
 pub const BVH_MAX_DEPTH: i32 = 25;
 
 // This will need to be used when creating the device
-pub fn get_device_spec()->wgpu::DeviceDescriptor<'static>
+pub fn get_required_device_spec()->wgpu::DeviceDescriptor<'static>
 {
     // We currently need these two features:
     // 1) Arrays of texture bindings, to store textures of arbitrary sizes
@@ -59,191 +77,145 @@ pub fn get_device_spec()->wgpu::DeviceDescriptor<'static>
     };
 }
 
-// Resources
-/*
-pub struct PathtracePipelineDesc<'a>
+// Shader params
+
+pub struct ShaderParams
 {
-    //shader_source: &'a str,
+    pub shader: wgpu::ShaderModule,
+    pub pipeline: wgpu::ComputePipeline,
 }
 
-impl<'a> Default for PathtracePipelineDesc<'a>
+pub fn build_shader_params(device: &wgpu::Device, with_runtime_checks: bool) -> ShaderParams
 {
-    fn default() -> Self
-    {
-        return Self {
+    let shader_desc = wgpu::ShaderModuleDescriptor {
+        label: Some("Lupin Pathtracer Shader"),
+        source: wgpu::ShaderSource::Wgsl(DEFAULT_PATHTRACER_SRC.into())
+    };
 
-        }
+    let shader;
+    if with_runtime_checks {
+        shader = device.create_shader_module(shader_desc);
+    } else {
+        shader = unsafe { device.create_shader_module_trusted(shader_desc, wgpu::ShaderRuntimeChecks::unchecked()) };
     }
+
+    let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor{
+        label: None,
+        entries: &[
+            wgpu::BindGroupLayoutEntry {
+                binding: 0,
+                visibility: wgpu::ShaderStages::COMPUTE,
+                ty: wgpu::BindingType::StorageTexture {
+                    access: wgpu::StorageTextureAccess::WriteOnly,
+                    format: wgpu::TextureFormat::Rgba8Unorm,
+                    view_dimension: wgpu::TextureViewDimension::D2
+                },
+                count: None
+            },
+            wgpu::BindGroupLayoutEntry {
+                binding: 1,
+                visibility: wgpu::ShaderStages::COMPUTE,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Storage { read_only: true },
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None
+            },
+            wgpu::BindGroupLayoutEntry {
+                binding: 2,
+                visibility: wgpu::ShaderStages::COMPUTE,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Storage { read_only: true },
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None
+            },
+            wgpu::BindGroupLayoutEntry {
+                binding: 3,
+                visibility: wgpu::ShaderStages::COMPUTE,
+                ty: wgpu::BindingType::Buffer
+                {
+                    ty: wgpu::BufferBindingType::Storage { read_only: true },
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None
+            },
+            wgpu::BindGroupLayoutEntry {
+                binding: 4,
+                visibility: wgpu::ShaderStages::COMPUTE,
+                ty: wgpu::BindingType::Buffer
+                {
+                    ty: wgpu::BufferBindingType::Storage { read_only: true },
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None
+            },
+            wgpu::BindGroupLayoutEntry {
+                binding: 5,
+                visibility: wgpu::ShaderStages::COMPUTE,
+                ty: wgpu::BindingType::Buffer
+                {
+                    ty: wgpu::BufferBindingType::Uniform,
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None
+            },
+        ]
+    });
+
+    let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+        label: Some("Lupin Pathtracer Pipeline Layout"),
+        bind_group_layouts: &[&bind_group_layout],
+        push_constant_ranges: &[],
+    });
+
+    let pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+        label: Some("Lupin Pathtracer Pipeline"),
+        layout: Some(&pipeline_layout),
+        module: &shader,
+        entry_point: Some("main"),
+        compilation_options: Default::default(),
+        cache: None,
+    });
+
+    return ShaderParams {
+        shader,
+        pipeline
+    };
 }
 
-pub fn create_pathtrace_pipeline(desc: PathtracePipelineDesc) -> Option<wgpu::ComputePipeline>
+#[cfg(disable)]
+pub fn build_shader_params_custom_shader(device: &wgpu::Device, shader_src: &str) -> ShaderParams
 {
-    return None;
-}
+    return ShaderParams {
 
-pub fn create_vertex_buffer() -> Vec<>
-{
-
+    };
 }
-*/
 
 // Rendering
-pub struct PathtraceDesc
+// Parameters:
+// device
+// scene
+// render_target
+// shader_params (shader itself, and things like vertex layout, bvh depth)
+// defaultable - accum_params (accum (bool), Option of previous image, frame_counter, when to stop?) (provide a function to advance the accum params)
+// defaultable - region (offset and size to render)
+// defaultable - motion_blur_params
+
+pub fn pathtrace_scene(device: &wgpu::Device, scene: &SceneDesc, render_target: &wgpu::TextureView, shader_params: &ShaderParams)
 {
-    camera_transform: Mat4,
-    // progressive ?
 
-}
-
-impl Default for PathtraceDesc
-{
-    fn default() -> Self
-    {
-        return Self {
-            camera_transform: Mat4::IDENTITY,
-        }
-    }
-}
-
-
-
-pub fn pathtrace_scene(scene: &SceneDesc,
-                       device: &wgpu::Device, queue: &wgpu::Queue,
-                       cmd_enc: &mut wgpu::CommandEncoder, pipeline: &wgpu::ComputePipeline,
-                       target: &wgpu::Texture,
-                       pathtrace_desc: PathtraceDesc)
-{
-    use wgpu::*;
-
-    // TODO: Remove the TEXTURE_BINDING check if we're not doing progressive rendering.
-    assert!(target.usage().contains(TextureUsages::TEXTURE_BINDING) &&
-            target.usage().contains(TextureUsages::STORAGE_BINDING),
-            "Pathtrace target texture has invalid usage!");
-
-    let mut pass = cmd_enc.begin_compute_pass(&ComputePassDescriptor {
-        label: Some("Lupin Pathtrace Compute Pass"),
-        timestamp_writes: None
-    });
-
-    pass.set_pipeline(pipeline);
-
-    let bindgroup_layout = device.create_bind_group_layout(&BindGroupLayoutDescriptor {
-        label: None,
-        entries: &[
-            BindGroupLayoutEntry {  // Target Texture
-                binding: 0,
-                visibility: ShaderStages::COMPUTE,
-                ty: BindingType::StorageTexture {
-                    access: StorageTextureAccess::WriteOnly,
-                    format: target.format(),
-                    view_dimension: TextureViewDimension::D2,
-                },
-                count: None
-            },
-            wgpu::BindGroupLayoutEntry {  // Verts pos
-                binding: 1,
-                visibility: ShaderStages::COMPUTE,
-                ty: BindingType::Buffer {
-                    ty: BufferBindingType::Storage { read_only: true },
-                    has_dynamic_offset: false,
-                    min_binding_size: None
-                },
-                count: None
-            },
-            wgpu::BindGroupLayoutEntry {  // Indices
-                binding: 2,
-                visibility: ShaderStages::COMPUTE,
-                ty: BindingType::Buffer {
-                    ty: BufferBindingType::Storage { read_only: true },
-                    has_dynamic_offset: false,
-                    min_binding_size: None
-                },
-                count: None,
-            },
-            BindGroupLayoutEntry {  // BVH Nodes
-                binding: 3,
-                visibility: ShaderStages::COMPUTE,
-                ty: BindingType::Buffer {
-                    ty: BufferBindingType::Storage { read_only: true },
-                    has_dynamic_offset: false,
-                    min_binding_size: None,
-                },
-                count: None
-            },
-            BindGroupLayoutEntry {  // Verts pos
-                binding: 4,
-                visibility: ShaderStages::COMPUTE,
-                ty: BindingType::Buffer {
-                    ty: BufferBindingType::Storage { read_only: true },
-                    has_dynamic_offset: false,
-                    min_binding_size: None,
-                },
-                count: None
-            },
-            BindGroupLayoutEntry {
-                binding: 5,
-                visibility: ShaderStages::COMPUTE,
-                ty: BindingType::Buffer {
-                    ty: BufferBindingType::Uniform,
-                    has_dynamic_offset: false,
-                    min_binding_size: None,
-                },
-                count: None
-            },
-        ]
-    });
-
-    let target_view = target.create_view(&Default::default());
-
-    #[inline(always)]
-    fn buffer_resource(buffer: &Buffer) -> BindingResource
-    {
-        return BindingResource::Buffer(BufferBinding { buffer: buffer, offset: 0, size: None });
-    }
-
-    // TODO: Reuse this buffer
-    let uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: Some("Lupin Pathtracing Uniform Buffer"),
-        contents: unsafe { to_u8_slice(&[pathtrace_desc.camera_transform]) },
-        usage: BufferUsages::UNIFORM,
-    });
-
-    let bind_group = device.create_bind_group(&BindGroupDescriptor {
-        label: None,
-        layout: &bindgroup_layout,
-        entries: &[
-            BindGroupEntry { binding: 0, resource: BindingResource::TextureView(&target_view) },
-            BindGroupEntry { binding: 1, resource: buffer_resource(&scene.verts_pos) },
-            BindGroupEntry { binding: 2, resource: buffer_resource(&scene.indices) },
-            BindGroupEntry { binding: 3, resource: buffer_resource(&scene.bvh_nodes) },
-            BindGroupEntry { binding: 4, resource: buffer_resource(&scene.verts) },
-            BindGroupEntry { binding: 5, resource: buffer_resource(&uniform_buffer) }
-        ]
-    });
-
-    pass.set_bind_group(0, &bind_group, &[]);
-    const WORKGROUP_SIZE_X: u32 = 8;
-    const WORKGROUP_SIZE_Y: u32 = 8;
-    let width  = target.width();
-    let height = target.height();
-    let num_workers_x = (width + WORKGROUP_SIZE_X - 1) / WORKGROUP_SIZE_X;
-    let num_workers_y = (height + WORKGROUP_SIZE_Y - 1) / WORKGROUP_SIZE_Y;
-    pass.dispatch_workgroups(num_workers_x, num_workers_y, 1);
 }
 
 ////////
 // BVH creation
 
-pub struct TLAS
-{
-    buf: wgpu::Buffer,
-}
-
-//pub fn build_tlas(device: &wgpu::Device, queue::Queue, instances) -> TLAS;
-
-// Maybe do this on the GPU
-//pub fn update_tlas(device: &wgpu::Device, queue::Queue, tlas: &mut TLAS, instances)
-//pub fn update_tlas_xform(device: &wgpu::Device, queue::Queue, tlas: &mut TLAS, instances_with_xform)
+// Maybe we should provide both options, to modify the indices in place or not to?
 
 // NOTE: This modifies the indices array to change the order of triangles
 // based on the BVH
@@ -596,12 +568,3 @@ pub fn compute_aabb(_indices: &[u32], tri_bounds: &mut[Aabb], tri_begin: u32, tr
 
     return (res.min, res.max);
 }
-
-// Here we want:
-// 1 stuff for drawing the scene. This should allow separating this draw call into multiple draw calls,
-// so that the gpu can continue doing other work. Also, if the rendering takes really long, it's good
-// user interface to let the user cancel the operation. Also, if the rendering takes too long i think vulkan
-// will kill the process. NOTE: multi-queues are not implemented in wgpu as of today,
-// but when they are, scene rendering can be moved to a separate queue and then we can synchronize as necessary.
-// 2 stuff for executing shaders in general. Use the fancy debugging system.
-// 3 constructing the bvh should be here, as it is an integral part of the renderer

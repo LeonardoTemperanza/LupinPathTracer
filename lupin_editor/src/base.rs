@@ -52,8 +52,22 @@ fn my_waker() -> Waker { unsafe { return Waker::from_raw(my_raw_waker()) } }
 pub const DEG_TO_RAD: f32 = 0.017453292;
 pub const RAD_TO_DEG: f32 = 57.29578049;
 
-use crate::renderer::Vec3;
-use crate::renderer::Vec2;
+#[derive(Debug, Default, Clone, Copy)]
+#[repr(C)]
+pub struct Vec2
+{
+    pub x: f32,
+    pub y: f32
+}
+
+#[repr(C)]
+#[derive(Debug, Default, Clone, Copy)]
+pub struct Vec3
+{
+    pub x: f32,
+    pub y: f32,
+    pub z: f32
+}
 
 impl Vec3
 {
@@ -593,6 +607,26 @@ pub fn position_matrix(pos: Vec3)->Mat4
 pub fn transform_to_matrix(transform: Transform)->Mat4
 {
     return position_matrix(transform.pos) * rotation_matrix(transform.rot) * scale_matrix(transform.scale);
+}
+
+pub use lupin as lp;
+
+// Example implementation of Into trait to convert
+// from your own algebraic types into lupin's.
+impl Into<lp::Vec3> for Vec3
+{
+    fn into(self) -> lp::Vec3
+    {
+        return lp::Vec3 { x: self.x, y: self.y, z: self.z }
+    }
+}
+
+impl Into<lp::Vec2> for Vec2
+{
+    fn into(self) -> lp::Vec2
+    {
+        return lp::Vec2 { x: self.x, y: self.y }
+    }
 }
 
 ////////

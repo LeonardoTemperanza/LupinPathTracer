@@ -2,9 +2,12 @@
 #![allow(dead_code)]
 #![allow(unused_labels)]
 #![allow(unused_variables)]
+#![allow(unused_imports)]
+#![allow(unexpected_cfgs)]
 
-pub mod base;
-pub mod renderer;
+mod base;
+mod renderer;
+mod wgpu_utils;
+
 pub use renderer::*;
-pub mod wgpu_utils;
 pub use wgpu_utils::*;

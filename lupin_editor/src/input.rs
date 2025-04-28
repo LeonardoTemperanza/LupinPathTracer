@@ -3,8 +3,8 @@
 // One could also fetch the previous frame's inputs
 // for quickly comparing state.
 
-// TODO: Do we want to use other types for vectors etc.?
-use lupin::base::*;
+use winit::event::*;
+use crate::base::*;
 
 #[repr(C)]
 pub enum GamepadButtonField

@@ -19,7 +19,7 @@ pub fn init_default_wgpu_context<'a>(device_desc: wgpu::DeviceDescriptor,
         backends: wgpu::Backends::GL,
         ..Default::default()
     };
-    let instance: wgpu::Instance = wgpu::Instance::new(instance_desc);
+    let instance: wgpu::Instance = wgpu::Instance::new(&instance_desc);
 
     let maybe_surface = instance.create_surface(window);
     let mut surface: wgpu::Surface = maybe_surface.expect("Failed to create WGPU surface");
@@ -99,38 +99,3 @@ fn configure_surface(surface: &mut wgpu::Surface,
 }
 
 // set_vsync function
-
-// Take a look at this and check which one should even be implemented
-
-
-/*
-fn upload_buffer(&mut self, buffer: &[u8])->wgpu::Buffer;
-fn upload_uniform(&mut self, buffer: &[u8])->Buffer;
-fn create_empty_buffer(&mut self)->Buffer;
-// Lets the user read a buffer from the GPU to the CPU. This will
-// cause latency so it should be used very sparingly if at all
-fn read_buffer(&mut self, buffer: Buffer, output: &mut[u8]);
-fn read_texture(&mut self, texture: Texture, output: &mut[u8]);
-
-// Textures
-fn create_texture(&mut self, width: u32, height: u32)->Texture;
-fn create_egui_output_texture(&mut self, width: u32, height: u32)->Texture;
-fn get_texture_size(texture: &Texture)->(i32, i32);
-fn resize_texture(&mut self, texture: &mut Texture, width: i32, height: i32);
-fn texture_to_egui_texture(&mut self, texture: &Texture, filter_near: bool)->egui::TextureId;
-fn update_egui_texture(&mut self, texture: &Texture, texture_id: egui::TextureId, filter_near: bool);
-
-// GPU Timer
-fn create_gpu_timer(&mut self, num_timestamps: u32)->GPUTimer;
-fn add_timestamp(&mut self, timer: &mut GPUTimer);
-// Returns an array of values, each of which represents the time
-// spent between two timestamps added, in milliseconds. This will
-// make the CPU wait for all the calls to be finished on the GPU side,
-// so it should be used sparingly, perhaps at the end of a benchmark
-// or for profiling
-fn get_gpu_times(&mut self, timer: &GPUTimer, times: &mut [f32]);
-
-// Miscellaneous
-fn set_vsync(&mut self, flag: bool);  // Off by default
-fn log_backend(&self);  // Logs the currently used renderer. In the case of WGPU, logs the used backend
-*/

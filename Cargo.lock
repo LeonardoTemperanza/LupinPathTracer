@@ -1184,6 +1184,7 @@ dependencies = [
  "image 0.25.2",
  "lupin",
  "tobj",
+ "wgpu",
  "winit",
 ]
 

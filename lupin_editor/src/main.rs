@@ -2,9 +2,12 @@
 #![allow(dead_code)]
 #![allow(unused_variables)]
 #![allow(unused_imports)]
+#![allow(unexpected_cfgs)]
 
 // Don't spawn a terminal window on windows
 //#![windows_subsystem = "windows"]
+
+use std::time::Instant;
 
 pub use winit::
 {
@@ -14,13 +17,16 @@ pub use winit::
     event_loop::*
 };
 
-mod loader;
-use loader::*;
-mod input;
-use input::*;
-use lupin as lp;
+//use ::egui::FontDefinitions;
 
-use std::time::Instant;
+pub use lupin as lp;
+
+mod loader;
+mod input;
+mod base;
+pub use loader::*;
+pub use input::*;
+pub use base::*;
 
 fn main()
 {
@@ -33,18 +39,25 @@ fn main()
                                      .unwrap();
 
     let win_size = window.inner_size();
-    let (width, height) = (win_size.width, win_size.height);
-    let (device, queue, _surface, adapter) = lp::init_default_wgpu_context(lupin::get_device_spec(), &window, width as i32, height as i32);
+    let (width, height) = (win_size.width as i32, win_size.height as i32);
+    let device_spec = lp::get_required_device_spec();
+    let (device, queue, surface, adapter) = lp::init_default_wgpu_context(device_spec, &window, width, height);
     log_backend(&adapter);
 
-    // Load model, get verts and indices and some other things
-
-    // Load model
-    //let (scene, _) = load_scene_obj(&device, queue, "dragon.obj");
-
-    let mut input_diff = InputDiff::default();
-
     window.set_visible(true);
+
+    // Init rendering resources
+    let scene = load_scene_obj(&device, &queue, "stanford-bunny.obj");
+    let shader_params = lp::build_shader_params(&device, true);
+    //
+
+    // let mut egui_ctx = egui::Context::default();
+    // let viewport_id = egui_ctx.viewport_id();
+    // let mut egui_state = egui_winit::State::new(egui_ctx.clone(), viewport_id, &window, None, None);
+
+    let mut input_state = InputState::default();
+    let mut input_diff  = InputDiff::default();
+
     let min_delta_time: f32 = 1.0/10.0;
     let mut delta_time: f32 = 1.0/60.0;
     let mut time_begin = Instant::now();
@@ -55,14 +68,12 @@ fn main()
         if let Event::WindowEvent { window_id: _, event } = event
         {
             // Collect inputs
-            //let _ = egui_state.on_window_event(&window, &event);
+            // let _ = egui_state.on_window_event(&window, &event);
 
             match event
             {
                 WindowEvent::Resized(new_size) =>
                 {
-                    // TODO: Handle resizing
-                    //renderer.resize(new_size.width as i32, new_size.height as i32);
                     window.request_redraw();
                 },
                 WindowEvent::CloseRequested =>
@@ -75,6 +86,14 @@ fn main()
                     delta_time = delta_time.min(min_delta_time);
                     time_begin = Instant::now();
 
+                    poll_input(&mut input_state, &mut input_diff);
+
+                    let frame = surface.get_current_texture().unwrap();
+                    let render_target = frame.texture.create_view(&Default::default());
+                    lp::pathtrace_scene(&device, &scene, &render_target, &shader_params);
+
+                    frame.present();
+
                     // Continuously request drawing messages to let the main loop continue
                     window.request_redraw();
                 },
@@ -82,68 +101,6 @@ fn main()
             }
         }
     }).unwrap();
-
-    /*
-    #[cfg(disable)]
-    {
-        //let mut renderer = Renderer::new(&window, initial_win_size.width as i32, initial_win_size.height as i32);
-        //renderer.log_backend();
-        //renderer.set_vsync(true);
-
-        let mut egui_ctx = egui::Context::default();
-        let viewport_id = egui_ctx.viewport_id();
-
-        let mut egui_state = egui_winit::State::new(egui_ctx.clone(), viewport_id, &window, None, None);
-
-        let mut core = State::new(&mut renderer);
-
-        window.set_visible(true);
-
-        let mut input_diff = InputDiff::default();
-
-        let min_delta_time: f32 = 1.0/20.0;  // Reasonable min value to prevent degeneracies when updating state
-        let mut delta_time: f32 = 1.0/60.0;
-        let mut time_begin = Instant::now();
-        event_loop.run(|event, target|
-        {
-            collect_inputs_winit(&mut input_diff, &event);
-
-            if let Event::WindowEvent { window_id, event } = event
-            {
-                // Collect inputs
-                let _ = egui_state.on_window_event(&window, &event);
-
-                match event
-                {
-                    WindowEvent::Resized(new_size) =>
-                    {
-                        // NOTE: On vulkan and dx12 there are some artifacts when resizing
-                        // This is a wgpu problem, and it goes away completely when using
-                        // the opengl backend
-                        renderer.resize(new_size.width as i32, new_size.height as i32);
-                        window.request_redraw();
-                    },
-                    WindowEvent::CloseRequested =>
-                    {
-                        target.exit();
-                    },
-                    WindowEvent::RedrawRequested =>
-                    {
-                        delta_time = time_begin.elapsed().as_secs_f32();
-                        delta_time = delta_time.min(min_delta_time);
-                        time_begin = Instant::now();
-
-                        core.main_update(&mut renderer, &window, &mut egui_ctx, &mut egui_state, delta_time, &mut input_diff);
-
-                        // Continuously request drawing messages to let the main loop continue
-                        window.request_redraw();
-                    },
-                    _ => {},
-                }
-            }
-        }).unwrap();
-    }
-    */
 }
 
 pub fn log_backend(adapter: &wgpu::Adapter)
@@ -161,8 +118,7 @@ pub fn log_backend(adapter: &wgpu::Adapter)
     }
 }
 
-// Contains all application logic that isn't already separated
-// into different modules (such as serialization and rendering)
+// TODO: Remove later
 
 //use egui::ClippedPrimitive;
 

@@ -1,19 +1,11 @@
 
 use lupin as lp;
 
-pub struct Scene
-{
-    verts: &[f32],
-    indices: &[u32],
-};
+use crate::base::*;
 
-pub fn load_scene_obj(device: &wgpu::Device, queue: wgpu::Queue, path: &str)->()
+pub fn load_scene_obj(device: &wgpu::Device, queue: &wgpu::Queue, path: &str)->lp::SceneDesc
 {
-    let mut loading_times: LoadingTimes = Default::default();
-
     let scene = tobj::load_obj(path, &tobj::GPU_LOAD_OPTIONS);
-
-    loading_times.parsing = time;
 
     assert!(scene.is_ok());
     let (mut models, _materials) = scene.expect("Failed to load OBJ file");
@@ -36,14 +28,11 @@ pub fn load_scene_obj(device: &wgpu::Device, queue: wgpu::Queue, path: &str)->()
             verts_pos.push(0.0);
         }
 
-        let timer_start = std::time::Instant::now();
-        let bvh_buf = build_bvh(&device, &queue, verts_pos.as_slice(), &mut mesh.indices);
-        let time = timer_start.elapsed().as_micros() as f32 / 1_000.0;
-        loading_times.bvh_build = time;
+        let bvh_buf = lp::build_bvh(&device, &queue, verts_pos.as_slice(), &mut mesh.indices);
 
-        let verts_pos_buf = upload_storage_buffer(&device, &queue, unsafe { to_u8_slice(&verts_pos) });
-        let indices_buf = upload_storage_buffer(&device, &queue, unsafe { to_u8_slice(&mesh.indices) });
-        let mut verts: Vec<Vertex> = Vec::new();
+        let verts_pos_buf = lp::upload_storage_buffer(&device, &queue, unsafe { to_u8_slice(&verts_pos) });
+        let indices_buf = lp::upload_storage_buffer(&device, &queue, unsafe { to_u8_slice(&mesh.indices) });
+        let mut verts: Vec<lp::Vertex> = Vec::new();
         verts.reserve_exact(mesh.positions.len() / 3);
         for vert_idx in 0..(mesh.positions.len() / 3)
         {
@@ -64,27 +53,27 @@ pub fn load_scene_obj(device: &wgpu::Device, queue: wgpu::Queue, path: &str)->()
                 tex_coords = normalize_vec2(tex_coords);
             };
 
-            let vert = Vertex { normal, padding0: 0.0, tex_coords, padding1: 0.0, padding2: 0.0 };
+            let vert = lp::Vertex { normal: normal.into(), padding0: 0.0, tex_coords: tex_coords.into(), padding1: 0.0, padding2: 0.0 };
 
             verts.push(vert);
         }
 
-        let verts_buf = upload_storage_buffer(&device, &queue, unsafe { to_u8_slice(&verts) });
+        let verts_buf = lp::upload_storage_buffer(&device, &queue, unsafe { to_u8_slice(&verts) });
 
-        return (Scene
+        return lp::SceneDesc
         {
             verts_pos: verts_pos_buf,
             indices:   indices_buf,
             bvh_nodes: bvh_buf,
             verts:     verts_buf
-        }, loading_times);
+        };
     }
 
-    return (Scene
+    return lp::SceneDesc
     {
-        verts_pos: create_empty_storage_buffer(&device, &queue),
-        indices:   create_empty_storage_buffer(&device, &queue),
-        bvh_nodes: create_empty_storage_buffer(&device, &queue),
-        verts:     create_empty_storage_buffer(&device, &queue)
-    }, loading_times);
+        verts_pos: lp::create_empty_storage_buffer(&device, &queue),
+        indices:   lp::create_empty_storage_buffer(&device, &queue),
+        bvh_nodes: lp::create_empty_storage_buffer(&device, &queue),
+        verts:     lp::create_empty_storage_buffer(&device, &queue)
+    };
 }
