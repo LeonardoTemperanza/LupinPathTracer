@@ -3,6 +3,7 @@ use crate::base::*;
 use crate::wgpu_utils::*;
 
 pub static DEFAULT_PATHTRACER_SRC: &str = include_str!("shaders/pathtracer.wgsl");
+pub static TONEMAPPING_SRC: &str = include_str!("shaders/tonemapping.wgsl");
 
 #[derive(Debug, Default, Clone, Copy)]
 #[repr(C)]
@@ -21,14 +22,19 @@ pub struct Vec3
     pub z: f32
 }
 
+#[derive(Debug, Clone, Copy)]
+#[repr(C)]
+pub struct Mat4
+{
+    pub m: [[f32; 4]; 4]
+}
+
 pub struct SceneDesc
 {
     pub verts_pos: wgpu::Buffer,
     pub indices: wgpu::Buffer,
     pub bvh_nodes: wgpu::Buffer,
     pub verts: wgpu::Buffer,
-
-    pub camera_transform: Mat4
 }
 
 // This doesn't include positions, as that
@@ -79,13 +85,13 @@ pub fn get_required_device_spec()->wgpu::DeviceDescriptor<'static>
 
 // Shader params
 
-pub struct ShaderParams
+pub struct PathtraceShaderParams
 {
     pub shader: wgpu::ShaderModule,
     pub pipeline: wgpu::ComputePipeline,
 }
 
-pub fn build_shader_params(device: &wgpu::Device, with_runtime_checks: bool) -> ShaderParams
+pub fn build_pathtrace_shader_params(device: &wgpu::Device, with_runtime_checks: bool) -> PathtraceShaderParams
 {
     let shader_desc = wgpu::ShaderModuleDescriptor {
         label: Some("Lupin Pathtracer Shader"),
@@ -107,7 +113,7 @@ pub fn build_shader_params(device: &wgpu::Device, with_runtime_checks: bool) -> 
                 visibility: wgpu::ShaderStages::COMPUTE,
                 ty: wgpu::BindingType::StorageTexture {
                     access: wgpu::StorageTextureAccess::WriteOnly,
-                    format: wgpu::TextureFormat::Rgba8Unorm,
+                    format: wgpu::TextureFormat::Rgba16Float,
                     view_dimension: wgpu::TextureViewDimension::D2
                 },
                 count: None
@@ -135,8 +141,7 @@ pub fn build_shader_params(device: &wgpu::Device, with_runtime_checks: bool) -> 
             wgpu::BindGroupLayoutEntry {
                 binding: 3,
                 visibility: wgpu::ShaderStages::COMPUTE,
-                ty: wgpu::BindingType::Buffer
-                {
+                ty: wgpu::BindingType::Buffer {
                     ty: wgpu::BufferBindingType::Storage { read_only: true },
                     has_dynamic_offset: false,
                     min_binding_size: None,
@@ -146,8 +151,7 @@ pub fn build_shader_params(device: &wgpu::Device, with_runtime_checks: bool) -> 
             wgpu::BindGroupLayoutEntry {
                 binding: 4,
                 visibility: wgpu::ShaderStages::COMPUTE,
-                ty: wgpu::BindingType::Buffer
-                {
+                ty: wgpu::BindingType::Buffer {
                     ty: wgpu::BufferBindingType::Storage { read_only: true },
                     has_dynamic_offset: false,
                     min_binding_size: None,
@@ -157,8 +161,7 @@ pub fn build_shader_params(device: &wgpu::Device, with_runtime_checks: bool) -> 
             wgpu::BindGroupLayoutEntry {
                 binding: 5,
                 visibility: wgpu::ShaderStages::COMPUTE,
-                ty: wgpu::BindingType::Buffer
-                {
+                ty: wgpu::BindingType::Buffer {
                     ty: wgpu::BufferBindingType::Uniform,
                     has_dynamic_offset: false,
                     min_binding_size: None,
@@ -183,14 +186,14 @@ pub fn build_shader_params(device: &wgpu::Device, with_runtime_checks: bool) -> 
         cache: None,
     });
 
-    return ShaderParams {
+    return PathtraceShaderParams {
         shader,
         pipeline
     };
 }
 
 #[cfg(disable)]
-pub fn build_shader_params_custom_shader(device: &wgpu::Device, shader_src: &str) -> ShaderParams
+pub fn build_pathtrace_shader_params_custom_shader(device: &wgpu::Device, shader_src: &str) -> ShaderParams
 {
     return ShaderParams {
 
@@ -207,7 +210,67 @@ pub fn build_shader_params_custom_shader(device: &wgpu::Device, shader_src: &str
 // defaultable - region (offset and size to render)
 // defaultable - motion_blur_params
 
-pub fn pathtrace_scene(device: &wgpu::Device, scene: &SceneDesc, render_target: &wgpu::TextureView, shader_params: &ShaderParams)
+pub fn pathtrace_scene(device: &wgpu::Device, queue: &wgpu::Queue, scene: &SceneDesc, render_target: &wgpu::Texture, shader_params: &PathtraceShaderParams, camera_transform: Mat4)
+{
+    // TODO: Check format and usage of render target params
+
+    let render_target_view = render_target.create_view(&Default::default());
+
+    use wgpu::util::DeviceExt;
+    let camera_transform_uniform = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("Camera Buffer"),
+        contents: to_u8_slice(&[camera_transform]),
+        usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+    });
+
+    let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: None,
+        layout: &shader_params.pipeline.get_bind_group_layout(0),
+        entries: &[
+            wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(&render_target_view) },
+            wgpu::BindGroupEntry { binding: 1, resource: buffer_resource(&scene.verts_pos) },
+            wgpu::BindGroupEntry { binding: 2, resource: buffer_resource(&scene.indices) },
+            wgpu::BindGroupEntry { binding: 3, resource: buffer_resource(&scene.bvh_nodes) },
+            wgpu::BindGroupEntry { binding: 4, resource: buffer_resource(&scene.verts) },
+            wgpu::BindGroupEntry { binding: 5, resource: buffer_resource(&camera_transform_uniform) }
+        ]
+    });
+
+    let mut encoder = device.create_command_encoder(&Default::default());
+
+    {
+        let mut compute_pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+            label: None,
+            timestamp_writes: None
+        });
+
+        compute_pass.set_pipeline(&shader_params.pipeline);
+        compute_pass.set_bind_group(0, &bind_group, &[]);
+        // NOTE: This has to be in sync with the value in the shader
+        const WORKGROUP_SIZE_X: u32 = 8;
+        const WORKGROUP_SIZE_Y: u32 = 8;
+        let num_workers_x = (render_target.width() + WORKGROUP_SIZE_X - 1) / WORKGROUP_SIZE_X;
+        let num_workers_y = (render_target.height() + WORKGROUP_SIZE_Y - 1) / WORKGROUP_SIZE_Y;
+        compute_pass.dispatch_workgroups(num_workers_x, num_workers_y, 1);
+    }
+
+    queue.submit(Some(encoder.finish()));
+}
+
+pub enum DebugVisualizationType
+{
+    VisualizeNormals,
+    VisualizeBVHBoxTests { threshold: i32 },
+    VisualizeBVHTriTests { threshold: i32 }
+}
+
+pub struct DebugParams
+{
+    pub viz: DebugVisualizationType,
+    pub display_env_map: bool
+}
+
+pub fn pathtrace_debug_viz(device: &wgpu::Device, scene: &SceneDesc, render_target: &wgpu::Texture, shader_params: &PathtraceShaderParams, debug_params: &DebugParams)
 {
 
 }
@@ -258,7 +321,7 @@ pub fn build_bvh(device: &wgpu::Device, queue: &wgpu::Queue, verts: &[f32], indi
     //bvh_split_bfs(&mut bvh, verts, indices, centroids.as_mut_slice(), tri_bounds.as_mut_slice(), 0, 1);
 
     // Upload the buffer to GPU
-    let res = upload_storage_buffer(&device, &queue, unsafe { to_u8_slice(&bvh) });
+    let res = upload_storage_buffer(&device, &queue, to_u8_slice(&bvh));
     return res;
 }
 
@@ -501,7 +564,7 @@ pub fn node_cost(size: Vec3, num_tris: u32)->f32
     return half_area * num_tris as f32;
 }
 
-pub fn get_tri(verts: &[f32], indices: &[u32], tri_idx: usize)->(Vec3, Vec3, Vec3)
+fn get_tri(verts: &[f32], indices: &[u32], tri_idx: usize)->(Vec3, Vec3, Vec3)
 {
     let idx0 = (indices[tri_idx*3+0]*4) as usize;
     let idx1 = (indices[tri_idx*3+1]*4) as usize;
@@ -529,7 +592,7 @@ pub fn get_tri(verts: &[f32], indices: &[u32], tri_idx: usize)->(Vec3, Vec3, Vec
     return (t0, t1, t2);
 }
 
-pub fn swap_tris(indices: &mut[u32], centroids: &mut[Vec3], tri_bounds: &mut[Aabb], tri_a: u32, tri_b: u32)
+fn swap_tris(indices: &mut[u32], centroids: &mut[Vec3], tri_bounds: &mut[Aabb], tri_a: u32, tri_b: u32)
 {
     let tri_a = tri_a as usize;
     let tri_b = tri_b as usize;
@@ -556,7 +619,7 @@ pub fn swap_tris(indices: &mut[u32], centroids: &mut[Vec3], tri_bounds: &mut[Aab
     tri_bounds[tri_b] = tmp;
 }
 
-pub fn compute_aabb(_indices: &[u32], tri_bounds: &mut[Aabb], tri_begin: u32, tri_count: u32)->(Vec3, Vec3)
+fn compute_aabb(_indices: &[u32], tri_bounds: &mut[Aabb], tri_begin: u32, tri_count: u32)->(Vec3, Vec3)
 {
     let mut res = Aabb::default();
     let tri_end = tri_begin + tri_count;
@@ -567,4 +630,186 @@ pub fn compute_aabb(_indices: &[u32], tri_bounds: &mut[Aabb], tri_begin: u32, tr
     }
 
     return (res.min, res.max);
+}
+
+////////
+// Tonemapping
+
+pub struct TonemapShaderParams
+{
+    pub aces_pipeline: wgpu::RenderPipeline,
+    pub filmic_pipeline: wgpu::RenderPipeline,
+}
+
+pub fn build_tonemap_shader_params(device: &wgpu::Device) -> TonemapShaderParams
+{
+    let shader_desc = wgpu::ShaderModuleDescriptor {
+        label: Some("Lupin Aces Tonemapping Shader"),
+        source: wgpu::ShaderSource::Wgsl(TONEMAPPING_SRC.into())
+    };
+
+    let tonemap_shader = device.create_shader_module(shader_desc);
+
+    let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor{
+        label: None,
+        entries: &[
+            wgpu::BindGroupLayoutEntry {
+                binding: 0,
+                visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Texture {
+                    multisampled: false,
+                    sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                    view_dimension: wgpu::TextureViewDimension::D2
+                },
+                count: None
+            },
+            wgpu::BindGroupLayoutEntry {
+                binding: 1,
+                visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                count: None
+            },
+            wgpu::BindGroupLayoutEntry {
+                binding: 2,
+                visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Uniform,
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None
+            }
+        ]
+    });
+
+    let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+        label: Some("Lupin Tonemapping Pipeline Layout"),
+        bind_group_layouts: &[&bind_group_layout],
+        push_constant_ranges: &[],
+    });
+
+    fn tonemap_pipeline_descriptor<'a>(shader: &'a wgpu::ShaderModule, pipeline_layout: &'a wgpu::PipelineLayout, frag_main: &'static str) -> wgpu::RenderPipelineDescriptor<'a>
+    {
+        return wgpu::RenderPipelineDescriptor {
+            label: Some("Render Pipeline"),
+            layout: Some(pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &shader,
+                entry_point: Some("vert_main"),
+                buffers: &[],
+                compilation_options: Default::default(),
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &shader,
+                entry_point: Some(frag_main),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: wgpu::TextureFormat::Rgba8Unorm,  // TODO How to work with other formats?
+                    blend: Some(wgpu::BlendState {
+                        color: wgpu::BlendComponent::REPLACE,
+                        alpha: wgpu::BlendComponent::REPLACE,
+                    }),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+                compilation_options: Default::default(),
+            }),
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                strip_index_format: None,
+                front_face: wgpu::FrontFace::Ccw,
+                cull_mode: Some(wgpu::Face::Back),
+                polygon_mode: wgpu::PolygonMode::Fill,
+                unclipped_depth: false,
+                conservative: false,
+            },
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState {
+                count: 1,
+                mask: !0,
+                alpha_to_coverage_enabled: false,
+            },
+            multiview: None,
+            cache: None,
+        }
+    }
+
+    let aces_pipeline = device.create_render_pipeline(&tonemap_pipeline_descriptor(&tonemap_shader, &pipeline_layout, "aces_main"));
+    let filmic_pipeline = device.create_render_pipeline(&tonemap_pipeline_descriptor(&tonemap_shader, &pipeline_layout, "filmic_main"));
+
+    return TonemapShaderParams {
+        aces_pipeline,
+        filmic_pipeline
+    };
+}
+
+pub fn aces_tonemapping(device: &wgpu::Device, queue: &wgpu::Queue, shader_params: &TonemapShaderParams, hdr_texture: &wgpu::Texture, render_target: &wgpu::Texture, exposure: f32)
+{
+    let render_target_view = render_target.create_view(&Default::default());
+    let hdr_texture_view = hdr_texture.create_view(&Default::default());
+
+    use wgpu::util::DeviceExt;
+    let exposure_uniform = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("Camera Buffer"),
+        contents: to_u8_slice(&[exposure]),
+        usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+    });
+
+    let linear_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+        address_mode_u: wgpu::AddressMode::ClampToEdge,
+        address_mode_v: wgpu::AddressMode::ClampToEdge,
+        address_mode_w: wgpu::AddressMode::ClampToEdge,
+        mag_filter: wgpu::FilterMode::Linear,
+        min_filter: wgpu::FilterMode::Linear,
+        mipmap_filter: wgpu::FilterMode::Linear,
+        ..Default::default()
+    });
+
+    let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: None,
+        layout: &shader_params.aces_pipeline.get_bind_group_layout(0),
+        entries: &[
+            wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(&hdr_texture_view) },
+            wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::Sampler(&linear_sampler) },
+            wgpu::BindGroupEntry { binding: 2, resource: buffer_resource(&exposure_uniform) },
+        ]
+    });
+
+    let mut encoder = device.create_command_encoder(&Default::default());
+
+    {
+        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: None,
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view: &render_target_view,
+                resolve_target: None,
+                ops: wgpu::Operations {
+                    load: wgpu::LoadOp::Clear(wgpu::Color { r: 0.0, g: 0.0, b: 0.0, a: 1.0 }),
+                    store: wgpu::StoreOp::Store
+                },
+            })],
+            depth_stencil_attachment: None,
+            occlusion_query_set: None,
+            timestamp_writes: None
+        });
+
+        pass.set_pipeline(&shader_params.aces_pipeline);
+        pass.set_bind_group(0, &bind_group, &[]);
+        pass.draw(0..6, 0..1);
+    }
+
+    queue.submit(Some(encoder.finish()));
+}
+
+pub fn filmic_tonemapping(device: &wgpu::Device, queue: &wgpu::Queue, shader_params: &TonemapShaderParams, hdr_texture: &wgpu::Texture, render_target: &wgpu::Texture, exposure: f32)
+{
+
+}
+
+fn buffer_resource(buffer: &wgpu::Buffer)->wgpu::BindingResource
+{
+    use wgpu::*;
+    return BindingResource::Buffer(BufferBinding {
+        buffer: buffer,
+        offset: 0,
+        size: None
+    });
 }

@@ -54,6 +54,7 @@ pub const RAD_TO_DEG: f32 = 57.29578049;
 
 use crate::renderer::Vec3;
 use crate::renderer::Vec2;
+use crate::renderer::Mat4;
 
 impl Vec3
 {
@@ -252,11 +253,12 @@ impl std::fmt::Display for Vec3
 
 // Matrices (they are all column major)
 
-#[derive(Debug, Default, Clone, Copy)]
-#[repr(C)]
-pub struct Mat4
+impl Default for Mat4
 {
-    pub m: [[f32; 4]; 4]
+    fn default() -> Self
+    {
+        return Self::IDENTITY;
+    }
 }
 
 impl Mat4
@@ -607,7 +609,7 @@ pub fn append_to_path(p: std::path::PathBuf, s: &str)->std::path::PathBuf
 }
 
 // Useful for passing buffers to the GPU
-pub unsafe fn to_u8_slice<T>(slice: &[T])->&[u8]
+pub fn to_u8_slice<T>(slice: &[T])->&[u8]
 {
     let buf_size = slice.len() * std::mem::size_of::<T>();
     return unsafe

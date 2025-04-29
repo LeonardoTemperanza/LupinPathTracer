@@ -629,6 +629,14 @@ impl Into<lp::Vec2> for Vec2
     }
 }
 
+impl Into<lp::Mat4> for Mat4
+{
+    fn into(self) -> lp::Mat4
+    {
+        return lp::Mat4 { m: self.m }
+    }
+}
+
 ////////
 // Miscellaneous
 

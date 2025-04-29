@@ -36,9 +36,9 @@ pub fn init_default_wgpu_context<'a>(device_desc: wgpu::DeviceDescriptor,
     let (device, queue) = maybe_device_queue.expect("Failed to get device");
 
     let swapchain_capabilities = surface.get_capabilities(&adapter);
-    let swapchain_format = swapchain_capabilities.formats[0];
+    let swapchain_format = wgpu::TextureFormat::Rgba8Unorm;
 
-    let default_present_mode = wgpu::PresentMode::Immediate;
+    let default_present_mode = wgpu::PresentMode::Mailbox;
     configure_surface(&mut surface, &device, swapchain_format, default_present_mode, window_width, window_height);
 
     return (device, queue, surface, adapter);
@@ -53,7 +53,7 @@ pub fn upload_storage_buffer(device: &wgpu::Device, queue: &wgpu::Queue, buf: &[
         mapped_at_creation: false,
     });
 
-    queue.write_buffer(&wgpu_buffer, 0, unsafe { to_u8_slice(&buf) });
+    queue.write_buffer(&wgpu_buffer, 0, to_u8_slice(&buf));
     return wgpu_buffer
 }
 

@@ -1,17 +1,15 @@
 
-//#include "base.wgsl"
-
-// Scene representation
-//@group(0) @binding(0) var models: storage
-
-/*
-@group(0) @binding(0) var output_texture: texture_storage_2d<rgba8unorm, write>;
+// Scene
+// The problem here is that storage texture formats are hardcoded in the shader.
+// In theory we could reserve multiple bindings for different texture formats and
+// then just have a "selector" uniform? Writing the output is cheap compared to the rest
+// so I think this should be fine. For now let's just support 32 float.
+@group(0) @binding(0) var output_texture: texture_storage_2d<rgba16float, write>;
 @group(0) @binding(1) var<storage, read> verts_pos: array<vec3f>;
 @group(0) @binding(2) var<storage, read> indices: array<u32>;
 @group(0) @binding(3) var<storage, read> bvh_nodes: array<BvhNode>;
 @group(0) @binding(4) var<storage, read> verts: array<Vertex>;
 @group(0) @binding(5) var<uniform> camera_transform: mat4x4f;
-*/
 
 //@group(1) @binding(0) var atlas_1_channel: texture_2d<r8unorm, read>;
 // Like base color
@@ -160,7 +158,7 @@ struct HitInfo
     tex_coords: vec2f
 }
 
-//const MAX_BVH_DEPTH: u32 = 25;
+const MAX_BVH_DEPTH: u32 = 25;
 //const STACK_SIZE: u32 = (MAX_BVH_DEPTH + 1) * 8 * 8;
 //var<workgroup> stack: array<u32, STACK_SIZE>;
 
@@ -168,11 +166,11 @@ fn ray_scene_intersection(local_id: vec3u, ray: Ray)->HitInfo
 {
     // Comment/Uncomment to test the performance of shared memory
     // vs local array (registers or global memory)
-    // Shared memory is much faster (on a GTX 1070).
-    //let offset: u32 = 0u;
-    let offset = (local_id.y * 8 + local_id.x) * (MAX_BVH_DEPTH + 1);
+    // Shared memory is faster (on a GTX 1070).
+    let offset: u32 = 0u;                                            // local
+    //let offset = (local_id.y * 8 + local_id.x) * (MAX_BVH_DEPTH + 1);  // Shared memory
 
-    //var stack: array<u32, 26>;
+    var stack: array<u32, 26>;  // local
     var stack_idx: u32 = 2;
     stack[0 + offset] = 0u;
     stack[1 + offset] = 0u;
@@ -274,16 +272,8 @@ fn ray_scene_intersection(local_id: vec3u, ray: Ray)->HitInfo
 
 @compute
 @workgroup_size(8, 8, 1)
-fn cs_main(@builtin(local_invocation_id) local_id: vec3u, @builtin(global_invocation_id) global_id: vec3<u32>)
+fn main(@builtin(local_invocation_id) local_id: vec3u, @builtin(global_invocation_id) global_id: vec3<u32>)
 {
-    var color = vec4f(1.0f, 0.0f, 0.0f, 1.0f);
-
-    if global_id.x < output_dim.x && global_id.y < output_dim.y
-    {
-        textureStore(output_texture, global_id.xy, color);
-    }
-
-    /*
     var frag_coord = vec2f(global_id.xy) + 0.5f;
     var output_dim = textureDimensions(output_texture).xy;
     var resolution = vec2f(output_dim.xy);
@@ -307,5 +297,4 @@ fn cs_main(@builtin(local_invocation_id) local_id: vec3u, @builtin(global_invoca
     {
         textureStore(output_texture, global_id.xy, color);
     }
-    */
 }

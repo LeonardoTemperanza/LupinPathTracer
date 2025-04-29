@@ -48,7 +48,19 @@ fn main()
 
     // Init rendering resources
     let scene = load_scene_obj(&device, &queue, "stanford-bunny.obj");
-    let shader_params = lp::build_shader_params(&device, true);
+    let shader_params = lp::build_pathtrace_shader_params(&device, false);
+    let tonemap_shader_params = lp::build_tonemap_shader_params(&device);
+    let hdr_texture = device.create_texture(&wgpu::TextureDescriptor {
+        label: None,
+        size: wgpu::Extent3d { width: width as u32, height: height as u32, depth_or_array_layers: 1 },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: wgpu::TextureFormat::Rgba16Float,
+        usage: wgpu::TextureUsages::STORAGE_BINDING |
+               wgpu::TextureUsages::TEXTURE_BINDING,
+        view_formats: &[]
+    });
     //
 
     // let mut egui_ctx = egui::Context::default();
@@ -86,11 +98,18 @@ fn main()
                     delta_time = delta_time.min(min_delta_time);
                     time_begin = Instant::now();
 
+                    debug_loop_iter();
+
                     poll_input(&mut input_state, &mut input_diff);
 
+                    let camera_transform = position_matrix(Vec3 {x: 0.0, y: 0.0, z: -10.0});
                     let frame = surface.get_current_texture().unwrap();
-                    let render_target = frame.texture.create_view(&Default::default());
-                    lp::pathtrace_scene(&device, &scene, &render_target, &shader_params);
+                    lp::pathtrace_scene(&device, &queue, &scene, &hdr_texture,
+                                        &shader_params, camera_transform.into());
+
+                    let exposure = 0.0;
+                    lp::aces_tonemapping(&device, &queue, &tonemap_shader_params,
+                                         &hdr_texture, &frame.texture, exposure);
 
                     frame.present();
 
@@ -101,6 +120,25 @@ fn main()
             }
         }
     }).unwrap();
+}
+
+fn debug_loop_iter() {}
+
+fn resize_texture(device: &wgpu::Device, texture: &mut wgpu::Texture, new_width: u32, new_height: u32)
+{
+    let desc = wgpu::TextureDescriptor {
+        label: None,
+        size: texture.size(),
+        mip_level_count: texture.mip_level_count(),
+        sample_count: texture.sample_count(),
+        dimension: texture.dimension(),
+        format: texture.format(),
+        usage: texture.usage(),
+        view_formats: &[]
+    };
+
+    texture.destroy();
+    *texture = device.create_texture(&desc);
 }
 
 pub fn log_backend(adapter: &wgpu::Adapter)
