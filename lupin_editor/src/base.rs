@@ -123,6 +123,16 @@ pub fn square_f32(n: f32)->f32
     return n*n;
 }
 
+impl std::ops::AddAssign<Vec2> for Vec2
+{
+    #[inline]
+    fn add_assign(&mut self, rhs: Vec2)
+    {
+        self.x += rhs.x;
+        self.y += rhs.y;
+    }
+}
+
 impl std::ops::Add for Vec3
 {
     type Output = Self;
@@ -329,6 +339,34 @@ impl Default for Quat
     }
 }
 
+impl std::ops::Mul<Quat> for Quat
+{
+    type Output = Quat;
+
+    #[inline]
+    fn mul(self, rhs: Quat)->Quat
+    {
+        return Quat {
+            w: self.w * rhs.w - self.x * rhs.x - self.y * rhs.y - self.z * rhs.z,
+            x: self.w * rhs.x + self.x * rhs.w + self.y * rhs.z - self.z * rhs.y,
+            y: self.w * rhs.y + self.y * rhs.w + self.z * rhs.x - self.x * rhs.z,
+            z: self.w * rhs.z + self.z * rhs.w + self.x * rhs.y - self.y * rhs.x,
+        }
+    }
+}
+
+impl std::ops::MulAssign<Quat> for Quat
+{
+    #[inline]
+    fn mul_assign(&mut self, rhs: Quat)
+    {
+        self.w = self.w * rhs.w - self.x * rhs.x - self.y * rhs.y - self.z * rhs.z;
+        self.x = self.w * rhs.x + self.x * rhs.w + self.y * rhs.z - self.z * rhs.y;
+        self.y = self.w * rhs.y + self.y * rhs.w + self.z * rhs.x - self.x * rhs.z;
+        self.z = self.w * rhs.z + self.z * rhs.w + self.x * rhs.y - self.y * rhs.x;
+    }
+}
+
 impl Quat
 {
     pub const IDENTITY: Quat = Quat { w: 1.0, x: 0.0, y: 0.0, z: 0.0 };
@@ -368,7 +406,7 @@ impl Default for Transform
     }
 }
 
-pub fn rotate_vec3_with_quat(q: Quat, v: Vec3)->Vec3
+pub fn vec3_quat_mul(q: Quat, v: Vec3) -> Vec3
 {
     let num   = q.x * 2.0;
     let num2  = q.y * 2.0;
@@ -382,24 +420,11 @@ pub fn rotate_vec3_with_quat(q: Quat, v: Vec3)->Vec3
     let num10 = q.w * num;
     let num11 = q.w * num2;
     let num12 = q.w * num3;
-    return Vec3
-    {
+
+    return Vec3 {
         x: (1.0 - (num5 + num6)) * v.x + (num7 - num12) * v.y + (num8 + num11) * v.z,
         y: (num7 + num12) * v.x + (1.0 - (num4 + num6)) * v.y + (num9 - num10) * v.z,
-        z: (num8 - num11) * v.x + (num9 + num10) * v.y + (1.0 - (num4 + num5)) * v.z
-    };
-}
-
-// Applies b first, a second
-#[inline]
-pub fn quat_mul(a: Quat, b: Quat)->Quat
-{
-    return Quat
-    {
-        w: a.w * b.w - a.x * b.x - a.y * b.y - a.z * b.z,
-        x: a.w * b.x + a.x * b.w + a.y * b.z - a.z * b.y,
-        y: a.w * b.y + a.y * b.w + a.z * b.x - a.x * b.z,
-        z: a.w * b.z + a.z * b.w + a.x * b.y - a.y * b.x
+        z: (num8 - num11) * v.x + (num9 + num10) * v.y + (1.0 - (num4 + num5)) * v.z,
     };
 }
 
@@ -607,6 +632,11 @@ pub fn position_matrix(pos: Vec3)->Mat4
 pub fn transform_to_matrix(transform: Transform)->Mat4
 {
     return position_matrix(transform.pos) * rotation_matrix(transform.rot) * scale_matrix(transform.scale);
+}
+
+pub fn xform_to_matrix(pos: Vec3, rot: Quat, scale: Vec3) -> Mat4
+{
+    return position_matrix(pos) * rotation_matrix(rot) * scale_matrix(scale);
 }
 
 pub use lupin as lp;

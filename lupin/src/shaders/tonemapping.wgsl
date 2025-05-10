@@ -12,7 +12,7 @@ struct VertexOutput
 @vertex
 fn vert_main(@builtin(vertex_index) vertex_index : u32) -> VertexOutput
 {
-    // NOTE: Here we assume that the front face is in counter clockwise order
+    // NOTE: Assuming front face is counter clockwise
     const pos = array(
         vec2(-1.0,  1.0),
         vec2( 1.0, -1.0),
@@ -40,17 +40,18 @@ fn vert_main(@builtin(vertex_index) vertex_index : u32) -> VertexOutput
 @fragment
 fn filmic_main(input: VertexOutput) -> @location(0) vec4f
 {
-    return vec4f(1.0, 0.0, 0.0, 1.0);
+    let color = max(textureSample(source_texture, source_sampler, input.tex_coords).rgb, vec3f(0.0f));
+    return vec4(tonemap_filmic_uc2_default(pow(2.0f, exposure) * color), 1.0f);
 }
 
 @fragment
 fn aces_main(input: VertexOutput) -> @location(0) vec4f
 {
-    return textureSample(source_texture, source_sampler, input.tex_coords);
+    let color = max(textureSample(source_texture, source_sampler, input.tex_coords).rgb, vec3f(0.0f));
+    return vec4(tonemap_aces(pow(2.0f, exposure) * color), 1.0f);
 }
 
 // Tonemapping functions from: https://gist.github.com/SpineyPete/ebf9619f009318536c6da48209894fed
-/*
 fn tonemap_filmic_uc2(linear_color: vec3f, linear_white: f32, A: f32, B: f32, C: f32, D: f32, E: f32, F: f32) -> vec3f
 {
     // Uncharted II configurable tonemapper.
@@ -62,7 +63,7 @@ fn tonemap_filmic_uc2(linear_color: vec3f, linear_white: f32, A: f32, B: f32, C:
     // E = toe numerator
     // F = toe denominator
     // Note: E / F = toe angle
-    // linearWhite = linear white point value
+    // linear_white = linear white point value
 
     var x: vec3f = linear_color;
     let color: vec3f = ((x * (A * x + C * B) + D * E) / (x * (A * x + B) + D * F)) - E / F;
@@ -81,7 +82,7 @@ fn tonemap_filmic_uc2_default(color: vec3f) -> vec3f
     return tonemap_filmic_uc2(color, 11.2, 0.22, 0.3, 0.1, 0.2, 0.01, 0.30);
 }
 
-fn tonemap_aces(color: vec3f)
+fn tonemap_aces(color: vec3f) -> vec3f
 {
     // ACES filmic tonemapper with highlight desaturation ("crosstalk").
     // Based on the curve fit by Krzysztof Narkowicz.
@@ -104,7 +105,7 @@ fn tonemap_aces(color: vec3f)
     const d: f32 = 0.59f;
     const e: f32 = 0.14f;
 
-    let tonemap: vec4f = clamp((x * (a * x + b)) / (x * (c * x + d) + e), 0.0, 1.0);
+    let tonemap: vec4f = clamp((x * (a * x + b)) / (x * (c * x + d) + e), vec4f(0.0), vec4f(1.0));
     var t: f32 = x.a;
 
     t = t * t / (slope + t);
@@ -112,4 +113,3 @@ fn tonemap_aces(color: vec3f)
     // Return after desaturation step.
     return mix(tonemap.rgb, tonemap.aaa, t);
 }
-*/

@@ -7,3 +7,7 @@ members = [
     "lupin_editor"
 ]
 resolver = "2"
+
+[profile.dev.package.image]
+opt-level = 3
+debug = false

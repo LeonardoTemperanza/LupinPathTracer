@@ -1,61 +1,56 @@
 
-// Scene
-// The problem here is that storage texture formats are hardcoded in the shader.
-// In theory we could reserve multiple bindings for different texture formats and
-// then just have a "selector" uniform? Writing the output is cheap compared to the rest
-// so I think this should be fine. For now let's just support 32 float.
-@group(0) @binding(0) var output_texture: texture_storage_2d<rgba16float, write>;
-@group(0) @binding(1) var<storage, read> verts_pos: array<vec3f>;
-@group(0) @binding(2) var<storage, read> indices: array<u32>;
-@group(0) @binding(3) var<storage, read> bvh_nodes: array<BvhNode>;
-@group(0) @binding(4) var<storage, read> verts: array<Vertex>;
-@group(0) @binding(5) var<uniform> camera_transform: mat4x4f;
+// Group 0: Scene Description
+// Mesh
+@group(0) @binding(0) var<storage, read> verts_pos_array: binding_array<VertsPos>;
+@group(0) @binding(1) var<storage, read> verts_array: binding_array<Verts>;
+@group(0) @binding(2) var<storage, read> indices_array: binding_array<Indices>;
+@group(0) @binding(3) var<storage, read> bvh_nodes_array: binding_array<BvhNodes>;
+// Instances
+@group(0) @binding(4) var<storage, read> tlas_nodes: array<Vertex>;
+@group(0) @binding(5) var<storage, read> instances: array<Instance>;
+// Textures
+//@group(0) @binding(6) var textures: binding_array<texture_2d<f32>>;
+//@group(0) @binding(7) var samplers: binding_array<sampler>;
 
-//@group(1) @binding(0) var atlas_1_channel: texture_2d<r8unorm, read>;
-// Like base color
-//@group(1) @binding(2) var atlas_3_channels: texture_2d<rgb8unorm, read>;
-// Like environment maps
-//@group(1) @binding(4) var atlas_hdr_3_channels: texture_2d<rgbf32, read>;
+// Group 1: Pathtrace settings
+@group(1) @binding(0) var<uniform> camera_transform: mat4x4f;
 
+// Group 2: Render target
+@group(2) @binding(0) var output_texture: texture_storage_2d<rgba16float, write>;
+
+// We need these wrappers for some reason...
+struct VertsPos { data: array<vec3f> }
+struct Verts    { data: array<Vertex> }
+struct Indices  { data: array<u32> }
+struct BvhNodes { data: array<BvhNode> }
+
+// Constants
 const f32_max: f32 = 0x1.fffffep+127;
 
-// This doesn't include positions, as that
-// is stored in a separate buffer for locality
+// This doesn't include positions; those are
+// stored in a separate buffer for locality.
 struct Vertex
 {
     normal: vec3f,
+    // 4 bytes padding
     tex_coords: vec2f
+    // 8 bytes padding
 }
 
-struct PerFrame
+struct Instance
 {
-    camera_transform: mat4x3f
-}
-
-struct Material
-{
-    color_scale: vec3f,
-    alpha_scale: f32,
-    roughness_scale: f32,
-    emission_scale: f32,
-
-    // Textures (base coordinates for atlas lookup)
-    // An out of bounds index will yield the neutral value
-    // for the corresponding texture type
-    color_texture: vec2u,      // 3 channels
-    alpha_texture: vec2u,      // 1 channel
-    roughness_texture: vec2u,  // 1 channel
-    emission_texture: vec2u    // hdr 3 channels
-
-    // We also need some texture wrapping info, i guess.
-    // Stuff like: repeat, clamp, etc.
+    pos: vec3f,
+    mesh_idx: u32,
+    texture_idx: u32,
+    sampler_idx: u32,
+    // 8 bytes padding
 }
 
 struct Ray
 {
     ori: vec3f,
     dir: vec3f,
-    inv_dir: vec3f  // Precomputed inverse of the ray direction, for performance
+    inv_dir: vec3f  // Precomputed inverse of the ray direction, for performance.
 }
 
 fn transform_point(p: vec3f, transform: mat4x4f)->vec3f
@@ -73,7 +68,7 @@ fn transform_dir(dir: vec3f, transform: mat4x4f)->vec3f
 
 // NOTE: The odd ordering of the fields
 // ensures that the struct is 32 bytes wide,
-// given that vec3f has 16-byte padding
+// given that vec3f has 16-byte alignment.
 struct BvhNode
 {
     aabb_min:  vec3f,
@@ -96,19 +91,6 @@ struct TlasNode
     is_leaf:   u32,  // 32-bit bool
 
     // Second child is at index first_child + 1
-}
-
-struct MeshInstance
-{
-    // Transform from world space to model space
-    inverse_transform: mat4x3f,
-    material: Material,
-    bvh_root: u32
-}
-
-struct Scene
-{
-    env_map: vec2u,
 }
 
 // From: https://tavianator.com/2011/ray_box.html
@@ -159,18 +141,21 @@ struct HitInfo
 }
 
 const MAX_BVH_DEPTH: u32 = 25;
-//const STACK_SIZE: u32 = (MAX_BVH_DEPTH + 1) * 8 * 8;
-//var<workgroup> stack: array<u32, STACK_SIZE>;
+const STACK_SIZE: u32 = (MAX_BVH_DEPTH + 1) * 8 * 8;  // shared memory
+var<workgroup> stack: array<u32, STACK_SIZE>;         // shared memory
 
-fn ray_scene_intersection(local_id: vec3u, ray: Ray)->HitInfo
+fn ray_scene_intersection(local_id: vec3u, ray: Ray, test_idx: u32, test_pos: vec3f)->HitInfo
 {
+    // Transform the ray with the inverse of the instance transform.
+    let ray_trans = Ray(ray.ori - test_pos, ray.dir, ray.inv_dir);
+
     // Comment/Uncomment to test the performance of shared memory
     // vs local array (registers or global memory)
     // Shared memory is faster (on a GTX 1070).
-    let offset: u32 = 0u;                                            // local
-    //let offset = (local_id.y * 8 + local_id.x) * (MAX_BVH_DEPTH + 1);  // Shared memory
+    //let offset: u32 = 0u;                                                // local
+    let offset = (local_id.y * 8 + local_id.x) * (MAX_BVH_DEPTH + 1);  // shared memory
 
-    var stack: array<u32, 26>;  // local
+    //var stack: array<u32, 26>;  // local
     var stack_idx: u32 = 2;
     stack[0 + offset] = 0u;
     stack[1 + offset] = 0u;
@@ -183,7 +168,7 @@ fn ray_scene_intersection(local_id: vec3u, ray: Ray)->HitInfo
     while stack_idx > 1
     {
         stack_idx--;
-        let node = bvh_nodes[stack[stack_idx + offset]];
+        let node = bvh_nodes_array[test_idx].data[stack[stack_idx + offset]];
 
         if node.tri_count > 0u  // Leaf node
         {
@@ -191,10 +176,10 @@ fn ray_scene_intersection(local_id: vec3u, ray: Ray)->HitInfo
             let tri_count = node.tri_count;
             for(var i: u32 = tri_begin; i < tri_begin + tri_count; i++)
             {
-                let v0: vec3f = verts_pos[indices[i*3 + 0]];
-                let v1: vec3f = verts_pos[indices[i*3 + 1]];
-                let v2: vec3f = verts_pos[indices[i*3 + 2]];
-                let hit: vec3f = ray_tri_dst(ray, v0, v1, v2);
+                let v0: vec3f = verts_pos_array[test_idx].data[indices_array[test_idx].data[i*3 + 0]];
+                let v1: vec3f = verts_pos_array[test_idx].data[indices_array[test_idx].data[i*3 + 1]];
+                let v2: vec3f = verts_pos_array[test_idx].data[indices_array[test_idx].data[i*3 + 2]];
+                let hit: vec3f = ray_tri_dst(ray_trans, v0, v1, v2);
                 if hit.x < min_hit.x
                 {
                     min_hit = hit;
@@ -206,11 +191,11 @@ fn ray_scene_intersection(local_id: vec3u, ray: Ray)->HitInfo
         {
             let left_child  = node.tri_begin_or_first_child;
             let right_child = left_child + 1;
-            let left_child_node  = bvh_nodes[left_child];
-            let right_child_node = bvh_nodes[right_child];
+            let left_child_node  = bvh_nodes_array[test_idx].data[left_child];
+            let right_child_node = bvh_nodes_array[test_idx].data[right_child];
 
-            let left_dst  = ray_aabb_dst(ray, left_child_node.aabb_min,  left_child_node.aabb_max);
-            let right_dst = ray_aabb_dst(ray, right_child_node.aabb_min, right_child_node.aabb_max);
+            let left_dst  = ray_aabb_dst(ray_trans, left_child_node.aabb_min,  left_child_node.aabb_max);
+            let right_dst = ray_aabb_dst(ray_trans, right_child_node.aabb_min, right_child_node.aabb_max);
 
             // Push children onto the stack
             // The closest child should be looked at
@@ -256,9 +241,9 @@ fn ray_scene_intersection(local_id: vec3u, ray: Ray)->HitInfo
     var hit_info: HitInfo = HitInfo(min_hit.x, vec3f(0.0f), vec2f(0.0f));
     if hit_info.dst != f32_max
     {
-        let vert0: Vertex = verts[indices[tri_idx*3 + 0]];
-        let vert1: Vertex = verts[indices[tri_idx*3 + 1]];
-        let vert2: Vertex = verts[indices[tri_idx*3 + 2]];
+        let vert0: Vertex = verts_array[test_idx].data[indices_array[test_idx].data[tri_idx*3 + 0]];
+        let vert1: Vertex = verts_array[test_idx].data[indices_array[test_idx].data[tri_idx*3 + 1]];
+        let vert2: Vertex = verts_array[test_idx].data[indices_array[test_idx].data[tri_idx*3 + 2]];
         let u = min_hit.y;
         let v = min_hit.z;
         let w = 1.0 - u - v;
@@ -289,12 +274,20 @@ fn main(@builtin(local_invocation_id) local_id: vec3u, @builtin(global_invocatio
     camera_ray.dir = transform_dir(camera_ray.dir, camera_transform);
     camera_ray.inv_dir = 1.0f / camera_ray.dir;
 
-    var hit = ray_scene_intersection(local_id, camera_ray);
-
-    var color = vec4f(select(vec3f(0.0f), hit.normal, hit.dst != f32_max), 1.0f);
-
-    if global_id.x < output_dim.x && global_id.y < output_dim.y
+    var closest_hit = HitInfo(f32_max, vec3f(0.0), vec2f(0.0));
+    for (var i = 0; i < 4; i++)
     {
+        var hit = ray_scene_intersection(local_id, camera_ray, instances[i].mesh_idx, instances[i].pos);
+        if hit.dst < closest_hit.dst {
+            closest_hit = hit;
+        }
+    }
+
+    var color = vec4f(select(vec3f(0.0f), closest_hit.normal * 0.5f + 0.5f, closest_hit.dst != f32_max), 1.0f);
+    //var color = vec4f(select(vec3f(0.0f), vec3f(closest_hit.tex_coords, 1.0f), closest_hit.dst != f32_max), 1.0f);
+    color = max(color, vec4f(0.0));  // Clamp to 0
+
+    if global_id.x < output_dim.x && global_id.y < output_dim.y {
         textureStore(output_texture, global_id.xy, color);
     }
 }

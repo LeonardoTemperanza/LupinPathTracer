@@ -1,222 +1,152 @@
 
 // System for quickly polling inputs per frame.
-// One could also fetch the previous frame's inputs
-// for quickly comparing state.
 
 use winit::event::*;
 use crate::base::*;
 
-#[repr(C)]
-pub enum GamepadButtonField
+pub enum Key
 {
-    None          = 0,
-    DpadUp        = 1 << 1,
-    DpadDown      = 1 << 2,
-    DpadRight     = 1 << 4,
-    DpadLeft      = 1 << 3,
-    Start         = 1 << 5,
-    Back          = 1 << 6,
-    LeftThumb     = 1 << 7,
-    RightThumb    = 1 << 8,
-    LeftShoulder  = 1 << 9,
-    RightShoulder = 1 << 10,
-    A             = 1 << 11,
-    B             = 1 << 12,
-    X             = 1 << 13,
-    Y             = 1 << 14
-}
-
-#[repr(C)]
-pub enum VirtualKeycode
-{
-    Null = 0,
+    W = 0,  // NOTE: Do not change this.
     A,
-    B,
-    C,
-    D,
-    E,
-    F,
-    G,
-    H,
-    I,
-    J,
-    K,
-    L,
-    M,
-    N,
-    O,
-    P,
-    Q,
-    R,
     S,
-    T,
-    U,
-    V,
-    W,
-    X,
-    Y,
-    Z,
+    D,
+    Q,
+    E,
+    P,
+    _1,
+    LSHIFT,
+    LCTRL,
+    SPACEBAR,
 
-    Count
+    NumValues,
+}
+
+impl<T> std::ops::Index<Key> for [T; Key::NumValues as usize]
+{
+    type Output = T;
+    fn index(&self, idx: Key) -> &Self::Output
+    {
+        return &self[idx as usize];
+    }
+}
+impl<T> std::ops::IndexMut<Key> for [T; Key::NumValues as usize]
+{
+    fn index_mut(&mut self, idx: Key) -> &mut Self::Output
+    {
+        return &mut self[idx as usize];
+    }
 }
 
 #[derive(Default, Clone, Copy)]
-pub struct MouseState
+pub struct Input
 {
-    // In pixels starting from the top-left corner
-    // of the application window. This is guaranteed
-    // to be < 0 if the cursor is not on the window
-    pub x_pos: i64,
-    pub y_pos: i64,
-    pub delta: Vec2,
-
-    pub left_click: bool,
-    pub right_click: bool
+    pub lmouse: ButtonState,
+    pub rmouse: ButtonState,
+    pub mmouse: ButtonState,
+    pub keys: [ButtonState; Key::NumValues as usize],
+    pub mouse_dx: f32,  // Pixels/dpi (inches), right is positive
+    pub mouse_dy: f32,  // Pixels/dpi (inches), up is positive
 }
 
-// All inactive gamepads will have every property set
-// to 0, so no need to check for the active flag unless needed.
+// "Pressed" and "Released" will be active for a single frame.
+// "Pressing" will always be true when "Pressed" is true,
+// "Pressing" will always be false when "Released" is true
 #[derive(Default, Clone, Copy)]
-pub struct GamepadState
+pub struct ButtonState
 {
-    pub active: bool,
-    pub buttons: u32,
-
-    // Values are normalized from 0 to 1.
-    pub left_trigger: f32,
-    pub right_trigger: f32,
-
-    // Values are normalized from -1 to 1.
-    pub left_stick_x: f32,
-    pub left_stick_y: f32,
-    pub right_stick_x: f32,
-    pub right_stick_y: f32
+    pub pressed: bool,
+    pub pressing: bool,
+    pub released: bool
 }
 
-#[derive(Default, Clone, Copy)]
-pub struct KeyboardState
+pub fn begin_input_events(input: &mut Input)
 {
-    pub keys: [bool; VirtualKeycode::Count as usize]
+    // Zero out mouse delta
+    input.mouse_dx = 0.0;
+    input.mouse_dy = 0.0;
+
+    // Zero out "one shot" booleans
+    input.lmouse.pressed  = false;
+    input.lmouse.released = false;
+    input.rmouse.pressed  = false;
+    input.rmouse.pressed  = false;
+    input.mmouse.released = false;
+    input.mmouse.released = false;
+    for key in &mut input.keys
+    {
+        key.pressed  = false;
+        key.released = false;
+    }
 }
 
-const MAX_ACTIVE_CONTROLLERS: usize = 10;
-#[derive(Default, Clone, Copy)]
-pub struct InputState
-{
-    pub gamepads: [GamepadState; MAX_ACTIVE_CONTROLLERS],
-    pub mouse_state: MouseState,
-    pub keyboard_state: KeyboardState,
-
-    pub prev_gamepads: [GamepadState; MAX_ACTIVE_CONTROLLERS],
-    pub prev_mouse_state: MouseState,
-    pub prev_keyboard_state: KeyboardState
-}
-
-#[derive(Default, Clone, Copy)]
-pub struct InputDiff
-{
-    pub keys_pressed:  [bool; VirtualKeycode::Count as usize],
-    pub keys_held:     [bool; VirtualKeycode::Count as usize],
-
-    // Right and up are positive
-    pub mouse_delta: Vec2,
-}
-
-pub fn collect_inputs_winit(diff: &mut InputDiff, event: &winit::event::Event<()>)
+pub fn process_input_event(input: &mut Input, event: &winit::event::Event<()>)
 {
     use winit::event::*;
-    use winit::keyboard::*;
+
+    fn press(button: &mut ButtonState)
+    {
+        button.pressed  = true;
+        button.pressing = true;
+    }
+
+    fn release(button: &mut ButtonState)
+    {
+        button.pressing = false;
+        button.released = true;
+    }
 
     if let Event::WindowEvent { window_id: _, event } = event
     {
         match event
         {
-            WindowEvent::KeyboardInput
-            {
-                event,
-                ..
-            } =>
-            {
-                if !event.repeat
+            WindowEvent::KeyboardInput { event, .. } =>
+            'block: {
+                if event.repeat { break 'block; }
+
+                let action: fn(&mut ButtonState);
+                if event.state == ElementState::Pressed {
+                    action = press;
+                } else if event.state == ElementState::Released {
+                    action = release;
+                } else {
+                    break 'block;
+                }
+
+                use winit::keyboard::Key::Character;
+                use winit::keyboard::Key::Named;
+                use winit::keyboard::NamedKey;
+                match &event.logical_key
                 {
-                    match &event.logical_key
-                    {
-                        Key::Character(c) if c == "w" =>
-                        {
-                            if event.state == ElementState::Pressed
-                            {
-                                diff.keys_pressed[VirtualKeycode::W as usize] = true;
-                                diff.keys_held[VirtualKeycode::W as usize] = true;
-                            }
-                            else if event.state == ElementState::Released
-                            {
-                                diff.keys_held[VirtualKeycode::W as usize] = false;
-                            }
-                        }
-                        Key::Character(c) if c == "a" =>
-                        {
-                            if event.state == ElementState::Pressed
-                            {
-                                diff.keys_pressed[VirtualKeycode::A as usize] = true;
-                                diff.keys_held[VirtualKeycode::A as usize] = true;
-                            }
-                            else if event.state == ElementState::Released
-                            {
-                                diff.keys_held[VirtualKeycode::A as usize] = false;
-                            }
-                        }
-                        Key::Character(c) if c == "s" =>
-                        {
-                            if event.state == ElementState::Pressed
-                            {
-                                diff.keys_pressed[VirtualKeycode::S as usize] = true;
-                                diff.keys_held[VirtualKeycode::S as usize] = true;
-                            }
-                            else if event.state == ElementState::Released
-                            {
-                                diff.keys_held[VirtualKeycode::S as usize] = false;
-                            }
-                        }
-                        Key::Character(c) if c == "d" =>
-                        {
-                            if event.state == ElementState::Pressed
-                            {
-                                diff.keys_pressed[VirtualKeycode::D as usize] = true;
-                                diff.keys_held[VirtualKeycode::D as usize] = true;
-                            }
-                            else if event.state == ElementState::Released
-                            {
-                                diff.keys_held[VirtualKeycode::D as usize] = false;
-                            }
-                        }
-                        Key::Character(c) if c == "q" =>
-                        {
-                            if event.state == ElementState::Pressed
-                            {
-                                diff.keys_pressed[VirtualKeycode::Q as usize] = true;
-                                diff.keys_held[VirtualKeycode::Q as usize] = true;
-                            }
-                            else if event.state == ElementState::Released
-                            {
-                                diff.keys_held[VirtualKeycode::Q as usize] = false;
-                            }
-                        }
-                        Key::Character(c) if c == "e" =>
-                        {
-                            if event.state == ElementState::Pressed
-                            {
-                                diff.keys_pressed[VirtualKeycode::E as usize] = true;
-                                diff.keys_held[VirtualKeycode::E as usize] = true;
-                            }
-                            else if event.state == ElementState::Released
-                            {
-                                diff.keys_held[VirtualKeycode::E as usize] = false;
-                            }
-                        }
-                        _ => (),
-                    }
+                    Character(c) if c.eq_ignore_ascii_case("w") => { action(&mut input.keys[Key::W]); }
+                    Character(c) if c.eq_ignore_ascii_case("a") => { action(&mut input.keys[Key::A]); }
+                    Character(c) if c.eq_ignore_ascii_case("s") => { action(&mut input.keys[Key::S]); }
+                    Character(c) if c.eq_ignore_ascii_case("d") => { action(&mut input.keys[Key::D]); }
+                    Character(c) if c.eq_ignore_ascii_case("q") => { action(&mut input.keys[Key::Q]); }
+                    Character(c) if c.eq_ignore_ascii_case("e") => { action(&mut input.keys[Key::E]); }
+                    Named(k) if *k == NamedKey::Shift => { action(&mut input.keys[Key::LSHIFT]); }
+                    _ => (),
                 }
             },
+            WindowEvent::MouseInput { state, button, .. } =>
+            'block: {
+                let action: fn(&mut ButtonState);
+                if *state == ElementState::Pressed {
+                    action = press;
+                } else if *state == ElementState::Released {
+                    action = release;
+                } else {
+                    break 'block;
+                }
+
+                use winit::event::MouseButton;
+                match button
+                {
+                    MouseButton::Left   => { action(&mut input.lmouse); }
+                    MouseButton::Right  => { action(&mut input.rmouse); }
+                    MouseButton::Middle => { action(&mut input.mmouse); }
+                    _ => (),
+                }
+            }
             _ => {}
         }
     }
@@ -226,31 +156,10 @@ pub fn collect_inputs_winit(diff: &mut InputDiff, event: &winit::event::Event<()
         {
             DeviceEvent::MouseMotion { delta } =>
             {
-                diff.mouse_delta.x += delta.0 as f32;
-                diff.mouse_delta.y -= delta.1 as f32;  // In winit, up = negative.
+                input.mouse_dx += delta.0 as f32;
+                input.mouse_dy -= delta.1 as f32;  // In winit, up = negative.
             },
             _ => {}
-        }
-    }
-}
-
-pub fn poll_input(state: &mut InputState, input_diff: &mut InputDiff)
-{
-    for i in 0..VirtualKeycode::Count as usize
-    {
-        let key_down = input_diff.keys_pressed[i] || input_diff.keys_held[i];
-        state.keyboard_state.keys[i] = key_down;
-    }
-
-    state.mouse_state.delta = input_diff.mouse_delta;
-    input_diff.mouse_delta = Vec2::default();
-
-    // Reset all one shot booleans
-    for i in 0..VirtualKeycode::Count as usize
-    {
-        if input_diff.keys_pressed[i] || input_diff.keys_held[i]
-        {
-            input_diff.keys_pressed[i] = false;
         }
     }
 }
