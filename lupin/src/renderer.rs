@@ -13,8 +13,8 @@ pub struct Vec2
     pub y: f32
 }
 
-#[repr(C)]
 #[derive(Debug, Default, Clone, Copy)]
+#[repr(C)]
 pub struct Vec3
 {
     pub x: f32,
@@ -29,10 +29,18 @@ pub struct Mat4
     pub m: [[f32; 4]; 4]
 }
 
+#[derive(Debug, Default, Clone, Copy)]
+#[repr(C)]
+pub struct Aabb
+{
+    pub min: Vec3,
+    pub max: Vec3
+}
+
 pub struct SceneDesc
 {
     // It would be more ergonomic to do a AoS here
-    // (which could then just be turned into SoA
+    // (which could then just be turned into SoA)
     pub verts_pos: Vec<wgpu::Buffer>,
     pub verts: Vec<wgpu::Buffer>,
     pub indices: Vec<wgpu::Buffer>,
@@ -45,20 +53,22 @@ pub struct SceneDesc
     pub samplers: Vec<wgpu::Sampler>
 }
 
+#[derive(Default, Clone, Copy, Debug)]
+#[repr(C)]
 pub struct Instance
 {
     pub pos: Vec3,
     pub mesh_idx: u32,
-    pub texture_idx: u32,
-    pub sampler_idx: u32,
+    pub mat_idx: u32,
     pub padding0: f32,
     pub padding1: f32,
+    pub padding2: f32,
 }
 
 // This doesn't include positions, as that
 // is stored in a separate buffer for locality
+#[derive(Default, Clone, Copy, Debug)]
 #[repr(C)]
-#[derive(Default)]
 pub struct Vertex
 {
     pub normal: Vec3,
@@ -71,8 +81,8 @@ pub struct Vertex
 // NOTE: The odd ordering of the fields
 // ensures that the struct is 32 bytes wide,
 // given that vec3f has 16-byte padding (on the GPU)
+#[derive(Default, Clone, Copy, Debug)]
 #[repr(C)]
-#[derive(Default, Clone, Copy)]
 pub struct BvhNode
 {
     pub aabb_min: Vec3,
@@ -81,6 +91,16 @@ pub struct BvhNode
     pub tri_begin_or_first_child: u32,
     pub aabb_max: Vec3,
     pub tri_count: u32
+}
+
+#[derive(Default, Clone, Copy, Debug)]
+#[repr(C)]
+pub struct TlasNode
+{
+    pub aabb_min: Vec3,
+    pub left_right: u32,  // 2x16 bits. If it's 0, this node is a leaf
+    pub aabb_max: Vec3,
+    pub instance_idx: u32
 }
 
 // Constants
@@ -111,8 +131,8 @@ pub fn get_required_device_spec()->wgpu::DeviceDescriptor<'static>
 
 pub struct PathtraceShaderParams
 {
-    pub shader: wgpu::ShaderModule,
     pub pipeline: wgpu::ComputePipeline,
+    pub debug_pipeline: wgpu::ComputePipeline,
 }
 
 pub fn build_pathtrace_shader_params(device: &wgpu::Device, with_runtime_checks: bool) -> PathtraceShaderParams
@@ -192,7 +212,7 @@ pub fn build_pathtrace_shader_params(device: &wgpu::Device, with_runtime_checks:
                 },
                 count: None,
             },
-            /*wgpu::BindGroupLayoutEntry {  // textures
+            wgpu::BindGroupLayoutEntry {  // textures
                 binding: 6,
                 visibility: wgpu::ShaderStages::COMPUTE,
                 ty: wgpu::BindingType::Texture {
@@ -207,8 +227,7 @@ pub fn build_pathtrace_shader_params(device: &wgpu::Device, with_runtime_checks:
                 visibility: wgpu::ShaderStages::COMPUTE,
                 ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
                 count: std::num::NonZero::new(1)
-            },
-            */
+            }
         ]
     });
 
@@ -263,29 +282,20 @@ pub fn build_pathtrace_shader_params(device: &wgpu::Device, with_runtime_checks:
         cache: None,
     });
 
+    let debug_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+        label: Some("Lupin Pathtracer Debug Pipeline"),
+        layout: Some(&pipeline_layout),
+        module: &shader,
+        entry_point: Some("main"),
+        compilation_options: Default::default(),
+        cache: None,
+    });
+
     return PathtraceShaderParams {
-        shader,
-        pipeline
+        pipeline,
+        debug_pipeline
     };
 }
-
-#[cfg(disable)]
-pub fn build_pathtrace_shader_params_custom_shader(device: &wgpu::Device, shader_src: &str) -> ShaderParams
-{
-    return ShaderParams {
-
-    };
-}
-
-// Rendering
-// Parameters:
-// device
-// scene
-// render_target
-// shader_params (shader itself, and things like vertex layout, bvh depth)
-// defaultable - accum_params (accum (bool), Option of previous image, frame_counter, when to stop?) (provide a function to advance the accum params)
-// defaultable - region (offset and size to render)
-// defaultable - motion_blur_params
 
 pub fn pathtrace_scene(device: &wgpu::Device, queue: &wgpu::Queue, scene: &SceneDesc, render_target: &wgpu::Texture, shader_params: &PathtraceShaderParams, camera_transform: Mat4)
 {
@@ -297,73 +307,17 @@ pub fn pathtrace_scene(device: &wgpu::Device, queue: &wgpu::Queue, scene: &Scene
     let camera_transform_uniform = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some("Camera Buffer"),
         contents: to_u8_slice(&[camera_transform]),
-        usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        usage: wgpu::BufferUsages::UNIFORM,
     });
 
-    fn array_of_buffer_bindings_resource(buffers: &Vec<wgpu::Buffer>) -> Vec<wgpu::BufferBinding>
-    {
-        let mut bindings: Vec<wgpu::BufferBinding> = Vec::with_capacity(buffers.len());
-        for i in 0..buffers.len()
-        {
-            bindings.push(wgpu::BufferBinding {
-                buffer: &buffers[i],
-                offset: 0,
-                size: None
-            });
-        }
-
-        return bindings;
-    }
-
-    fn array_of_texture_views(textures: &Vec<wgpu::Texture>) -> Vec<wgpu::TextureView>
-    {
-        let mut bindings: Vec<wgpu::TextureView> = Vec::with_capacity(textures.len());
-        for i in 0..textures.len()
-        {
-            let view = textures[i].create_view(&Default::default());
-            bindings.push(view);
-        }
-
-        return bindings;
-    }
-
-    fn array_of_texture_bindings_resource<'a>(texture_views: &'a Vec<wgpu::TextureView>) -> Vec<&'a wgpu::TextureView>
-    {
-        let mut bindings: Vec<&'a wgpu::TextureView> = Vec::with_capacity(texture_views.len());
-        bindings.push(&texture_views[0]);
-        for i in 0..texture_views.len() {
-            bindings.push(&texture_views[i]);
-        }
-
-        return bindings;
-    }
-
-    fn array_of_sampler_bindings_resource<'a>(samplers: &'a Vec<wgpu::Sampler>) -> Vec<&'a wgpu::Sampler>
-    {
-        let mut bindings: Vec<&'a wgpu::Sampler> = Vec::with_capacity(samplers.len());
-        for i in 0..samplers.len() {
-            bindings.push(&samplers[i]);
-        }
-
-        return bindings;
-    }
-
+    use crate::wgpu_utils::*;
     let verts_pos_array = array_of_buffer_bindings_resource(&scene.verts_pos);
     let verts_array     = array_of_buffer_bindings_resource(&scene.verts);
     let indices_array   = array_of_buffer_bindings_resource(&scene.indices);
     let bvh_nodes_array = array_of_buffer_bindings_resource(&scene.bvh_nodes);
-    //let texture_views   = array_of_texture_views(&scene.textures);
-    //let textures_array  = array_of_texture_bindings_resource(&texture_views);
-    //let samplers_array  = array_of_sampler_bindings_resource(&scene.samplers);
-
-/*
-    println!("{}", verts_pos_array.len);
-    println!("{}", verts_array.len);
-    println!("{}", indices_array.len);
-    println!("{}", bhv_nodes_array.len);
-    println!("{}", texture_views.len);
-    println!("{}", textures_arr.len);
-*/
+    let texture_views   = array_of_texture_views(&scene.textures);
+    let textures_array  = array_of_texture_bindings_resource(&texture_views);
+    let samplers_array  = array_of_sampler_bindings_resource(&scene.samplers);
 
     let scene_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
         label: None,
@@ -375,8 +329,115 @@ pub fn pathtrace_scene(device: &wgpu::Device, queue: &wgpu::Queue, scene: &Scene
             wgpu::BindGroupEntry { binding: 3, resource: wgpu::BindingResource::BufferArray(bvh_nodes_array.as_slice()) },
             wgpu::BindGroupEntry { binding: 4, resource: buffer_resource(&scene.tlas_nodes) },
             wgpu::BindGroupEntry { binding: 5, resource: buffer_resource(&scene.instances) },
-            //wgpu::BindGroupEntry { binding: 6, resource: wgpu::BindingResource::TextureViewArray(textures_array.as_slice()) },
-            //wgpu::BindGroupEntry { binding: 7, resource: wgpu::BindingResource::SamplerArray(&samplers_array.as_slice()) },
+            wgpu::BindGroupEntry { binding: 6, resource: wgpu::BindingResource::TextureViewArray(textures_array.as_slice()) },
+            wgpu::BindGroupEntry { binding: 7, resource: wgpu::BindingResource::SamplerArray(samplers_array.as_slice()) },
+        ]
+    });
+
+    let settings_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: None,
+        layout: &shader_params.pipeline.get_bind_group_layout(1),
+        entries: &[
+            wgpu::BindGroupEntry { binding: 0, resource: buffer_resource(&camera_transform_uniform) }
+        ]
+    });
+
+    let render_target_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: None,
+        layout: &shader_params.pipeline.get_bind_group_layout(2),
+        entries: &[
+            wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(&render_target_view) },
+        ]
+    });
+
+    let mut encoder = device.create_command_encoder(&Default::default());
+
+    {
+        let mut compute_pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+            label: None,
+            timestamp_writes: None
+        });
+
+        compute_pass.set_pipeline(&shader_params.pipeline);
+        compute_pass.set_bind_group(0, &scene_bind_group, &[]);
+        compute_pass.set_bind_group(1, &settings_bind_group, &[]);
+        compute_pass.set_bind_group(2, &render_target_bind_group, &[]);
+        // NOTE: This is tied to the corresponding value in the shader
+        const WORKGROUP_SIZE_X: u32 = 8;
+        const WORKGROUP_SIZE_Y: u32 = 8;
+        let num_workers_x = (render_target.width() + WORKGROUP_SIZE_X - 1) / WORKGROUP_SIZE_X;
+        let num_workers_y = (render_target.height() + WORKGROUP_SIZE_Y - 1) / WORKGROUP_SIZE_Y;
+        compute_pass.dispatch_workgroups(num_workers_x, num_workers_y, 1);
+    }
+
+    queue.submit(Some(encoder.finish()));
+}
+
+pub enum DebugAccelStructureVizType
+{
+    VizBVHBoxTests { threshold: i32 },
+    VizBVHTriTests { threshold: i32 },
+    VizBVHAllLevels,
+    VizBVHOneLevel { level: i32 },
+}
+
+pub enum DebugMeshVizType
+{
+    VizNormals,
+    VizWireframe,
+    VizColor,
+}
+
+pub struct DebugParams
+{
+    pub accel_viz: DebugAccelStructureVizType,
+    pub mesh_viz: DebugMeshVizType,
+    pub display_env_map: bool
+}
+
+#[derive(Default)]
+#[repr(C)]
+struct DebugInput
+{
+    bvh_viz_type: i32,
+    mesh_viz_type: i32,
+    threshold: i32,
+    level: i32,
+}
+
+pub fn pathtrace_scene_debug(device: &wgpu::Device, queue: &wgpu::Queue, scene: &SceneDesc, render_target: &wgpu::Texture, shader_params: &PathtraceShaderParams, camera_transform: Mat4)
+{
+    // TODO: Check format and usage of render target params and others
+
+    let render_target_view = render_target.create_view(&Default::default());
+
+    use wgpu::util::DeviceExt;
+    let camera_transform_uniform = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("Camera Buffer"),
+        contents: to_u8_slice(&[camera_transform]),
+        usage: wgpu::BufferUsages::UNIFORM,
+    });
+
+    let verts_pos_array = array_of_buffer_bindings_resource(&scene.verts_pos);
+    let verts_array     = array_of_buffer_bindings_resource(&scene.verts);
+    let indices_array   = array_of_buffer_bindings_resource(&scene.indices);
+    let bvh_nodes_array = array_of_buffer_bindings_resource(&scene.bvh_nodes);
+    let texture_views   = array_of_texture_views(&scene.textures);
+    let textures_array  = array_of_texture_bindings_resource(&texture_views);
+    let samplers_array  = array_of_sampler_bindings_resource(&scene.samplers);
+
+    let scene_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: None,
+        layout: &shader_params.pipeline.get_bind_group_layout(0),
+        entries: &[
+            wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::BufferArray(verts_pos_array.as_slice()) },
+            wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::BufferArray(verts_array.as_slice())     },
+            wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::BufferArray(indices_array.as_slice())   },
+            wgpu::BindGroupEntry { binding: 3, resource: wgpu::BindingResource::BufferArray(bvh_nodes_array.as_slice()) },
+            wgpu::BindGroupEntry { binding: 4, resource: buffer_resource(&scene.tlas_nodes) },
+            wgpu::BindGroupEntry { binding: 5, resource: buffer_resource(&scene.instances) },
+            wgpu::BindGroupEntry { binding: 6, resource: wgpu::BindingResource::TextureViewArray(textures_array.as_slice()) },
+            wgpu::BindGroupEntry { binding: 7, resource: wgpu::BindingResource::SamplerArray(samplers_array.as_slice()) },
         ]
     });
 
@@ -420,32 +481,104 @@ pub fn pathtrace_scene(device: &wgpu::Device, queue: &wgpu::Queue, scene: &Scene
     queue.submit(Some(encoder.finish()));
 }
 
-pub enum DebugVisualizationType
-{
-    VisualizeNormals,
-    VisualizeWireframe,
-    VisualizePreview,
-    VisualizeBVHBoxTests { threshold: i32 },
-    VisualizeBVHTriTests { threshold: i32 }
-}
-
-pub struct DebugParams
-{
-    pub viz: DebugVisualizationType,
-    pub display_env_map: bool
-}
-
-pub fn pathtrace_scene_debug(device: &wgpu::Device, scene: &SceneDesc, render_target: &wgpu::Texture, shader_params: &PathtraceShaderParams, debug_params: &DebugParams)
-{
-
-}
-
 ////////
-// BVH creation
+// Acceleration structures
+
+// The aabbs are in model space, and they're indexed using the instance mesh_idx member.
+pub fn build_tlas(device: &wgpu::Device, queue: &wgpu::Queue, instances: &[Instance], aabbs: &[Aabb]) -> wgpu::Buffer
+{
+    // TODO: Precompute the worldspace AABBs.
+
+    let mut node_indices = Vec::<u32>::with_capacity(instances.len());
+    let mut tlas = Vec::<TlasNode>::with_capacity(instances.len());
+
+    tlas.push(TlasNode::default());  // Reserve slot for root node.
+
+    // Assign a leaf node for each instance.
+    for i in 0..instances.len() as u32
+    {
+        node_indices.push(i + 1);
+
+        let instance = instances[i as usize];
+        let transform = position_matrix(instance.pos);
+        let aabb = aabbs[instance.mesh_idx as usize];
+        let aabb_trans = transform_aabb(aabb.min, aabb.max, transform);
+
+        let tlas_node = TlasNode {
+            aabb_min: aabb_trans.min,
+            aabb_max: aabb_trans.max,
+            instance_idx: i,
+            left_right: 0,  // Makes it a leaf.
+        };
+        tlas.push(tlas_node);
+    }
+
+    // Use agglomerative clustering.
+    let mut a: u32 = 0;
+    let mut b = tlas_find_best_match(tlas.as_slice(), node_indices.as_slice(), a);
+    while node_indices.len() > 1
+    {
+        let c = tlas_find_best_match(tlas.as_slice(), node_indices.as_slice(), b);
+        if a == c
+        {
+            let node_idx_a = node_indices[a as usize];
+            let node_idx_b = node_indices[b as usize];
+            let node_a = tlas[node_idx_a as usize];
+            let node_b = tlas[node_idx_b as usize];
+
+            let transform_a = position_matrix(instances[node_a.instance_idx as usize].pos);
+            let transform_b = position_matrix(instances[node_b.instance_idx as usize].pos);
+
+            let aabb_a_trans = transform_aabb(node_a.aabb_min, node_a.aabb_max, transform_a);
+            let aabb_b_trans = transform_aabb(node_b.aabb_min, node_b.aabb_max, transform_b);
+
+            let new_node = TlasNode {
+                left_right: node_idx_a + (node_idx_b << 16),
+                aabb_min: aabb_a_trans.min.min(aabb_b_trans.min),
+                aabb_max: aabb_a_trans.max.max(aabb_b_trans.max),
+                instance_idx: 0,  // Unused
+            };
+            tlas.push(new_node);
+
+            node_indices[a as usize] = tlas.len() as u32 - 1;
+            node_indices[b as usize] = node_indices[node_indices.len()-1];
+            node_indices.pop();
+            b = tlas_find_best_match(tlas.as_slice(), node_indices.as_slice(), a);
+        }
+        else
+        {
+            a = b;
+            b = c;
+        }
+
+        tlas[0] = tlas[node_indices[a as usize] as usize];
+    }
+
+    return upload_storage_buffer(&device, &queue, to_u8_slice(&tlas));
+}
+
+pub fn tlas_find_best_match(tlas: &[TlasNode], idx_array: &[u32], node_a: u32) -> u32
+{
+    let a_idx = idx_array[node_a as usize];
+
+    let mut smallest: f32 = f32::MAX;
+    let mut best_b: u32 = u32::MAX;
+    for (i, &b_idx) in idx_array.iter().enumerate()
+    {
+        let bmax = tlas[a_idx as usize].aabb_max.max(tlas[b_idx as usize].aabb_max);
+        let bmin = tlas[a_idx as usize].aabb_min.min(tlas[b_idx as usize].aabb_min);
+        let e = bmax - bmin;
+        let area = e.x * e.y + e.y * e.z + e.z * e.x;
+        if area < smallest { smallest = area; best_b = i as u32; }
+    }
+
+    assert!(best_b != u32::MAX);
+    return 0;
+}
 
 // NOTE: This modifies the indices array to change the order of triangles (indices)
 // based on the BVH
-pub fn build_bvh(device: &wgpu::Device, queue: &wgpu::Queue, verts: &[f32], indices: &mut[u32])->wgpu::Buffer
+pub fn build_bvh(device: &wgpu::Device, queue: &wgpu::Queue, verts: &[f32], indices: &mut[u32]) -> wgpu::Buffer
 {
     let num_tris: u32 = indices.len() as u32 / 3;
 
@@ -800,14 +933,16 @@ fn compute_aabb(_indices: &[u32], tri_bounds: &mut[Aabb], tri_begin: u32, tri_co
 
 pub struct TonemapShaderParams
 {
+    pub identity_pipeline: wgpu::RenderPipeline,
     pub aces_pipeline: wgpu::RenderPipeline,
     pub filmic_pipeline: wgpu::RenderPipeline,
+    pub sampler: wgpu::Sampler,
 }
 
 pub fn build_tonemap_shader_params(device: &wgpu::Device) -> TonemapShaderParams
 {
     let shader_desc = wgpu::ShaderModuleDescriptor {
-        label: Some("Lupin Aces Tonemapping Shader"),
+        label: Some("Lupin Tonemapping Shader"),
         source: wgpu::ShaderSource::Wgsl(TONEMAPPING_SRC.into())
     };
 
@@ -895,28 +1030,11 @@ pub fn build_tonemap_shader_params(device: &wgpu::Device) -> TonemapShaderParams
         }
     }
 
+    let identity_pipeline = device.create_render_pipeline(&tonemap_pipeline_descriptor(&tonemap_shader, &pipeline_layout, "no_tonemap_main"));
     let aces_pipeline = device.create_render_pipeline(&tonemap_pipeline_descriptor(&tonemap_shader, &pipeline_layout, "aces_main"));
     let filmic_pipeline = device.create_render_pipeline(&tonemap_pipeline_descriptor(&tonemap_shader, &pipeline_layout, "filmic_main"));
 
-    return TonemapShaderParams {
-        aces_pipeline,
-        filmic_pipeline
-    };
-}
-
-pub fn aces_tonemapping(device: &wgpu::Device, queue: &wgpu::Queue, shader_params: &TonemapShaderParams, hdr_texture: &wgpu::Texture, render_target: &wgpu::Texture, exposure: f32)
-{
-    let render_target_view = render_target.create_view(&Default::default());
-    let hdr_texture_view = hdr_texture.create_view(&Default::default());
-
-    use wgpu::util::DeviceExt;
-    let exposure_uniform = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: Some("Camera Buffer"),
-        contents: to_u8_slice(&[exposure]),
-        usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-    });
-
-    let linear_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+    let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
         address_mode_u: wgpu::AddressMode::ClampToEdge,
         address_mode_v: wgpu::AddressMode::ClampToEdge,
         address_mode_w: wgpu::AddressMode::ClampToEdge,
@@ -926,13 +1044,90 @@ pub fn aces_tonemapping(device: &wgpu::Device, queue: &wgpu::Queue, shader_param
         ..Default::default()
     });
 
+    return TonemapShaderParams {
+        identity_pipeline,
+        aces_pipeline,
+        filmic_pipeline,
+        sampler,
+    };
+}
+
+#[derive(Clone, Copy, Debug)]
+pub enum TonemapOperator
+{
+    Aces,
+    FilmicUC2,
+    FilmicUC2Custom { linear_white: f32, a: f32, b: f32, c: f32, d: f32, e: f32, f: f32 },
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct TonemapParams
+{
+    pub operator: TonemapOperator,
+    pub exposure: f32,
+}
+
+pub fn apply_tonemapping(device: &wgpu::Device, queue: &wgpu::Queue, shader_params: &TonemapShaderParams, hdr_texture: &wgpu::Texture, render_target: &wgpu::Texture, tonemap_params: &TonemapParams)
+{
+    let render_target_view = render_target.create_view(&Default::default());
+    let hdr_texture_view = hdr_texture.create_view(&Default::default());
+
+    // NOTE: Coupled to the struct in the shader of the same name.
+    #[derive(Default)]
+    #[repr(C)]
+    struct TonemapShaderParams
+    {
+        exposure: f32,
+        // For filmic tonemapping
+        linear_white: f32,
+        a: f32, b: f32, c: f32, d: f32, e: f32, f: f32,
+    }
+
+    let mut params = TonemapShaderParams::default();
+
+    let pipeline = match tonemap_params.operator
+    {
+        TonemapOperator::Aces      => &shader_params.aces_pipeline,
+        TonemapOperator::FilmicUC2 =>
+        {
+            params.linear_white = 11.2;
+            params.a = 0.22;
+            params.b = 0.3;
+            params.c = 0.1;
+            params.d = 0.2;
+            params.e = 0.01;
+            params.f = 0.30;
+
+            &shader_params.filmic_pipeline
+        }
+        TonemapOperator::FilmicUC2Custom { linear_white, a, b, c, d, e, f } =>
+        {
+            params.linear_white = linear_white;
+            params.a = a;
+            params.b = b;
+            params.c = c;
+            params.d = d;
+            params.e = e;
+            params.f = f;
+
+            &shader_params.filmic_pipeline
+        }
+    };
+
+    use wgpu::util::DeviceExt;
+    let params_uniform = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("Camera Buffer"),
+        contents: to_u8_slice(&[params]),
+        usage: wgpu::BufferUsages::UNIFORM,
+    });
+
     let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
         label: None,
         layout: &shader_params.aces_pipeline.get_bind_group_layout(0),
         entries: &[
             wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(&hdr_texture_view) },
-            wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::Sampler(&linear_sampler) },
-            wgpu::BindGroupEntry { binding: 2, resource: buffer_resource(&exposure_uniform) },
+            wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::Sampler(&shader_params.sampler) },
+            wgpu::BindGroupEntry { binding: 2, resource: buffer_resource(&params_uniform) },
         ]
     });
 
@@ -954,7 +1149,7 @@ pub fn aces_tonemapping(device: &wgpu::Device, queue: &wgpu::Queue, shader_param
             timestamp_writes: None
         });
 
-        pass.set_pipeline(&shader_params.aces_pipeline);
+        pass.set_pipeline(&pipeline);
         pass.set_bind_group(0, &bind_group, &[]);
         pass.draw(0..6, 0..1);
     }
@@ -962,17 +1157,118 @@ pub fn aces_tonemapping(device: &wgpu::Device, queue: &wgpu::Queue, shader_param
     queue.submit(Some(encoder.finish()));
 }
 
-pub fn filmic_tonemapping(device: &wgpu::Device, queue: &wgpu::Queue, shader_params: &TonemapShaderParams, hdr_texture: &wgpu::Texture, render_target: &wgpu::Texture, exposure: f32)
+pub fn convert_to_ldr_no_tonemap(device: &wgpu::Device, queue: &wgpu::Queue, shader_params: &TonemapShaderParams, hdr_texture: &wgpu::Texture, render_target: &wgpu::Texture)
 {
+    let render_target_view = render_target.create_view(&Default::default());
+    let hdr_texture_view = hdr_texture.create_view(&Default::default());
 
+    // NOTE: Coupled to the struct in the shader of the same name.
+    #[derive(Default)]
+    #[repr(C)]
+    struct TonemapShaderParams
+    {
+        exposure: f32,
+        // For filmic tonemapping
+        linear_white: f32,
+        a: f32, b: f32, c: f32, d: f32, e: f32, f: f32,
+    }
+
+    let params = TonemapShaderParams::default();
+
+    use wgpu::util::DeviceExt;
+    let params_uniform = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: None,
+        contents: to_u8_slice(&[params]),
+        usage: wgpu::BufferUsages::UNIFORM,
+    });
+
+    let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: None,
+        layout: &shader_params.aces_pipeline.get_bind_group_layout(0),
+        entries: &[
+            wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(&hdr_texture_view) },
+            wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::Sampler(&shader_params.sampler) },
+            wgpu::BindGroupEntry { binding: 2, resource: buffer_resource(&params_uniform) },
+        ]
+    });
+
+    let mut encoder = device.create_command_encoder(&Default::default());
+
+    {
+        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: None,
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view: &render_target_view,
+                resolve_target: None,
+                ops: wgpu::Operations {
+                    load: wgpu::LoadOp::Clear(wgpu::Color { r: 0.0, g: 0.0, b: 0.0, a: 1.0 }),
+                    store: wgpu::StoreOp::Store
+                },
+            })],
+            depth_stencil_attachment: None,
+            occlusion_query_set: None,
+            timestamp_writes: None
+        });
+
+        pass.set_pipeline(&shader_params.identity_pipeline);
+        pass.set_bind_group(0, &bind_group, &[]);
+        pass.draw(0..6, 0..1);
+    }
+
+    queue.submit(Some(encoder.finish()));
 }
 
-fn apply_tonemapping(device: &wgpu::Device, queue: &wgpu::Queue, shader_params: &TonemapShaderParams, hdr_texture: &wgpu::Texture, render_target: &wgpu::Texture, exposure: f32)
-{
-
-}
+// Wrappers
 
 fn buffer_resource(buffer: &wgpu::Buffer) -> wgpu::BindingResource
 {
     return wgpu::BindingResource::Buffer(wgpu::BufferBinding { buffer: buffer, offset: 0, size: None });
+}
+
+
+fn array_of_buffer_bindings_resource(buffers: &Vec<wgpu::Buffer>) -> Vec<wgpu::BufferBinding>
+{
+    let mut bindings: Vec<wgpu::BufferBinding> = Vec::with_capacity(buffers.len());
+    for i in 0..buffers.len()
+    {
+        bindings.push(wgpu::BufferBinding {
+            buffer: &buffers[i],
+            offset: 0,
+            size: None
+        });
+    }
+
+    return bindings;
+}
+
+fn array_of_texture_views(textures: &Vec<wgpu::Texture>) -> Vec<wgpu::TextureView>
+{
+    let mut bindings: Vec<wgpu::TextureView> = Vec::with_capacity(textures.len());
+    for i in 0..textures.len()
+    {
+        let view = textures[i].create_view(&Default::default());
+        bindings.push(view);
+    }
+
+    return bindings;
+}
+
+fn array_of_texture_bindings_resource<'a>(texture_views: &'a Vec<wgpu::TextureView>) -> Vec<&'a wgpu::TextureView>
+{
+    let mut bindings: Vec<&'a wgpu::TextureView> = Vec::with_capacity(texture_views.len());
+    for i in 0..texture_views.len() {
+        bindings.push(&texture_views[i]);
+    }
+
+    return bindings;
+}
+
+fn array_of_sampler_bindings_resource<'a>(samplers: &'a Vec<wgpu::Sampler>) -> Vec<&'a wgpu::Sampler>
+{
+    let mut bindings: Vec<&'a wgpu::Sampler> = Vec::with_capacity(samplers.len());
+    for i in 0..samplers.len() {
+        bindings.push(&samplers[i]);
+    }
+
+    return bindings;
 }

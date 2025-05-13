@@ -17,21 +17,24 @@ pub fn load_scene_obj(device: &wgpu::Device, queue: &wgpu::Queue, path: &str)->l
         let mesh = &mut models[0].mesh;
 
         // Construct the buffer to send to GPU. Include an extra float
-        // for 16-byte padding.
+        // for 16-byte alignment of vectors.
 
+        let mut aabb = Aabb::neutral();
         verts_pos.reserve_exact(mesh.positions.len() + mesh.positions.len() / 3);
         for i in (0..mesh.positions.len()).step_by(3)
         {
-            verts_pos.push(mesh.positions[i + 0]*5.0);  // NOTE NOTE NOTE remove this
-            verts_pos.push(mesh.positions[i + 1]*5.0);
-            verts_pos.push(mesh.positions[i + 2]*5.0);
+            let pos = Vec3 { x: mesh.positions[i + 0], y: mesh.positions[i + 1], z: mesh.positions[i + 2] };
+            verts_pos.push(mesh.positions[i + 0]);
+            verts_pos.push(mesh.positions[i + 1]);
+            verts_pos.push(mesh.positions[i + 2]);
             verts_pos.push(0.0);
+            grow_aabb_to_include_vert(&mut aabb, pos);
         }
 
         let bvh_buf = lp::build_bvh(&device, &queue, verts_pos.as_slice(), &mut mesh.indices);
 
         let verts_pos_buf = lp::upload_storage_buffer(&device, &queue, unsafe { to_u8_slice(&verts_pos) });
-        let indices_buf = lp::upload_storage_buffer(&device, &queue, unsafe { to_u8_slice(&mesh.indices) });
+        let indices_buf   = lp::upload_storage_buffer(&device, &queue, unsafe { to_u8_slice(&mesh.indices) });
         let mut verts: Vec<lp::Vertex> = Vec::new();
         verts.reserve_exact(mesh.positions.len() / 3);
         for vert_idx in 0..(mesh.positions.len() / 3)
@@ -49,8 +52,8 @@ pub fn load_scene_obj(device: &wgpu::Device, queue: &wgpu::Queue, path: &str)->l
             if mesh.texcoords.len() > 0
             {
                 tex_coords.x = mesh.texcoords[vert_idx*2+0];
-                tex_coords.y = mesh.texcoords[vert_idx*2+1];
-                tex_coords = normalize_vec2(tex_coords);
+                // WGPU Convention is +=right,down and tipically it's +=right,up
+                tex_coords.y = -mesh.texcoords[vert_idx*2+1];
             };
 
             let vert = lp::Vertex { normal: normal.into(), padding0: 0.0, tex_coords: tex_coords.into(), padding1: 0.0, padding2: 0.0 };
@@ -60,15 +63,22 @@ pub fn load_scene_obj(device: &wgpu::Device, queue: &wgpu::Queue, path: &str)->l
 
         let verts_buf = lp::upload_storage_buffer(&device, &queue, unsafe { to_u8_slice(&verts) });
 
-        let instances = [
-            lp::Instance { pos: Vec3 { x: 0.0, y: 0.0, z: 0.0 }.into(), mesh_idx: 0, texture_idx: 0, sampler_idx: 0, padding0: 0.0, padding1: 0.0 },
-            lp::Instance { pos: Vec3 { x: 0.0, y: 1.5, z: 0.0 }.into(), mesh_idx: 0, texture_idx: 0, sampler_idx: 0, padding0: 0.0, padding1: 0.0 },
-            lp::Instance { pos: Vec3 { x: 0.0, y: 3.0, z: 0.0 }.into(), mesh_idx: 0, texture_idx: 0, sampler_idx: 0, padding0: 0.0, padding1: 0.0 },
-            lp::Instance { pos: Vec3 { x: 0.0, y: 4.5, z: 0.0 }.into(), mesh_idx: 0, texture_idx: 0, sampler_idx: 0, padding0: 0.0, padding1: 0.0 },
-            lp::Instance { pos: Vec3 { x: 0.0, y: 7.0, z: 0.0 }.into(), mesh_idx: 0, texture_idx: 0, sampler_idx: 0, padding0: 0.0, padding1: 0.0 },
-        ];
+        let mut instances = Vec::<lp::Instance>::default();
+        for i in 0..1
+        {
+            let offset: f32 = 1.5;
+            instances.push(lp::Instance {
+                pos: Vec3 { x: 0.0, y: offset * i as f32, z: 0.0 }.into(),
+                mesh_idx: 0,
+                mat_idx: 0,
+                padding0: 0.0, padding1: 0.0, padding2: 0.0,
+            });
+        }
 
         let instances_buf = lp::upload_storage_buffer(&device, &queue, unsafe { to_u8_slice(&instances) });
+
+        let lp_aabb: lp::Aabb = aabb.into();
+        let tlas_buf = lp::build_tlas(&device, &queue, instances.as_slice(), &[lp_aabb]);
 
         let linear_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             label: None,
@@ -81,24 +91,21 @@ pub fn load_scene_obj(device: &wgpu::Device, queue: &wgpu::Queue, path: &str)->l
             ..Default::default()
         });
 
-        return lp::SceneDesc
-        {
+        return lp::SceneDesc {
             verts_pos: vec![verts_pos_buf],
             verts:     vec![verts_buf],
             indices:   vec![indices_buf],
             bvh_nodes: vec![bvh_buf],
 
-            tlas_nodes: lp::create_empty_storage_buffer(device),
+            tlas_nodes: tlas_buf,
             instances:  instances_buf,
 
-            textures: vec![load_texture(device, queue, "bunny_texture.jpg")],
-            //textures: vec![],
+            textures: vec![load_texture(device, queue, "bunny_texture.png")],
             samplers: vec![linear_sampler],
         };
     }
 
-    return lp::SceneDesc
-    {
+    return lp::SceneDesc {
         verts_pos: vec![],
         verts:     vec![],
         indices:   vec![],

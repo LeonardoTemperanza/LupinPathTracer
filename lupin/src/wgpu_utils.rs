@@ -65,5 +65,3 @@ pub fn create_empty_storage_buffer(device: &wgpu::Device)->wgpu::Buffer
 
     return wgpu_buffer
 }
-
-// set_vsync function

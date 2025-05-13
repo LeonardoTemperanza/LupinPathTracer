@@ -131,9 +131,16 @@ fn main()
                     lp::pathtrace_scene(&device, &queue, &scene, &hdr_texture,
                                         &shader_params, camera_transform.into());
 
-                    let exposure = 0.0;
-                    lp::aces_tonemapping(&device, &queue, &tonemap_shader_params,
-                                         &hdr_texture, &frame.texture, exposure);
+                    let tonemap_params = lp::TonemapParams {
+                        operator: lp::TonemapOperator::Aces,
+                        exposure: 0.0
+                    };
+                    lp::apply_tonemapping(&device, &queue, &tonemap_shader_params,
+                                         &hdr_texture, &frame.texture, &tonemap_params);
+
+
+                    //lp::convert_to_ldr_no_tonemap(&device, &queue, &tonemap_shader_params,
+                    //                              &hdr_texture, &frame.texture);
 
                     frame.present();
 

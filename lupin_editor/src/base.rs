@@ -111,14 +111,22 @@ impl Aabb
     }
 }
 
+impl Into<lp::Aabb> for Aabb
+{
+    fn into(self) -> lp::Aabb
+    {
+        return lp::Aabb { min: self.min.into(), max: self.max.into() }
+    }
+}
+
 #[inline]
-pub fn lerp_f32(a: f32, b: f32, t: f32)->f32
+pub fn lerp_f32(a: f32, b: f32, t: f32) -> f32
 {
     return a + (b - a) * t;
 }
 
 #[inline]
-pub fn square_f32(n: f32)->f32
+pub fn square_f32(n: f32) -> f32
 {
     return n*n;
 }
@@ -165,7 +173,7 @@ impl std::ops::Sub for Vec3
     type Output = Self;
 
     #[inline]
-    fn sub(self, other: Self)->Self::Output
+    fn sub(self, other: Self) -> Self::Output
     {
         return Self
         {
@@ -302,7 +310,7 @@ impl std::ops::Mul<Mat4> for Mat4
     type Output = Mat4;
 
     #[inline]
-    fn mul(self, rhs: Mat4)->Mat4
+    fn mul(self, rhs: Mat4) -> Mat4
     {
         let mut res = Mat4::default();
         for i in 0..4
@@ -344,7 +352,7 @@ impl std::ops::Mul<Quat> for Quat
     type Output = Quat;
 
     #[inline]
-    fn mul(self, rhs: Quat)->Quat
+    fn mul(self, rhs: Quat) -> Quat
     {
         return Quat {
             w: self.w * rhs.w - self.x * rhs.x - self.y * rhs.y - self.z * rhs.z,
@@ -729,6 +737,16 @@ pub fn grow_aabb_to_include_aabb(aabb: &mut Aabb, to_include: Aabb)
     aabb.max.x = aabb.max.x.max(to_include.max.x);
     aabb.max.y = aabb.max.y.max(to_include.max.y);
     aabb.max.z = aabb.max.z.max(to_include.max.z);
+}
+
+pub fn grow_aabb_to_include_vert(aabb: &mut Aabb, to_include: Vec3)
+{
+    aabb.min.x = aabb.min.x.min(to_include.x);
+    aabb.max.x = aabb.max.x.max(to_include.x);
+    aabb.min.y = aabb.min.x.min(to_include.y);
+    aabb.max.y = aabb.max.x.max(to_include.y);
+    aabb.min.z = aabb.min.x.min(to_include.z);
+    aabb.max.z = aabb.max.x.max(to_include.z);
 }
 
 pub fn compute_tri_bounds(t0: Vec3, t1: Vec3, t2: Vec3)->Aabb

@@ -1,7 +1,16 @@
 
 @group(0) @binding(0) var source_texture: texture_2d<f32>;
 @group(0) @binding(1) var source_sampler: sampler;
-@group(0) @binding(2) var<uniform> exposure: f32;
+
+@group(0) @binding(2) var<uniform> params: TonemapParams;
+
+struct TonemapParams
+{
+    exposure: f32,
+    // For filmic tonemapping
+    linear_white: f32,
+    a: f32, b: f32, c: f32, d: f32, e: f32, f: f32,
+}
 
 struct VertexOutput
 {
@@ -12,7 +21,7 @@ struct VertexOutput
 @vertex
 fn vert_main(@builtin(vertex_index) vertex_index : u32) -> VertexOutput
 {
-    // NOTE: Assuming front face is counter clockwise
+    // NOTE: Assuming front face is counter-clockwise
     const pos = array(
         vec2(-1.0,  1.0),
         vec2( 1.0, -1.0),
@@ -40,18 +49,32 @@ fn vert_main(@builtin(vertex_index) vertex_index : u32) -> VertexOutput
 @fragment
 fn filmic_main(input: VertexOutput) -> @location(0) vec4f
 {
-    let color = max(textureSample(source_texture, source_sampler, input.tex_coords).rgb, vec3f(0.0f));
-    return vec4(tonemap_filmic_uc2_default(pow(2.0f, exposure) * color), 1.0f);
+    var color = max(textureSample(source_texture, source_sampler, input.tex_coords).rgb, vec3f(0.0f));
+    color *= pow(2.0f, params.exposure);
+    color = tonemap_filmic_uc2(color, params.linear_white,
+                               params.a, params.b,
+                               params.c, params.d,
+                               params.e, params.f);
+    return vec4(linear_to_srgb(color), 1.0f);
 }
 
 @fragment
 fn aces_main(input: VertexOutput) -> @location(0) vec4f
 {
-    let color = max(textureSample(source_texture, source_sampler, input.tex_coords).rgb, vec3f(0.0f));
-    return vec4(tonemap_aces(pow(2.0f, exposure) * color), 1.0f);
+    var color = max(textureSample(source_texture, source_sampler, input.tex_coords).rgb, vec3f(0.0f));
+    color *= pow(2.0f, params.exposure);
+    return vec4(linear_to_srgb(tonemap_aces(color)), 1.0f);
+}
+
+@fragment
+fn no_tonemap_main(input: VertexOutput) -> @location(0) vec4f
+{
+    let color = clamp(textureSample(source_texture, source_sampler, input.tex_coords).rgb, vec3f(0.0f), vec3f(1.0f));
+    return vec4(color, 1.0f);
 }
 
 // Tonemapping functions from: https://gist.github.com/SpineyPete/ebf9619f009318536c6da48209894fed
+
 fn tonemap_filmic_uc2(linear_color: vec3f, linear_white: f32, A: f32, B: f32, C: f32, D: f32, E: f32, F: f32) -> vec3f
 {
     // Uncharted II configurable tonemapper.
@@ -105,11 +128,19 @@ fn tonemap_aces(color: vec3f) -> vec3f
     const d: f32 = 0.59f;
     const e: f32 = 0.14f;
 
-    let tonemap: vec4f = clamp((x * (a * x + b)) / (x * (c * x + d) + e), vec4f(0.0), vec4f(1.0));
+    let tonemap: vec4f = clamp((x * (a * x + b)) / (x * (c * x + d) + e), vec4f(0.0f), vec4f(1.0f));
     var t: f32 = x.a;
 
     t = t * t / (slope + t);
 
     // Return after desaturation step.
     return mix(tonemap.rgb, tonemap.aaa, t);
+}
+
+fn linear_to_srgb(linear_color: vec3f) -> vec3f
+{
+    let cutoff = vec3f(linear_color <= vec3f(0.0031308f));
+    let higher = vec3f(1.055f) * pow(linear_color, vec3f(1.0f/2.4f)) - vec3f(0.055f);
+    let lower  = linear_color * vec3f(12.92f);
+    return mix(higher, lower, cutoff);
 }

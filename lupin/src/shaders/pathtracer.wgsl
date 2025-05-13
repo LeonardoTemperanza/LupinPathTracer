@@ -6,17 +6,29 @@
 @group(0) @binding(2) var<storage, read> indices_array: binding_array<Indices>;
 @group(0) @binding(3) var<storage, read> bvh_nodes_array: binding_array<BvhNodes>;
 // Instances
-@group(0) @binding(4) var<storage, read> tlas_nodes: array<Vertex>;
+@group(0) @binding(4) var<storage, read> tlas_nodes: array<TlasNode>;
 @group(0) @binding(5) var<storage, read> instances: array<Instance>;
 // Textures
-//@group(0) @binding(6) var textures: binding_array<texture_2d<f32>>;
-//@group(0) @binding(7) var samplers: binding_array<sampler>;
+@group(0) @binding(6) var textures: binding_array<texture_2d<f32>>;
+@group(0) @binding(7) var samplers: binding_array<sampler>;
 
 // Group 1: Pathtrace settings
 @group(1) @binding(0) var<uniform> camera_transform: mat4x4f;
 
 // Group 2: Render target
 @group(2) @binding(0) var output_texture: texture_storage_2d<rgba16float, write>;
+
+// Group 3: Debug
+//@group(3) @binding(0) var debug_input: DebugInput;
+
+struct DebugInput
+{
+    bvh_viz_type: i32,  // 0: VizBVHBoxTests, 1: VizBVHTriTests, 2: VizBVHAllLevels, 3: VizBVHOneLevel
+    mesh_viz_type: i32,  // 0: VizNormals, 1: VizWireframe, 2: VizColor
+
+    threshold: i32,
+    level: i32,
+}
 
 // We need these wrappers for some reason...
 struct VertsPos { data: array<vec3f> }
@@ -41,9 +53,30 @@ struct Instance
 {
     pos: vec3f,
     mesh_idx: u32,
-    texture_idx: u32,
-    sampler_idx: u32,
-    // 8 bytes padding
+    mat_idx: u32,
+    // 12 bytes padding
+}
+
+const MAT_FLAGS_HAS_COLOR: u32     = 1 << 0;
+const MAT_FLAGS_HAS_EMISSION: u32  = 1 << 1;
+const MAT_FLAGS_HAS_ROUGHNESS: u32 = 1 << 2;
+
+struct Material
+{
+    flags: u32,
+
+    color: vec4f,
+    emission: vec4f,
+    roughness: f32,
+    metallic: f32,
+    ior: f32,
+    scattering: vec4f,
+    sc_anisotropy: f32,
+    tr_depth: f32,
+
+    color_tex_idx:     u32,
+    emission_tex_idx:  u32,
+    roughness_tex_idx: u32,
 }
 
 struct Ray
@@ -53,17 +86,46 @@ struct Ray
     inv_dir: vec3f  // Precomputed inverse of the ray direction, for performance.
 }
 
-fn transform_point(p: vec3f, transform: mat4x4f)->vec3f
+@compute
+@workgroup_size(8, 8, 1)
+fn main(@builtin(local_invocation_id) local_id: vec3u, @builtin(global_invocation_id) global_id: vec3u)
 {
-    let p_vec4 = vec4f(p, 1.0f);
-    let transformed = transform * p_vec4;
-    return (transformed / transformed.w).xyz;
+    let output_dim = textureDimensions(output_texture).xy;
+    let camera_ray = compute_camera_ray(global_id, output_dim);
+
+    var hit = ray_scene_intersection(local_id, camera_ray);
+
+    // Diffuse color
+    var color = vec3f();
+    if hit.dst != f32_max
+    {
+        // color = textureSampleLevel(textures[texture_id], samplers[sampler_id], hit.tex_coords, 0.0f).rgb;
+        // Normals
+        color = select(vec3f(0.0f), hit.normal * 0.5f + 0.5f, hit.dst != f32_max);
+        // UVs
+        //color = select(vec3f(0.0f), vec3f(hit.tex_coords, 1.0f), hit.dst != f32_max);
+    }
+
+    color = max(color, vec3f(0.0f));
+
+    if global_id.x < output_dim.x && global_id.y < output_dim.y {
+        textureStore(output_texture, global_id.xy, vec4f(color, 1.0f));
+    }
 }
 
-fn transform_dir(dir: vec3f, transform: mat4x4f)->vec3f
+fn compute_camera_ray(global_id: vec3u, output_dim: vec2u) -> Ray
 {
-    let dir_vec4 = vec4f(dir, 0.0f);
-    return (transform * dir_vec4).xyz;
+    let frag_coord = vec2f(global_id.xy) + 0.5f;
+    let resolution = vec2f(output_dim);
+
+    let uv = frag_coord / resolution;
+    var coord = 2.0f * uv - 1.0f;
+    coord.y *= -resolution.y / resolution.x;
+
+    let look_at = normalize(vec3(coord, 1.0f));
+
+    let res = Ray(vec3f(0.0f, 0.0f, 0.0f), look_at, 1.0f / look_at);
+    return transform_ray(res, camera_transform);
 }
 
 // NOTE: The odd ordering of the fields
@@ -76,7 +138,7 @@ struct BvhNode
     // otherwise this is tri_begin
     tri_begin_or_first_child: u32,
     aabb_max:  vec3f,
-    tri_count: u32
+    tri_count: u32,
 
     // Second child is at index first_child + 1
 }
@@ -84,13 +146,9 @@ struct BvhNode
 struct TlasNode
 {
     aabb_min: vec3f,
+    left_right: u32,  // 2x16 bits. If it's 0, this node is a leaf
     aabb_max: vec3f,
-    // If is_leaf is true, this is mesh_instance,
-    // otherwise this is first_child
-    mesh_instance_or_first_child: u32,
-    is_leaf:   u32,  // 32-bit bool
-
-    // Second child is at index first_child + 1
+    instance_idx: u32,
 }
 
 // From: https://tavianator.com/2011/ray_box.html
@@ -135,67 +193,64 @@ fn ray_tri_dst(ray: Ray, v0: vec3f, v1: vec3f, v2: vec3f)->vec3f
 
 struct HitInfo
 {
-    dst: f32,
     normal: vec3f,
-    tex_coords: vec2f
+    dst: f32,
+    tex_coords: vec2f,
+    test: u32,
 }
 
-const MAX_BVH_DEPTH: u32 = 25;
-const STACK_SIZE: u32 = (MAX_BVH_DEPTH + 1) * 8 * 8;  // shared memory
-var<workgroup> stack: array<u32, STACK_SIZE>;         // shared memory
+const invalid_hit: HitInfo = HitInfo(vec3f(), f32_max, vec2f(), 0);
 
-fn ray_scene_intersection(local_id: vec3u, ray: Ray, test_idx: u32, test_pos: vec3f)->HitInfo
+const MAX_TLAS_DEPTH: u32 = 20;  // This supports 2^MAX_TLAS_DEPTH objects.
+const TLAS_STACK_SIZE: u32 = (MAX_TLAS_DEPTH + 1) * 8 * 8;  // shared memory
+var<workgroup> tlas_stack: array<u32, TLAS_STACK_SIZE>;     // shared memory
+
+fn ray_scene_intersection(local_id: vec3u, ray: Ray)->HitInfo
 {
-    // Transform the ray with the inverse of the instance transform.
-    let ray_trans = Ray(ray.ori - test_pos, ray.dir, ray.inv_dir);
-
     // Comment/Uncomment to test the performance of shared memory
     // vs local array (registers or global memory)
     // Shared memory is faster (on a GTX 1070).
     //let offset: u32 = 0u;                                                // local
-    let offset = (local_id.y * 8 + local_id.x) * (MAX_BVH_DEPTH + 1);  // shared memory
+    let offset = (local_id.y * 8 + local_id.x) * (MAX_TLAS_DEPTH + 1);  // shared memory
 
-    //var stack: array<u32, 26>;  // local
+    //var tlas_stack: array<u32, 26>;  // local
     var stack_idx: u32 = 2;
-    stack[0 + offset] = 0u;
-    stack[1 + offset] = 0u;
-
-    var num_boxes_hit: i32 = 0;
+    tlas_stack[0 + offset] = 0u;
+    tlas_stack[1 + offset] = 0u;
 
     // t, u, v
     var min_hit = vec3f(f32_max, 0.0f, 0.0f);
     var tri_idx: u32 = 0;
+    var mesh_idx: u32 = 0;
+    var test: u32 = 0;  // TODO: Remove
     while stack_idx > 1
     {
         stack_idx--;
-        let node = bvh_nodes_array[test_idx].data[stack[stack_idx + offset]];
+        test++;
+        let node = tlas_nodes[tlas_stack[stack_idx + offset]];
 
-        if node.tri_count > 0u  // Leaf node
+        if node.left_right == 0u  // Leaf node
         {
-            let tri_begin = node.tri_begin_or_first_child;
-            let tri_count = node.tri_count;
-            for(var i: u32 = tri_begin; i < tri_begin + tri_count; i++)
+            let instance = instances[node.instance_idx];
+            //let ray_trans = transform_ray(ray, instances[node.instance_idx].inv_transform);
+            let ray_trans = Ray(ray.ori - instance.pos, ray.dir, ray.inv_dir);
+            let result = ray_mesh_intersection(local_id, ray_trans, instance.mesh_idx);
+            if result.hit.x < min_hit.x
             {
-                let v0: vec3f = verts_pos_array[test_idx].data[indices_array[test_idx].data[i*3 + 0]];
-                let v1: vec3f = verts_pos_array[test_idx].data[indices_array[test_idx].data[i*3 + 1]];
-                let v2: vec3f = verts_pos_array[test_idx].data[indices_array[test_idx].data[i*3 + 2]];
-                let hit: vec3f = ray_tri_dst(ray_trans, v0, v1, v2);
-                if hit.x < min_hit.x
-                {
-                    min_hit = hit;
-                    tri_idx = i;
-                }
+                min_hit  = result.hit;
+                tri_idx  = result.tri_idx;
+                mesh_idx = instance.mesh_idx;
             }
         }
         else  // Non-leaf node
         {
-            let left_child  = node.tri_begin_or_first_child;
-            let right_child = left_child + 1;
-            let left_child_node  = bvh_nodes_array[test_idx].data[left_child];
-            let right_child_node = bvh_nodes_array[test_idx].data[right_child];
+            let left_child  = node.left_right >> 16;
+            let right_child = node.left_right & 0x0000FFFF;
+            let left_child_node  = tlas_nodes[left_child];
+            let right_child_node = tlas_nodes[right_child];
 
-            let left_dst  = ray_aabb_dst(ray_trans, left_child_node.aabb_min,  left_child_node.aabb_max);
-            let right_dst = ray_aabb_dst(ray_trans, right_child_node.aabb_min, right_child_node.aabb_max);
+            let left_dst  = ray_aabb_dst(ray, left_child_node.aabb_min,  left_child_node.aabb_max);
+            let right_dst = ray_aabb_dst(ray, right_child_node.aabb_min, right_child_node.aabb_max);
 
             // Push children onto the stack
             // The closest child should be looked at
@@ -211,13 +266,13 @@ fn ray_scene_intersection(local_id: vec3u, ray: Ray, test_idx: u32, test_pos: ve
             {
                 if push_right
                 {
-                    stack[stack_idx + offset] = right_child;
+                    tlas_stack[stack_idx + offset] = right_child;
                     stack_idx++;
                 }
 
                 if push_left
                 {
-                    stack[stack_idx + offset] = left_child;
+                    tlas_stack[stack_idx + offset] = left_child;
                     stack_idx++;
                 }
             }
@@ -225,69 +280,160 @@ fn ray_scene_intersection(local_id: vec3u, ray: Ray, test_idx: u32, test_pos: ve
             {
                 if push_left
                 {
-                    stack[stack_idx + offset] = left_child;
+                    tlas_stack[stack_idx + offset] = left_child;
                     stack_idx++;
                 }
 
                 if push_right
                 {
-                    stack[stack_idx + offset] = right_child;
+                    tlas_stack[stack_idx + offset] = right_child;
                     stack_idx++;
                 }
             }
         }
     }
 
-    var hit_info: HitInfo = HitInfo(min_hit.x, vec3f(0.0f), vec2f(0.0f));
-    if hit_info.dst != f32_max
+    var hit_info: HitInfo = invalid_hit;
+    if min_hit.x != f32_max
     {
-        let vert0: Vertex = verts_array[test_idx].data[indices_array[test_idx].data[tri_idx*3 + 0]];
-        let vert1: Vertex = verts_array[test_idx].data[indices_array[test_idx].data[tri_idx*3 + 1]];
-        let vert2: Vertex = verts_array[test_idx].data[indices_array[test_idx].data[tri_idx*3 + 2]];
+        let vert0: Vertex = verts_array[mesh_idx].data[indices_array[mesh_idx].data[tri_idx*3 + 0]];
+        let vert1: Vertex = verts_array[mesh_idx].data[indices_array[mesh_idx].data[tri_idx*3 + 1]];
+        let vert2: Vertex = verts_array[mesh_idx].data[indices_array[mesh_idx].data[tri_idx*3 + 2]];
         let u = min_hit.y;
         let v = min_hit.z;
         let w = 1.0 - u - v;
 
+        hit_info.dst = min_hit.x;
         hit_info.normal = vert0.normal*w + vert1.normal*u + vert2.normal*v;
         hit_info.tex_coords = vert0.tex_coords*w + vert1.tex_coords*u + vert2.tex_coords*v;
     }
 
+    hit_info.test = test;
     return hit_info;
 }
 
-@compute
-@workgroup_size(8, 8, 1)
-fn main(@builtin(local_invocation_id) local_id: vec3u, @builtin(global_invocation_id) global_id: vec3<u32>)
+const MAX_BVH_DEPTH: u32 = 25;
+const BVH_STACK_SIZE: u32 = (MAX_BVH_DEPTH + 1) * 8 * 8;  // shared memory
+var<workgroup> bvh_stack: array<u32, BVH_STACK_SIZE>;         // shared memory
+
+struct RayMeshIntersectionResult
 {
-    var frag_coord = vec2f(global_id.xy) + 0.5f;
-    var output_dim = textureDimensions(output_texture).xy;
-    var resolution = vec2f(output_dim.xy);
+    hit: vec3f,  // t, u, v
+    tri_idx: u32
+}
 
-    var uv = frag_coord / resolution;
-    var coord = 2.0f * uv - 1.0f;
-    coord.y *= -resolution.y / resolution.x;
+fn ray_mesh_intersection(local_id: vec3u, ray: Ray, mesh_idx: u32) -> RayMeshIntersectionResult
+{
+    // Comment/Uncomment to test the performance of shared memory
+    // vs local array (registers or global memory)
+    // Shared memory is faster (on a GTX 1070).
+    //let offset: u32 = 0u;                                                // local
+    let offset = (local_id.y * 8 + local_id.x) * (MAX_BVH_DEPTH + 1);  // shared memory
 
-    var camera_look_at = normalize(vec3(coord, 1.0f));
+    //var bvh_stack: array<u32, 26>;  // local
+    var stack_idx: u32 = 2;
+    bvh_stack[0 + offset] = 0u;
+    bvh_stack[1 + offset] = 0u;
 
-    var camera_ray = Ray(vec3f(0.0f, 0.0f, 0.0f), camera_look_at, 1.0f / camera_look_at);
-    camera_ray.ori = transform_point(camera_ray.ori, camera_transform);
-    camera_ray.dir = transform_dir(camera_ray.dir, camera_transform);
-    camera_ray.inv_dir = 1.0f / camera_ray.dir;
-
-    var closest_hit = HitInfo(f32_max, vec3f(0.0), vec2f(0.0));
-    for (var i = 0; i < 4; i++)
+    // t, u, v
+    var min_hit = vec3f(f32_max, 0.0f, 0.0f);
+    var tri_idx: u32 = 0;
+    while stack_idx > 1
     {
-        var hit = ray_scene_intersection(local_id, camera_ray, instances[i].mesh_idx, instances[i].pos);
-        if hit.dst < closest_hit.dst {
-            closest_hit = hit;
+        stack_idx--;
+        let node = bvh_nodes_array[mesh_idx].data[bvh_stack[stack_idx + offset]];
+
+        if node.tri_count > 0u  // Leaf node
+        {
+            let tri_begin = node.tri_begin_or_first_child;
+            let tri_count = node.tri_count;
+            for(var i: u32 = tri_begin; i < tri_begin + tri_count; i++)
+            {
+                let v0: vec3f = verts_pos_array[mesh_idx].data[indices_array[mesh_idx].data[i*3 + 0]];
+                let v1: vec3f = verts_pos_array[mesh_idx].data[indices_array[mesh_idx].data[i*3 + 1]];
+                let v2: vec3f = verts_pos_array[mesh_idx].data[indices_array[mesh_idx].data[i*3 + 2]];
+                let hit: vec3f = ray_tri_dst(ray, v0, v1, v2);
+                if hit.x < min_hit.x
+                {
+                    min_hit = hit;
+                    tri_idx = i;
+                }
+            }
+        }
+        else  // Non-leaf node
+        {
+            let left_child  = node.tri_begin_or_first_child;
+            let right_child = left_child + 1;
+            let left_child_node  = bvh_nodes_array[mesh_idx].data[left_child];
+            let right_child_node = bvh_nodes_array[mesh_idx].data[right_child];
+
+            let left_dst  = ray_aabb_dst(ray, left_child_node.aabb_min,  left_child_node.aabb_max);
+            let right_dst = ray_aabb_dst(ray, right_child_node.aabb_min, right_child_node.aabb_max);
+
+            // Push children onto the stack
+            // The closest child should be looked at
+            // first. This order is chosen so that it's more
+            // likely that the second child will never need
+            // to be visited in depth.
+
+            let visit_left_first: bool = left_dst <= right_dst;
+            let push_left:  bool = left_dst < min_hit.x;
+            let push_right: bool = right_dst < min_hit.x;
+
+            if visit_left_first
+            {
+                if push_right
+                {
+                    bvh_stack[stack_idx + offset] = right_child;
+                    stack_idx++;
+                }
+
+                if push_left
+                {
+                    bvh_stack[stack_idx + offset] = left_child;
+                    stack_idx++;
+                }
+            }
+            else
+            {
+                if push_left
+                {
+                    bvh_stack[stack_idx + offset] = left_child;
+                    stack_idx++;
+                }
+
+                if push_right
+                {
+                    bvh_stack[stack_idx + offset] = right_child;
+                    stack_idx++;
+                }
+            }
         }
     }
 
-    var color = vec4f(select(vec3f(0.0f), closest_hit.normal * 0.5f + 0.5f, closest_hit.dst != f32_max), 1.0f);
-    //var color = vec4f(select(vec3f(0.0f), vec3f(closest_hit.tex_coords, 1.0f), closest_hit.dst != f32_max), 1.0f);
-    color = max(color, vec4f(0.0));  // Clamp to 0
+    return RayMeshIntersectionResult(min_hit, tri_idx);
+}
 
-    if global_id.x < output_dim.x && global_id.y < output_dim.y {
-        textureStore(output_texture, global_id.xy, color);
-    }
+// Utils
+
+fn transform_point(p: vec3f, transform: mat4x4f)->vec3f
+{
+    let p_vec4 = vec4f(p, 1.0f);
+    let transformed = transform * p_vec4;
+    return (transformed / transformed.w).xyz;
+}
+
+fn transform_dir(dir: vec3f, transform: mat4x4f)->vec3f
+{
+    let dir_vec4 = vec4f(dir, 0.0f);
+    return (transform * dir_vec4).xyz;
+}
+
+fn transform_ray(ray: Ray, transform: mat4x4f) -> Ray
+{
+    var res = ray;
+    res.ori = transform_point(res.ori, camera_transform);
+    res.dir = transform_dir(res.dir, camera_transform);
+    res.inv_dir = 1.0f / res.dir;
+    return res;
 }

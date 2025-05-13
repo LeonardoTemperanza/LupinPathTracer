@@ -55,6 +55,7 @@ pub const RAD_TO_DEG: f32 = 57.29578049;
 use crate::renderer::Vec3;
 use crate::renderer::Vec2;
 use crate::renderer::Mat4;
+use crate::renderer::Aabb;
 
 impl Vec3
 {
@@ -74,14 +75,6 @@ pub struct Vec4
     pub y: f32,
     pub z: f32,
     pub w: f32
-}
-
-#[derive(Debug, Default, Clone, Copy)]
-#[repr(C)]
-pub struct Aabb
-{
-    pub min: Vec3,
-    pub max: Vec3
 }
 
 impl Aabb
@@ -117,6 +110,27 @@ impl std::ops::AddAssign<Vec2> for Vec2
     {
         self.x += rhs.x;
         self.y += rhs.y;
+    }
+}
+
+impl Vec3
+{
+    pub fn min(self, other: Self) -> Self
+    {
+        return Self {
+            x: self.x.min(other.x),
+            y: self.x.min(other.y),
+            z: self.x.min(other.z),
+        };
+    }
+
+    pub fn max(self, other: Self) -> Self
+    {
+        return Self {
+            x: self.x.max(other.x),
+            y: self.x.max(other.y),
+            z: self.x.max(other.z),
+        };
     }
 }
 
@@ -305,6 +319,46 @@ impl std::ops::Mul<Mat4> for Mat4
         }
 
         return res;
+    }
+}
+
+impl std::ops::Mul<Vec4> for Mat4
+{
+    type Output = Vec4;
+
+    #[inline]
+    fn mul(self, rhs: Vec4)->Vec4
+    {
+        let mut res = Vec4::default();
+        for i in 0..4  // Column
+        {
+            res.x += self.m[0][i] * rhs.x;
+            res.y += self.m[1][i] * rhs.y;
+            res.z += self.m[2][i] * rhs.z;
+            res.w += self.m[3][i] * rhs.w;
+        }
+
+        return res;
+    }
+}
+
+impl std::ops::Mul<Vec3> for Mat4
+{
+    type Output = Vec3;
+
+    #[inline]
+    fn mul(self, rhs: Vec3)->Vec3
+    {
+        let mut res = Vec4::default();
+        for i in 0..4  // Column
+        {
+            res.x += self.m[0][i] * rhs.x;
+            res.y += self.m[1][i] * rhs.y;
+            res.z += self.m[2][i] * rhs.z;
+            res.w += self.m[3][i] * 1.0;
+        }
+
+        return Vec3 { x: res.x / res.w, y: res.y / res.w, z: res.z / res.w };
     }
 }
 
@@ -724,6 +778,39 @@ pub fn grow_aabb_to_include_aabb(aabb: &mut Aabb, to_include: Aabb)
     aabb.max.x = aabb.max.x.max(to_include.max.x);
     aabb.max.y = aabb.max.y.max(to_include.max.y);
     aabb.max.z = aabb.max.z.max(to_include.max.z);
+}
+
+pub fn grow_aabb_to_include_vert(aabb: &mut Aabb, to_include: Vec3)
+{
+    aabb.min.x = aabb.min.x.min(to_include.x);
+    aabb.max.x = aabb.max.x.max(to_include.x);
+    aabb.min.y = aabb.min.x.min(to_include.y);
+    aabb.max.y = aabb.max.x.max(to_include.y);
+    aabb.min.z = aabb.min.x.min(to_include.z);
+    aabb.max.z = aabb.max.x.max(to_include.z);
+}
+
+pub fn transform_aabb(min: Vec3, max: Vec3, transform: Mat4) -> Aabb
+{
+    let verts = [
+        Vec3 { x: min.x, y: min.y, z: min.z },
+        Vec3 { x: min.x, y: min.y, z: max.z },
+        Vec3 { x: min.x, y: max.y, z: min.z },
+        Vec3 { x: min.x, y: max.y, z: max.z },
+        Vec3 { x: max.x, y: min.y, z: min.z },
+        Vec3 { x: max.x, y: min.y, z: max.z },
+        Vec3 { x: max.x, y: max.y, z: min.z },
+        Vec3 { x: max.x, y: max.y, z: max.z },
+    ];
+
+    let mut res = Aabb::neutral();
+    for vert in verts
+    {
+        let vert_trans = transform * vert;
+        grow_aabb_to_include_vert(&mut res, vert_trans);
+    }
+
+    return res;
 }
 
 pub fn compute_tri_bounds(t0: Vec3, t1: Vec3, t2: Vec3)->Aabb
