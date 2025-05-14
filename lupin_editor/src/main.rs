@@ -62,17 +62,33 @@ fn main()
     let scene = build_scene(&device, &queue);
     let shader_params = lp::build_pathtrace_shader_params(&device, false);
     let tonemap_shader_params = lp::build_tonemap_shader_params(&device);
-    let mut hdr_texture = device.create_texture(&wgpu::TextureDescriptor {
-        label: None,
-        size: wgpu::Extent3d { width: width as u32, height: height as u32, depth_or_array_layers: 1 },
-        mip_level_count: 1,
-        sample_count: 1,
-        dimension: wgpu::TextureDimension::D2,
-        format: wgpu::TextureFormat::Rgba16Float,
-        usage: wgpu::TextureUsages::STORAGE_BINDING |
-               wgpu::TextureUsages::TEXTURE_BINDING,
-        view_formats: &[]
-    });
+    let mut output_textures = [
+        device.create_texture(&wgpu::TextureDescriptor {
+            label: None,
+            size: wgpu::Extent3d { width: width as u32, height: height as u32, depth_or_array_layers: 1 },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba16Float,
+            usage: wgpu::TextureUsages::STORAGE_BINDING |
+                   wgpu::TextureUsages::TEXTURE_BINDING,
+            view_formats: &[]
+        }),
+        device.create_texture(&wgpu::TextureDescriptor {
+            label: None,
+            size: wgpu::Extent3d { width: width as u32, height: height as u32, depth_or_array_layers: 1 },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba16Float,
+            usage: wgpu::TextureUsages::STORAGE_BINDING |
+                   wgpu::TextureUsages::TEXTURE_BINDING,
+            view_formats: &[]
+        })
+    ];
+
+    let mut output_tex_front = 1;
+    let mut output_tex_back  = 0;
     //
 
     // let mut egui_ctx = egui::Context::default();
@@ -107,7 +123,8 @@ fn main()
                 WindowEvent::Resized(new_size) =>
                 {
                     // Resize screen dependent resources
-                    resize_texture(&device, &mut hdr_texture, new_size.width, new_size.height);
+                    resize_texture(&device, &mut output_textures[0], new_size.width, new_size.height);
+                    resize_texture(&device, &mut output_textures[1], new_size.width, new_size.height);
 
                     // Resize surface
                     surface_config.width  = new_size.width;
@@ -135,11 +152,11 @@ fn main()
                     prev_cam_transform = camera_transform;
 
                     let accum_params = lp::AccumulationParams {
-                        prev_frame: None,
-                        accum_counter: 0,  // TODO Change this
+                        prev_frame: Some(&output_textures[output_tex_back]),
+                        accum_counter: accum_counter,
                     };
                     let frame = surface.get_current_texture().unwrap();
-                    lp::pathtrace_scene(&device, &queue, &scene, &hdr_texture,
+                    lp::pathtrace_scene(&device, &queue, &scene, &output_textures[output_tex_front],
                                         &shader_params, &accum_params, camera_transform.into());
 
                     let tonemap_params = lp::TonemapParams {
@@ -147,7 +164,7 @@ fn main()
                         exposure: 0.0
                     };
                     lp::apply_tonemapping(&device, &queue, &tonemap_shader_params,
-                                         &hdr_texture, &frame.texture, &tonemap_params);
+                                          &output_textures[output_tex_front], &frame.texture, &tonemap_params);
 
 
                     //lp::convert_to_ldr_no_tonemap(&device, &queue, &tonemap_shader_params,
@@ -156,6 +173,10 @@ fn main()
                     frame.present();
 
                     begin_input_events(&mut input);
+                    let tmp = output_tex_back;
+                    output_tex_back  = output_tex_front;
+                    output_tex_front = tmp;
+
                     accum_counter += 1;
 
                     // Continuously request drawing messages to let the main loop continue
