@@ -77,6 +77,11 @@ impl Vec3
     pub const DOWN:     Vec3 = Vec3 { x: 0.0,  y: -1.0, z: 0.0  };
     pub const FORWARD:  Vec3 = Vec3 { x: 0.0,  y: 0.0,  z: 1.0  };
     pub const BACKWARD: Vec3 = Vec3 { x: 0.0,  y: 0.0,  z: -1.0 };
+
+    pub fn ones() -> Self
+    {
+        return Self { x: 1.0, y: 1.0, z: 1.0 };
+    }
 }
 
 #[derive(Debug, Default, Clone, Copy)]
@@ -743,10 +748,10 @@ pub fn grow_aabb_to_include_vert(aabb: &mut Aabb, to_include: Vec3)
 {
     aabb.min.x = aabb.min.x.min(to_include.x);
     aabb.max.x = aabb.max.x.max(to_include.x);
-    aabb.min.y = aabb.min.x.min(to_include.y);
-    aabb.max.y = aabb.max.x.max(to_include.y);
-    aabb.min.z = aabb.min.x.min(to_include.z);
-    aabb.max.z = aabb.max.x.max(to_include.z);
+    aabb.min.y = aabb.min.y.min(to_include.y);
+    aabb.max.y = aabb.max.y.max(to_include.y);
+    aabb.min.z = aabb.min.z.min(to_include.z);
+    aabb.max.z = aabb.max.z.max(to_include.z);
 }
 
 pub fn compute_tri_bounds(t0: Vec3, t1: Vec3, t2: Vec3)->Aabb

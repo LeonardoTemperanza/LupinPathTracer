@@ -16,3 +16,4 @@ wgpu  = "24.0.1"
 # Serialization
 tobj  = "4.0.2"
 image = "0.25.0"
+half = "2.3"

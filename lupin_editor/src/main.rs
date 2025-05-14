@@ -59,7 +59,7 @@ fn main()
     log_backend(&adapter);
 
     // Init rendering resources
-    let scene = load_scene_obj(&device, &queue, "stanford-bunny.obj");
+    let scene = build_scene(&device, &queue);
     let shader_params = lp::build_pathtrace_shader_params(&device, true);
     let tonemap_shader_params = lp::build_tonemap_shader_params(&device);
     let mut hdr_texture = device.create_texture(&wgpu::TextureDescriptor {

@@ -1181,6 +1181,7 @@ dependencies = [
 name = "lupin_editor"
 version = "0.1.0"
 dependencies = [
+ "half",
  "image 0.25.2",
  "lupin",
  "tobj",

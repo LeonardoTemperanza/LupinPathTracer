@@ -9,5 +9,6 @@ mod base;
 mod renderer;
 mod wgpu_utils;
 
+pub use base::*;
 pub use renderer::*;
 pub use wgpu_utils::*;

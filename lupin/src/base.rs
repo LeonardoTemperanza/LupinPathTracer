@@ -65,6 +65,11 @@ impl Vec3
     pub const DOWN:     Vec3 = Vec3 { x: 0.0,  y: -1.0, z: 0.0  };
     pub const FORWARD:  Vec3 = Vec3 { x: 0.0,  y: 0.0,  z: 1.0  };
     pub const BACKWARD: Vec3 = Vec3 { x: 0.0,  y: 0.0,  z: -1.0 };
+
+    pub fn new(x: f32, y: f32, z: f32) -> Self
+    {
+        return Self { x, y, z };
+    }
 }
 
 #[derive(Debug, Default, Clone, Copy)]
@@ -75,6 +80,14 @@ pub struct Vec4
     pub y: f32,
     pub z: f32,
     pub w: f32
+}
+
+impl Vec4
+{
+    pub fn new(x: f32, y: f32, z: f32, w: f32) -> Self
+    {
+        return Self { x, y, z, w };
+    }
 }
 
 impl Aabb
@@ -119,8 +132,8 @@ impl Vec3
     {
         return Self {
             x: self.x.min(other.x),
-            y: self.x.min(other.y),
-            z: self.x.min(other.z),
+            y: self.y.min(other.y),
+            z: self.z.min(other.z),
         };
     }
 
@@ -128,8 +141,8 @@ impl Vec3
     {
         return Self {
             x: self.x.max(other.x),
-            y: self.x.max(other.y),
-            z: self.x.max(other.z),
+            y: self.y.max(other.y),
+            z: self.z.max(other.z),
         };
     }
 }
@@ -329,16 +342,11 @@ impl std::ops::Mul<Vec4> for Mat4
     #[inline]
     fn mul(self, rhs: Vec4)->Vec4
     {
-        let mut res = Vec4::default();
-        for i in 0..4  // Column
-        {
-            res.x += self.m[0][i] * rhs.x;
-            res.y += self.m[1][i] * rhs.y;
-            res.z += self.m[2][i] * rhs.z;
-            res.w += self.m[3][i] * rhs.w;
-        }
-
-        return res;
+        let res_x = self.m[0][0]*rhs.x + self.m[1][0]*rhs.y + self.m[2][0]*rhs.z + self.m[3][0]*rhs.w;
+        let res_y = self.m[0][1]*rhs.x + self.m[1][1]*rhs.y + self.m[2][1]*rhs.z + self.m[3][1]*rhs.w;
+        let res_z = self.m[0][2]*rhs.x + self.m[1][2]*rhs.y + self.m[2][2]*rhs.z + self.m[3][2]*rhs.w;
+        let res_w = self.m[0][3]*rhs.x + self.m[1][3]*rhs.y + self.m[2][3]*rhs.z + self.m[3][3]*rhs.w;
+        return Vec4 { x: res_x, y: res_y, z: res_z, w: res_w };
     }
 }
 
@@ -349,18 +357,91 @@ impl std::ops::Mul<Vec3> for Mat4
     #[inline]
     fn mul(self, rhs: Vec3)->Vec3
     {
-        let mut res = Vec4::default();
-        for i in 0..4  // Column
-        {
-            res.x += self.m[0][i] * rhs.x;
-            res.y += self.m[1][i] * rhs.y;
-            res.z += self.m[2][i] * rhs.z;
-            res.w += self.m[3][i] * 1.0;
-        }
-
-        return Vec3 { x: res.x / res.w, y: res.y / res.w, z: res.z / res.w };
+        let res_x = self.m[0][0]*rhs.x + self.m[1][0]*rhs.y + self.m[2][0]*rhs.z + self.m[3][0]*1.0;
+        let res_y = self.m[0][1]*rhs.x + self.m[1][1]*rhs.y + self.m[2][1]*rhs.z + self.m[3][1]*1.0;
+        let res_z = self.m[0][2]*rhs.x + self.m[1][2]*rhs.y + self.m[2][2]*rhs.z + self.m[3][2]*1.0;
+        let res_w = self.m[0][3]*rhs.x + self.m[1][3]*rhs.y + self.m[2][3]*rhs.z + self.m[3][3]*1.0;
+        return Vec3 { x: res_x / res_w, y: res_y / res_w, z: res_z / res_w };
     }
 }
+
+pub fn mat4_inverse(m: Mat4) -> Mat4
+{
+    let s0 = m.m[0][0] * m.m[1][1] - m.m[1][0] * m.m[0][1];
+    let s1 = m.m[0][0] * m.m[1][2] - m.m[1][0] * m.m[0][2];
+    let s2 = m.m[0][0] * m.m[1][3] - m.m[1][0] * m.m[0][3];
+    let s3 = m.m[0][1] * m.m[1][2] - m.m[1][1] * m.m[0][2];
+    let s4 = m.m[0][1] * m.m[1][3] - m.m[1][1] * m.m[0][3];
+    let s5 = m.m[0][2] * m.m[1][3] - m.m[1][2] * m.m[0][3];
+    let c5 = m.m[2][2] * m.m[3][3] - m.m[3][2] * m.m[2][3];
+    let c4 = m.m[2][1] * m.m[3][3] - m.m[3][1] * m.m[2][3];
+    let c3 = m.m[2][1] * m.m[3][2] - m.m[3][1] * m.m[2][2];
+    let c2 = m.m[2][0] * m.m[3][3] - m.m[3][0] * m.m[2][3];
+    let c1 = m.m[2][0] * m.m[3][2] - m.m[3][0] * m.m[2][2];
+    let c0 = m.m[2][0] * m.m[3][1] - m.m[3][0] * m.m[2][1];
+
+    // Should check for 0 determinant
+    let invdet = 1.0 / (s0 * c5 - s1 * c4 + s2 * c3 + s3 * c2 - s4 * c1 + s5 * c0);
+
+    let mut b = Mat4::default();
+    b.m[0][0] = ( m.m[1][1] * c5 - m.m[1][2] * c4 + m.m[1][3] * c3) * invdet;
+    b.m[0][1] = (-m.m[0][1] * c5 + m.m[0][2] * c4 - m.m[0][3] * c3) * invdet;
+    b.m[0][2] = ( m.m[3][1] * s5 - m.m[3][2] * s4 + m.m[3][3] * s3) * invdet;
+    b.m[0][3] = (-m.m[2][1] * s5 + m.m[2][2] * s4 - m.m[2][3] * s3) * invdet;
+    b.m[1][0] = (-m.m[1][0] * c5 + m.m[1][2] * c2 - m.m[1][3] * c1) * invdet;
+    b.m[1][1] = ( m.m[0][0] * c5 - m.m[0][2] * c2 + m.m[0][3] * c1) * invdet;
+    b.m[1][2] = (-m.m[3][0] * s5 + m.m[3][2] * s2 - m.m[3][3] * s1) * invdet;
+    b.m[1][3] = ( m.m[2][0] * s5 - m.m[2][2] * s2 + m.m[2][3] * s1) * invdet;
+    b.m[2][0] = ( m.m[1][0] * c4 - m.m[1][1] * c2 + m.m[1][3] * c0) * invdet;
+    b.m[2][1] = (-m.m[0][0] * c4 + m.m[0][1] * c2 - m.m[0][3] * c0) * invdet;
+    b.m[2][2] = ( m.m[3][0] * s4 - m.m[3][1] * s2 + m.m[3][3] * s0) * invdet;
+    b.m[2][3] = (-m.m[2][0] * s4 + m.m[2][1] * s2 - m.m[2][3] * s0) * invdet;
+    b.m[3][0] = (-m.m[1][0] * c3 + m.m[1][1] * c1 - m.m[1][2] * c0) * invdet;
+    b.m[3][1] = ( m.m[0][0] * c3 - m.m[0][1] * c1 + m.m[0][2] * c0) * invdet;
+    b.m[3][2] = (-m.m[3][0] * s3 + m.m[3][1] * s1 - m.m[3][2] * s0) * invdet;
+    b.m[3][3] = ( m.m[2][0] * s3 - m.m[2][1] * s1 + m.m[2][2] * s0) * invdet;
+    return b;
+}
+
+/*
+pub fn mat4_inverse(m: Mat4) -> Mat4
+{
+    let s0 = m.m[0][0] * m.m[1][1] - m.m[0][1] * m.m[1][0];
+    let s1 = m.m[0][0] * m.m[2][1] - m.m[0][1] * m.m[2][0];
+    let s2 = m.m[0][0] * m.m[3][1] - m.m[0][1] * m.m[3][0];
+    let s3 = m.m[1][0] * m.m[2][1] - m.m[1][1] * m.m[2][0];
+    let s4 = m.m[1][0] * m.m[3][1] - m.m[1][1] * m.m[3][0];
+    let s5 = m.m[2][0] * m.m[3][1] - m.m[2][1] * m.m[3][0];
+    let c5 = m.m[2][2] * m.m[3][3] - m.m[2][3] * m.m[3][2];
+    let c4 = m.m[1][2] * m.m[3][3] - m.m[1][3] * m.m[3][2];
+    let c3 = m.m[1][2] * m.m[2][3] - m.m[1][3] * m.m[2][2];
+    let c2 = m.m[0][2] * m.m[3][3] - m.m[0][3] * m.m[3][2];
+    let c1 = m.m[0][2] * m.m[2][3] - m.m[0][3] * m.m[2][2];
+    let c0 = m.m[0][2] * m.m[1][3] - m.m[0][3] * m.m[1][2];
+
+    // Should check for 0 determinant
+    let invdet = 1.0 / (s0 * c5 - s1 * c4 + s2 * c3 + s3 * c2 - s4 * c1 + s5 * c0);
+
+    let mut b = Mat4::default();
+    b.m[0][0] = ( m.m[1][1] * c5 - m.m[2][1] * c4 + m.m[3][1] * c3) * invdet;
+    b.m[1][0] = (-m.m[1][0] * c5 + m.m[2][0] * c4 - m.m[3][0] * c3) * invdet;
+    b.m[2][0] = ( m.m[1][3] * s5 - m.m[2][3] * s4 + m.m[3][3] * s3) * invdet;
+    b.m[3][0] = (-m.m[1][2] * s5 + m.m[2][2] * s4 - m.m[3][2] * s3) * invdet;
+    b.m[0][1] = (-m.m[0][1] * c5 + m.m[2][1] * c2 - m.m[3][1] * c1) * invdet;
+    b.m[1][1] = ( m.m[0][0] * c5 - m.m[2][0] * c2 + m.m[3][0] * c1) * invdet;
+    b.m[2][1] = (-m.m[0][3] * s5 + m.m[2][3] * s2 - m.m[3][3] * s1) * invdet;
+    b.m[3][1] = ( m.m[0][2] * s5 - m.m[2][2] * s2 + m.m[3][2] * s1) * invdet;
+    b.m[0][2] = ( m.m[0][1] * c4 - m.m[1][1] * c2 + m.m[3][1] * c0) * invdet;
+    b.m[1][2] = (-m.m[0][0] * c4 + m.m[1][0] * c2 - m.m[3][0] * c0) * invdet;
+    b.m[2][2] = ( m.m[0][3] * s4 - m.m[1][3] * s2 + m.m[3][3] * s0) * invdet;
+    b.m[3][2] = (-m.m[0][2] * s4 + m.m[1][2] * s2 - m.m[3][2] * s0) * invdet;
+    b.m[0][3] = (-m.m[0][1] * c3 + m.m[1][1] * c1 - m.m[2][1] * c0) * invdet;
+    b.m[1][3] = ( m.m[0][0] * c3 - m.m[1][0] * c1 + m.m[2][0] * c0) * invdet;
+    b.m[2][3] = (-m.m[0][3] * s3 + m.m[1][3] * s1 - m.m[2][3] * s0) * invdet;
+    b.m[3][3] = ( m.m[0][2] * s3 - m.m[1][2] * s1 + m.m[2][2] * s0) * invdet;
+    return b;
+}
+*/
 
 #[derive(Debug, Clone, Copy)]
 #[repr(C)]
@@ -784,10 +865,10 @@ pub fn grow_aabb_to_include_vert(aabb: &mut Aabb, to_include: Vec3)
 {
     aabb.min.x = aabb.min.x.min(to_include.x);
     aabb.max.x = aabb.max.x.max(to_include.x);
-    aabb.min.y = aabb.min.x.min(to_include.y);
-    aabb.max.y = aabb.max.x.max(to_include.y);
-    aabb.min.z = aabb.min.x.min(to_include.z);
-    aabb.max.z = aabb.max.x.max(to_include.z);
+    aabb.min.y = aabb.min.y.min(to_include.y);
+    aabb.max.y = aabb.max.y.max(to_include.y);
+    aabb.min.z = aabb.min.z.min(to_include.z);
+    aabb.max.z = aabb.max.z.max(to_include.z);
 }
 
 pub fn transform_aabb(min: Vec3, max: Vec3, transform: Mat4) -> Aabb

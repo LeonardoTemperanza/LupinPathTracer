@@ -48,21 +48,41 @@ pub struct SceneDesc
 
     pub tlas_nodes: wgpu::Buffer,
     pub instances: wgpu::Buffer,
+    pub materials: wgpu::Buffer,
 
     pub textures: Vec<wgpu::Texture>,
-    pub samplers: Vec<wgpu::Sampler>
+    pub samplers: Vec<wgpu::Sampler>,
+    pub env_map: wgpu::Texture,
+    pub env_map_sampler: wgpu::Sampler,
 }
 
 #[derive(Default, Clone, Copy, Debug)]
 #[repr(C)]
 pub struct Instance
 {
-    pub pos: Vec3,
+    pub inv_transform: Mat4,
     pub mesh_idx: u32,
     pub mat_idx: u32,
     pub padding0: f32,
     pub padding1: f32,
-    pub padding2: f32,
+}
+
+#[derive(Default, Clone, Copy, Debug)]
+#[repr(C)]
+pub struct Material
+{
+    pub color: Vec4,
+    pub emission: Vec4,
+    pub scattering: Vec4,
+    pub roughness: f32,
+    pub metallic: f32,
+    pub ior: f32,
+    pub sc_anisotropy: f32,
+    pub tr_depth: f32,
+
+    pub color_tex_idx:     u32,
+    pub emission_tex_idx:  u32,
+    pub roughness_tex_idx: u32,
 }
 
 // This doesn't include positions, as that
@@ -212,8 +232,18 @@ pub fn build_pathtrace_shader_params(device: &wgpu::Device, with_runtime_checks:
                 },
                 count: None,
             },
-            wgpu::BindGroupLayoutEntry {  // textures
+            wgpu::BindGroupLayoutEntry {  // materials
                 binding: 6,
+                visibility: wgpu::ShaderStages::COMPUTE,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Storage { read_only: true },
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            },
+            wgpu::BindGroupLayoutEntry {  // textures
+                binding: 7,
                 visibility: wgpu::ShaderStages::COMPUTE,
                 ty: wgpu::BindingType::Texture {
                     sample_type: wgpu::TextureSampleType::Float { filterable: true },
@@ -223,11 +253,27 @@ pub fn build_pathtrace_shader_params(device: &wgpu::Device, with_runtime_checks:
                 count: std::num::NonZero::new(1)
             },
             wgpu::BindGroupLayoutEntry {  // samplers
-                binding: 7,
+                binding: 8,
                 visibility: wgpu::ShaderStages::COMPUTE,
                 ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
                 count: std::num::NonZero::new(1)
-            }
+            },
+            wgpu::BindGroupLayoutEntry {  // env map texture
+                binding: 9,
+                visibility: wgpu::ShaderStages::COMPUTE,
+                ty: wgpu::BindingType::Texture {
+                    sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                    view_dimension: wgpu::TextureViewDimension::D2,
+                    multisampled: false,
+                },
+                count: None
+            },
+            wgpu::BindGroupLayoutEntry {  // env map sampler
+                binding: 10,
+                visibility: wgpu::ShaderStages::COMPUTE,
+                ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                count: None
+            },
         ]
     });
 
@@ -318,6 +364,7 @@ pub fn pathtrace_scene(device: &wgpu::Device, queue: &wgpu::Queue, scene: &Scene
     let texture_views   = array_of_texture_views(&scene.textures);
     let textures_array  = array_of_texture_bindings_resource(&texture_views);
     let samplers_array  = array_of_sampler_bindings_resource(&scene.samplers);
+    let env_map_view    = scene.env_map.create_view(&Default::default());
 
     let scene_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
         label: None,
@@ -329,8 +376,11 @@ pub fn pathtrace_scene(device: &wgpu::Device, queue: &wgpu::Queue, scene: &Scene
             wgpu::BindGroupEntry { binding: 3, resource: wgpu::BindingResource::BufferArray(bvh_nodes_array.as_slice()) },
             wgpu::BindGroupEntry { binding: 4, resource: buffer_resource(&scene.tlas_nodes) },
             wgpu::BindGroupEntry { binding: 5, resource: buffer_resource(&scene.instances) },
-            wgpu::BindGroupEntry { binding: 6, resource: wgpu::BindingResource::TextureViewArray(textures_array.as_slice()) },
-            wgpu::BindGroupEntry { binding: 7, resource: wgpu::BindingResource::SamplerArray(samplers_array.as_slice()) },
+            wgpu::BindGroupEntry { binding: 6, resource: buffer_resource(&scene.materials) },
+            wgpu::BindGroupEntry { binding: 7, resource: wgpu::BindingResource::TextureViewArray(textures_array.as_slice()) },
+            wgpu::BindGroupEntry { binding: 8, resource: wgpu::BindingResource::SamplerArray(samplers_array.as_slice()) },
+            wgpu::BindGroupEntry { binding: 9, resource: wgpu::BindingResource::TextureView(&env_map_view) },
+            wgpu::BindGroupEntry { binding: 10, resource: wgpu::BindingResource::Sampler(&scene.env_map_sampler) },
         ]
     });
 
@@ -485,24 +535,20 @@ pub fn pathtrace_scene_debug(device: &wgpu::Device, queue: &wgpu::Queue, scene: 
 // Acceleration structures
 
 // The aabbs are in model space, and they're indexed using the instance mesh_idx member.
-pub fn build_tlas(device: &wgpu::Device, queue: &wgpu::Queue, instances: &[Instance], aabbs: &[Aabb]) -> wgpu::Buffer
+pub fn build_tlas(device: &wgpu::Device, queue: &wgpu::Queue, instances: &[Instance], model_aabbs: &[Aabb]) -> wgpu::Buffer
 {
-    // TODO: Precompute the worldspace AABBs.
-
     let mut node_indices = Vec::<u32>::with_capacity(instances.len());
-    let mut tlas = Vec::<TlasNode>::with_capacity(instances.len());
+    let mut tlas = Vec::<TlasNode>::with_capacity(instances.len() * 2 - 1);
 
     tlas.push(TlasNode::default());  // Reserve slot for root node.
 
     // Assign a leaf node for each instance.
     for i in 0..instances.len() as u32
     {
-        node_indices.push(i + 1);
-
         let instance = instances[i as usize];
-        let transform = position_matrix(instance.pos);
-        let aabb = aabbs[instance.mesh_idx as usize];
-        let aabb_trans = transform_aabb(aabb.min, aabb.max, transform);
+        let model_aabb = model_aabbs[instance.mesh_idx as usize];
+        let transform = mat4_inverse(instance.inv_transform);
+        let aabb_trans = transform_aabb(model_aabb.min, model_aabb.max, transform);
 
         let tlas_node = TlasNode {
             aabb_min: aabb_trans.min,
@@ -511,6 +557,7 @@ pub fn build_tlas(device: &wgpu::Device, queue: &wgpu::Queue, instances: &[Insta
             left_right: 0,  // Makes it a leaf.
         };
         tlas.push(tlas_node);
+        node_indices.push(tlas.len() as u32 - 1);
     }
 
     // Use agglomerative clustering.
@@ -526,23 +573,19 @@ pub fn build_tlas(device: &wgpu::Device, queue: &wgpu::Queue, instances: &[Insta
             let node_a = tlas[node_idx_a as usize];
             let node_b = tlas[node_idx_b as usize];
 
-            let transform_a = position_matrix(instances[node_a.instance_idx as usize].pos);
-            let transform_b = position_matrix(instances[node_b.instance_idx as usize].pos);
-
-            let aabb_a_trans = transform_aabb(node_a.aabb_min, node_a.aabb_max, transform_a);
-            let aabb_b_trans = transform_aabb(node_b.aabb_min, node_b.aabb_max, transform_b);
-
             let new_node = TlasNode {
                 left_right: node_idx_a + (node_idx_b << 16),
-                aabb_min: aabb_a_trans.min.min(aabb_b_trans.min),
-                aabb_max: aabb_a_trans.max.max(aabb_b_trans.max),
-                instance_idx: 0,  // Unused
+                aabb_min: node_a.aabb_min.min(node_b.aabb_min),
+                aabb_max: node_a.aabb_max.max(node_b.aabb_max),
+                instance_idx: 0,  // Unused.
             };
             tlas.push(new_node);
 
             node_indices[a as usize] = tlas.len() as u32 - 1;
-            node_indices[b as usize] = node_indices[node_indices.len()-1];
+            node_indices[b as usize] = node_indices[node_indices.len() - 1];
             node_indices.pop();
+            if a >= node_indices.len() as u32 { a = node_indices.len() as u32 - 1; }
+
             b = tlas_find_best_match(tlas.as_slice(), node_indices.as_slice(), a);
         }
         else
@@ -550,10 +593,9 @@ pub fn build_tlas(device: &wgpu::Device, queue: &wgpu::Queue, instances: &[Insta
             a = b;
             b = c;
         }
-
-        tlas[0] = tlas[node_indices[a as usize] as usize];
     }
 
+    tlas[0] = tlas[node_indices[a as usize] as usize];
     return upload_storage_buffer(&device, &queue, to_u8_slice(&tlas));
 }
 
@@ -565,15 +607,20 @@ pub fn tlas_find_best_match(tlas: &[TlasNode], idx_array: &[u32], node_a: u32) -
     let mut best_b: u32 = u32::MAX;
     for (i, &b_idx) in idx_array.iter().enumerate()
     {
+        if node_a == i as u32 { continue; }
+
         let bmax = tlas[a_idx as usize].aabb_max.max(tlas[b_idx as usize].aabb_max);
         let bmin = tlas[a_idx as usize].aabb_min.min(tlas[b_idx as usize].aabb_min);
         let e = bmax - bmin;
         let area = e.x * e.y + e.y * e.z + e.z * e.x;
-        if area < smallest { smallest = area; best_b = i as u32; }
+
+        if area < smallest {
+            smallest = area;
+            best_b = i as u32;
+        }
     }
 
-    assert!(best_b != u32::MAX);
-    return 0;
+    return best_b;
 }
 
 // NOTE: This modifies the indices array to change the order of triangles (indices)
@@ -856,7 +903,7 @@ pub fn node_cost(size: Vec3, num_tris: u32)->f32
     // Surface Area Heuristic (SAH)
     // Computing half area instead of full area because
     // it's slightly faster and doesn't change the result
-    let half_area: f32 = size.x * (size.y * size.z) + size.y * size.z;
+    let half_area: f32 = size.x * (size.y + size.z) + size.y * size.z;
     return half_area * num_tris as f32;
 }
 

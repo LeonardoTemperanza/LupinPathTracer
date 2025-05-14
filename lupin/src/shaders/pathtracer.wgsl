@@ -1,16 +1,20 @@
 
 // Group 0: Scene Description
 // Mesh
-@group(0) @binding(0) var<storage, read> verts_pos_array: binding_array<VertsPos>;
-@group(0) @binding(1) var<storage, read> verts_array: binding_array<Verts>;
-@group(0) @binding(2) var<storage, read> indices_array: binding_array<Indices>;
-@group(0) @binding(3) var<storage, read> bvh_nodes_array: binding_array<BvhNodes>;
+@group(0) @binding(0)  var<storage, read> verts_pos_array: binding_array<VertsPos>;
+@group(0) @binding(1)  var<storage, read> verts_array: binding_array<Verts>;
+@group(0) @binding(2)  var<storage, read> indices_array: binding_array<Indices>;
+@group(0) @binding(3)  var<storage, read> bvh_nodes_array: binding_array<BvhNodes>;
 // Instances
-@group(0) @binding(4) var<storage, read> tlas_nodes: array<TlasNode>;
-@group(0) @binding(5) var<storage, read> instances: array<Instance>;
+@group(0) @binding(4)  var<storage, read> tlas_nodes: array<TlasNode>;
+@group(0) @binding(5)  var<storage, read> instances: array<Instance>;
+@group(0) @binding(6)  var<storage, read> materials: array<Material>;
 // Textures
-@group(0) @binding(6) var textures: binding_array<texture_2d<f32>>;
-@group(0) @binding(7) var samplers: binding_array<sampler>;
+@group(0) @binding(7)  var textures: binding_array<texture_2d<f32>>;
+@group(0) @binding(8)  var samplers: binding_array<sampler>;
+@group(0) @binding(9)  var env_map:  texture_2d<f32>;
+@group(0) @binding(10) var env_map_sampler: sampler;
+const frame_id: u32 = 0;
 
 // Group 1: Pathtrace settings
 @group(1) @binding(0) var<uniform> camera_transform: mat4x4f;
@@ -18,26 +22,16 @@
 // Group 2: Render target
 @group(2) @binding(0) var output_texture: texture_storage_2d<rgba16float, write>;
 
-// Group 3: Debug
-//@group(3) @binding(0) var debug_input: DebugInput;
-
-struct DebugInput
-{
-    bvh_viz_type: i32,  // 0: VizBVHBoxTests, 1: VizBVHTriTests, 2: VizBVHAllLevels, 3: VizBVHOneLevel
-    mesh_viz_type: i32,  // 0: VizNormals, 1: VizWireframe, 2: VizColor
-
-    threshold: i32,
-    level: i32,
-}
-
-// We need these wrappers for some reason...
-struct VertsPos { data: array<vec3f> }
-struct Verts    { data: array<Vertex> }
-struct Indices  { data: array<u32> }
+// We need these wrappers, or we get a
+// compilation error, for some reason...
+struct VertsPos { data: array<vec3f>   }
+struct Verts    { data: array<Vertex>  }
+struct Indices  { data: array<u32>     }
 struct BvhNodes { data: array<BvhNode> }
 
-// Constants
-const f32_max: f32 = 0x1.fffffep+127;
+//////////////////////////////////////////////
+// Scene description
+//////////////////////////////////////////////
 
 // This doesn't include positions; those are
 // stored in a separate buffer for locality.
@@ -51,81 +45,26 @@ struct Vertex
 
 struct Instance
 {
-    pos: vec3f,
+    inv_transform: mat4x4f,
     mesh_idx: u32,
     mat_idx: u32,
-    // 12 bytes padding
+    // 8 bytes padding
 }
-
-const MAT_FLAGS_HAS_COLOR: u32     = 1 << 0;
-const MAT_FLAGS_HAS_EMISSION: u32  = 1 << 1;
-const MAT_FLAGS_HAS_ROUGHNESS: u32 = 1 << 2;
 
 struct Material
 {
-    flags: u32,
-
     color: vec4f,
     emission: vec4f,
+    scattering: vec4f,
     roughness: f32,
     metallic: f32,
     ior: f32,
-    scattering: vec4f,
     sc_anisotropy: f32,
     tr_depth: f32,
 
     color_tex_idx:     u32,
     emission_tex_idx:  u32,
     roughness_tex_idx: u32,
-}
-
-struct Ray
-{
-    ori: vec3f,
-    dir: vec3f,
-    inv_dir: vec3f  // Precomputed inverse of the ray direction, for performance.
-}
-
-@compute
-@workgroup_size(8, 8, 1)
-fn main(@builtin(local_invocation_id) local_id: vec3u, @builtin(global_invocation_id) global_id: vec3u)
-{
-    let output_dim = textureDimensions(output_texture).xy;
-    let camera_ray = compute_camera_ray(global_id, output_dim);
-
-    var hit = ray_scene_intersection(local_id, camera_ray);
-
-    // Diffuse color
-    var color = vec3f();
-    if hit.dst != f32_max
-    {
-        // color = textureSampleLevel(textures[texture_id], samplers[sampler_id], hit.tex_coords, 0.0f).rgb;
-        // Normals
-        color = select(vec3f(0.0f), hit.normal * 0.5f + 0.5f, hit.dst != f32_max);
-        // UVs
-        //color = select(vec3f(0.0f), vec3f(hit.tex_coords, 1.0f), hit.dst != f32_max);
-    }
-
-    color = max(color, vec3f(0.0f));
-
-    if global_id.x < output_dim.x && global_id.y < output_dim.y {
-        textureStore(output_texture, global_id.xy, vec4f(color, 1.0f));
-    }
-}
-
-fn compute_camera_ray(global_id: vec3u, output_dim: vec2u) -> Ray
-{
-    let frag_coord = vec2f(global_id.xy) + 0.5f;
-    let resolution = vec2f(output_dim);
-
-    let uv = frag_coord / resolution;
-    var coord = 2.0f * uv - 1.0f;
-    coord.y *= -resolution.y / resolution.x;
-
-    let look_at = normalize(vec3(coord, 1.0f));
-
-    let res = Ray(vec3f(0.0f, 0.0f, 0.0f), look_at, 1.0f / look_at);
-    return transform_ray(res, camera_transform);
 }
 
 // NOTE: The odd ordering of the fields
@@ -151,8 +90,203 @@ struct TlasNode
     instance_idx: u32,
 }
 
+//////////////////////////////////////////////
+// Entrypoints
+//////////////////////////////////////////////
+
+@compute
+@workgroup_size(8, 8, 1)
+fn main(@builtin(local_invocation_id) local_id: vec3u, @builtin(global_invocation_id) global_id: vec3u)
+{
+    let output_dim = textureDimensions(output_texture).xy;
+    init_rng(global_id.y * global_id.x + global_id.x, output_dim.y * output_dim.x + output_dim.x);
+    let camera_ray = compute_camera_ray(global_id, output_dim);
+
+    var color = pathtrace(local_id, camera_ray);
+    color = max(color, vec3f(0.0f));
+
+    if global_id.x < output_dim.x && global_id.y < output_dim.y {
+        textureStore(output_texture, global_id.xy, vec4f(color, 1.0f));
+    }
+}
+
+fn compute_camera_ray(global_id: vec3u, output_dim: vec2u) -> Ray
+{
+    let frag_coord = vec2f(global_id.xy) + 0.5f;
+    let resolution = vec2f(output_dim);
+
+    let uv = frag_coord / resolution;
+    var coord = 2.0f * uv - 1.0f;
+    coord.y *= -resolution.y / resolution.x;
+
+    let look_at = normalize(vec3(coord, 1.0f));
+
+    let res = Ray(vec3f(0.0f, 0.0f, 0.0f), look_at, 1.0f / look_at);
+    return transform_ray(res, camera_transform);
+}
+
+//////////////////////////////////////////////
+// Pathtracing
+//////////////////////////////////////////////
+
+const NUM_BOUNCES: u32 = 5;
+const NUM_SAMPLES: u32 = 1;
+
+fn pathtrace(local_id: vec3u, ray: Ray) -> vec3f
+{
+    var final_color = vec3f(0.0f);
+
+    for(var sample = 0u; sample < NUM_SAMPLES; sample++)
+    {
+        var cur_ray = ray;
+        var ray_color = vec3f(1.0f);  // Multiplicative terms.
+        var luminance = vec3f(0.0f);
+        for(var bounce = 0u; bounce <= NUM_BOUNCES; bounce++)
+        {
+            let hit = ray_scene_intersection(local_id, cur_ray);
+            if hit.dst == F32_MAX  // Missed.
+            {
+                luminance += sample_env_map(cur_ray.dir) * ray_color;
+                break;
+            }
+
+            // Ray hit something.
+
+            // Matte material
+            let mat = materials[hit.mat_idx];
+            const mat_sampler_idx: u32 = 0;  // TODO!
+            let mat_color = textureSampleLevel(textures[mat.color_tex_idx], samplers[mat_sampler_idx], hit.tex_coords, 0.0f) * mat.color;
+
+            cur_ray.ori = ray.ori + normalize(ray.dir) * hit.dst;
+
+            // If this condition isn't met the next ray will go through.
+            if random_f32() < mat_color.a
+            {
+                cur_ray.dir = cosine_weighted_random_direction(hit.normal);
+                cur_ray.inv_dir = 1.0f / cur_ray.dir;
+                ray_color *= mat_color.rgb;
+            }
+        }
+
+        final_color += luminance;
+    }
+
+    final_color /= f32(NUM_SAMPLES);
+
+    // TODO: Progressive rendering.
+
+    return final_color;
+}
+
+fn sample_env_map(dir: vec3f) -> vec3f
+{
+    let coords = vec2f((atan2(dir.x, dir.z) + PI) / (2*PI), acos(dir.y / PI));
+    return textureSampleLevel(env_map, env_map_sampler, coords, 0.0f).rgb;
+}
+
+//////////////////////////////////////////////
+// Random number generation
+//////////////////////////////////////////////
+
+var<private> RNG_STATE: u32 = 0u;
+
+fn init_rng(global_id: u32, last_id: u32)
+{
+    RNG_STATE = global_id + (last_id + 1u) * frame_id;
+}
+
+// PCG Random number generator.
+// From: www.pcg-random.org and www.shadertoy.com/view/XlGcRh
+fn random_u32() -> u32
+{
+    RNG_STATE = RNG_STATE * 747796405u + 2891336453u;
+    var result = ((RNG_STATE >> ((RNG_STATE >> 28u) + 4u)) ^ RNG_STATE) * 277803737u;
+    result = (result >> 22u) ^ result;
+    return result;
+}
+
+// From 0 (inclusive) to 1 (inclusive)
+fn random_f32() -> f32
+{
+    RNG_STATE = RNG_STATE * 747796405u + 2891336453u;
+    var result: u32 = ((RNG_STATE >> ((RNG_STATE >> 28) + 4u)) ^ RNG_STATE) * 277803737u;
+    result = (result >> 22) ^ result;
+    return f32(result) / 4294967295.0;
+}
+
+fn random_f32_normal_dist() -> f32
+{
+    let theta = 2.0f * PI * random_f32();
+    let rho = sqrt(-2.0f * log(random_f32()));
+    return rho * cos(theta);
+}
+
+fn random_in_circle() -> vec2f
+{
+    let angle: f32 = random_f32() * 2.0f * PI;
+    var res: vec2f = vec2f(cos(angle), sin(angle));
+    res *= sqrt(random_f32());
+    return res;
+}
+
+fn random_direction() -> vec3f
+{
+    // This is the same as sampling a random
+    // point along a unit sphere. Since the
+    // multivariate standard normal distribution
+    // is spherically symmetric, we can just sample
+    // the normal distribution 3 times to get our
+    // direction result.
+    let x = random_f32_normal_dist();
+    let y = random_f32_normal_dist();
+    let z = random_f32_normal_dist();
+    return normalize(vec3(x, y, z));
+}
+
+fn random_in_hemisphere(normal: vec3f) -> vec3f
+{
+    let dir = random_direction();
+    return dir * sign(dot(normal, dir));
+}
+
+// TODO: Can we make this faster?
+fn cosine_weighted_random_direction(normal: vec3f) -> vec3f
+{
+    let r1 = random_f32();
+    let r2 = random_f32();
+
+    // Spherical coordinates
+    let theta = acos(sqrt(1.0f - r1));
+    let phi = 2.0f * PI * r2;
+
+    // Convert to Cartesian coordinates
+    let x = sin(theta) * cos(phi);
+    let y = sin(theta) * sin(phi);
+    let z = cos(theta);
+
+    // Transform to world space
+    let w = normal;
+    let axis = select(vec3(1.0f, 0.0f, 0.0f), vec3(0.0f, 1.0f, 0.0f), abs(w.x) > 0.1f);
+    let u = normalize(cross(axis, w));
+    let v = cross(w, u);
+    return normalize(x * u + y * v + z * w);
+}
+
+//////////////////////////////////////////////
+// Acceleration structures
+//////////////////////////////////////////////
+
+struct Ray
+{
+    ori: vec3f,
+    dir: vec3f,
+    inv_dir: vec3f  // Precomputed inverse of the ray direction, for performance.
+}
+
+const RAY_HIT_MIN_DIST: f32 = 0.001;
+
 // From: https://tavianator.com/2011/ray_box.html
-// For misses, t = f32_max
+// For misses, t = F32_MAX
 fn ray_aabb_dst(ray: Ray, aabb_min: vec3f, aabb_max: vec3f)->f32
 {
     let t_min: vec3f = (aabb_min - 0.001 - ray.ori) * ray.inv_dir;
@@ -163,12 +297,12 @@ fn ray_aabb_dst(ray: Ray, aabb_min: vec3f, aabb_max: vec3f)->f32
     let dst_near: f32 = max(max(t1.x, t1.y), t1.z);
 
     let did_hit: bool = dst_far >= dst_near && dst_far > 0.0f;
-    return select(f32_max, dst_near, did_hit);
+    return select(F32_MAX, dst_near, did_hit);
 }
 
 // From: https://www.shadertoy.com/view/MlGcDz
 // Triangle intersection. Returns { t, u, v }
-// For misses, t = f32_max
+// For misses, t = F32_MAX
 fn ray_tri_dst(ray: Ray, v0: vec3f, v1: vec3f, v2: vec3f)->vec3f
 {
     let v1v0 = v1 - v0;
@@ -187,7 +321,7 @@ fn ray_tri_dst(ray: Ray, v0: vec3f, v1: vec3f, v2: vec3f)->vec3f
     let v = d * dot(q, v1v0);
     var t = d * dot(-n, rov0);
 
-    if min(u, v) < 0.0 || (u+v) > 1.0 { t = f32_max; }
+    if min(u, v) < 0.0 || (u+v) > 1.0 || t < RAY_HIT_MIN_DIST { t = F32_MAX; }
     return vec3f(t, u, v);
 }
 
@@ -196,10 +330,10 @@ struct HitInfo
     normal: vec3f,
     dst: f32,
     tex_coords: vec2f,
-    test: u32,
+    mat_idx: u32,
 }
 
-const invalid_hit: HitInfo = HitInfo(vec3f(), f32_max, vec2f(), 0);
+const invalid_hit: HitInfo = HitInfo(vec3f(), F32_MAX, vec2f(), 0);
 
 const MAX_TLAS_DEPTH: u32 = 20;  // This supports 2^MAX_TLAS_DEPTH objects.
 const TLAS_STACK_SIZE: u32 = (MAX_TLAS_DEPTH + 1) * 8 * 8;  // shared memory
@@ -219,27 +353,26 @@ fn ray_scene_intersection(local_id: vec3u, ray: Ray)->HitInfo
     tlas_stack[1 + offset] = 0u;
 
     // t, u, v
-    var min_hit = vec3f(f32_max, 0.0f, 0.0f);
+    var min_hit = vec3f(F32_MAX, 0.0f, 0.0f);
     var tri_idx: u32 = 0;
     var mesh_idx: u32 = 0;
-    var test: u32 = 0;  // TODO: Remove
+    var mat_idx: u32 = 0;
     while stack_idx > 1
     {
         stack_idx--;
-        test++;
         let node = tlas_nodes[tlas_stack[stack_idx + offset]];
 
         if node.left_right == 0u  // Leaf node
         {
             let instance = instances[node.instance_idx];
-            //let ray_trans = transform_ray(ray, instances[node.instance_idx].inv_transform);
-            let ray_trans = Ray(ray.ori - instance.pos, ray.dir, ray.inv_dir);
+            let ray_trans = transform_ray(ray, instances[node.instance_idx].inv_transform);
             let result = ray_mesh_intersection(local_id, ray_trans, instance.mesh_idx);
             if result.hit.x < min_hit.x
             {
                 min_hit  = result.hit;
                 tri_idx  = result.tri_idx;
                 mesh_idx = instance.mesh_idx;
+                mat_idx  = instance.mat_idx;
             }
         }
         else  // Non-leaf node
@@ -294,7 +427,7 @@ fn ray_scene_intersection(local_id: vec3u, ray: Ray)->HitInfo
     }
 
     var hit_info: HitInfo = invalid_hit;
-    if min_hit.x != f32_max
+    if min_hit.x != F32_MAX
     {
         let vert0: Vertex = verts_array[mesh_idx].data[indices_array[mesh_idx].data[tri_idx*3 + 0]];
         let vert1: Vertex = verts_array[mesh_idx].data[indices_array[mesh_idx].data[tri_idx*3 + 1]];
@@ -306,9 +439,9 @@ fn ray_scene_intersection(local_id: vec3u, ray: Ray)->HitInfo
         hit_info.dst = min_hit.x;
         hit_info.normal = vert0.normal*w + vert1.normal*u + vert2.normal*v;
         hit_info.tex_coords = vert0.tex_coords*w + vert1.tex_coords*u + vert2.tex_coords*v;
+        hit_info.mat_idx = mat_idx;
     }
 
-    hit_info.test = test;
     return hit_info;
 }
 
@@ -336,7 +469,7 @@ fn ray_mesh_intersection(local_id: vec3u, ray: Ray, mesh_idx: u32) -> RayMeshInt
     bvh_stack[1 + offset] = 0u;
 
     // t, u, v
-    var min_hit = vec3f(f32_max, 0.0f, 0.0f);
+    var min_hit = vec3f(F32_MAX, 0.0f, 0.0f);
     var tri_idx: u32 = 0;
     while stack_idx > 1
     {
@@ -414,7 +547,12 @@ fn ray_mesh_intersection(local_id: vec3u, ray: Ray, mesh_idx: u32) -> RayMeshInt
     return RayMeshIntersectionResult(min_hit, tri_idx);
 }
 
-// Utils
+//////////////////////////////////////////////
+// Utils and constants
+//////////////////////////////////////////////
+
+const F32_MAX: f32 = 0x1.fffffep+127;  // WGSL does not yet have a "max(f32)"
+const PI: f32 = 3.14159265358979323846264338327950288;
 
 fn transform_point(p: vec3f, transform: mat4x4f)->vec3f
 {
@@ -432,8 +570,8 @@ fn transform_dir(dir: vec3f, transform: mat4x4f)->vec3f
 fn transform_ray(ray: Ray, transform: mat4x4f) -> Ray
 {
     var res = ray;
-    res.ori = transform_point(res.ori, camera_transform);
-    res.dir = transform_dir(res.dir, camera_transform);
+    res.ori = transform_point(res.ori, transform);
+    res.dir = transform_dir(res.dir, transform);
     res.inv_dir = 1.0f / res.dir;
     return res;
 }
