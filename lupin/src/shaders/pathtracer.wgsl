@@ -17,7 +17,8 @@
 
 // Group 1: Pathtrace settings
 @group(1) @binding(0) var<uniform> camera_transform: mat4x4f;
-@group(1) @binding(1) var<uniform> frame_id: u32;
+@group(1) @binding(1) var<uniform> accum_counter: u32;  // If this is 0, nothing is taken from the previous frame
+@group(1) @binding(2) var prev_frame: texture_2d<f32>;
 
 // Group 2: Render target
 @group(2) @binding(0) var output_texture: texture_storage_2d<rgba16float, write>;
@@ -105,6 +106,19 @@ fn main(@builtin(local_invocation_id) local_id: vec3u, @builtin(global_invocatio
     var color = pathtrace(local_id, camera_ray);
     color = max(color, vec3f(0.0f));
 
+    // Progressive rendering.
+    if accum_counter != 0
+    {
+        let frag_coord = vec2f(global_id.xy) + 0.5f;
+        let resolution = vec2f(output_dim);
+        let uv = frag_coord / resolution;
+
+        let weight = 1.0f / f32(accum_counter);
+        let prev_color = textureSampleLevel(prev_frame, samplers[0], uv, 0.0f).rgb;
+        color = prev_color * (1.0f - weight) + color * weight;
+        color = max(color, vec3f(0.0f));
+    }
+
     if global_id.x < output_dim.x && global_id.y < output_dim.y {
         textureStore(output_texture, global_id.xy, vec4f(color, 1.0f));
     }
@@ -172,9 +186,6 @@ fn pathtrace(local_id: vec3u, ray: Ray) -> vec3f
     }
 
     final_color /= f32(NUM_SAMPLES);
-
-    // TODO: Progressive rendering.
-
     return final_color;
 }
 
@@ -192,7 +203,7 @@ var<private> RNG_STATE: u32 = 0u;
 
 fn init_rng(global_id: u32, last_id: u32)
 {
-    RNG_STATE = global_id + (last_id + 1u) * frame_id;
+    RNG_STATE = global_id + (last_id + 1u) * accum_counter;
 }
 
 // PCG Random number generator.

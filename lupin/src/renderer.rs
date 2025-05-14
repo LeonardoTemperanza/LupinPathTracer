@@ -153,6 +153,7 @@ pub struct PathtraceShaderParams
 {
     pub pipeline: wgpu::ComputePipeline,
     pub debug_pipeline: wgpu::ComputePipeline,
+    pub dummy_texture: wgpu::Texture,
 }
 
 pub fn build_pathtrace_shader_params(device: &wgpu::Device, with_runtime_checks: bool) -> PathtraceShaderParams
@@ -290,13 +291,23 @@ pub fn build_pathtrace_shader_params(device: &wgpu::Device, with_runtime_checks:
                 },
                 count: None
             },
-            wgpu::BindGroupLayoutEntry {  // frame id
+            wgpu::BindGroupLayoutEntry {  // accum_counter
                 binding: 1,
                 visibility: wgpu::ShaderStages::COMPUTE,
                 ty: wgpu::BindingType::Buffer {
                     ty: wgpu::BufferBindingType::Uniform,
                     has_dynamic_offset: false,
                     min_binding_size: None,
+                },
+                count: None
+            },
+            wgpu::BindGroupLayoutEntry {  // prev frame
+                binding: 2,
+                visibility: wgpu::ShaderStages::COMPUTE,
+                ty: wgpu::BindingType::Texture {
+                    sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                    view_dimension: wgpu::TextureViewDimension::D2,
+                    multisampled: false,
                 },
                 count: None
             },
@@ -347,35 +358,42 @@ pub fn build_pathtrace_shader_params(device: &wgpu::Device, with_runtime_checks:
         cache: None,
     });
 
+    let size = wgpu::Extent3d {
+        width: 1,
+        height: 1,
+        depth_or_array_layers: 1,
+    };
+
+    // TODO: Make this a 1x1 white texture instead of garbage data.
+    let dummy_texture = device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("Dummy Texture"),
+        size,
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: wgpu::TextureFormat::Rgba16Float, // Match your main texture format
+        usage: wgpu::TextureUsages::TEXTURE_BINDING,
+        view_formats: &[],
+    });
+
     return PathtraceShaderParams {
         pipeline,
-        debug_pipeline
+        debug_pipeline,
+        dummy_texture,
     };
 }
 
 pub struct AccumulationParams<'a>
 {
     pub prev_frame: Option<&'a wgpu::Texture>,
-    pub frame_id: u32,
+    pub accum_counter: u32,
 }
 
 pub fn pathtrace_scene(device: &wgpu::Device, queue: &wgpu::Queue, scene: &SceneDesc, render_target: &wgpu::Texture, shader_params: &PathtraceShaderParams, accum_params: &AccumulationParams, camera_transform: Mat4)
 {
+    use wgpu::util::DeviceExt;  // For some extra device traits.
+
     // TODO: Check format and usage of render target params and others
-
-    let render_target_view = render_target.create_view(&Default::default());
-
-    use wgpu::util::DeviceExt;
-    let camera_transform_uniform = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: Some("Camera Buffer"),
-        contents: to_u8_slice(&[camera_transform]),
-        usage: wgpu::BufferUsages::UNIFORM,
-    });
-    let frame_id_uniform = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: Some("Frame ID Buffer"),
-        contents: to_u8_slice(&[accum_params.frame_id]),
-        usage: wgpu::BufferUsages::UNIFORM,
-    });
 
     use crate::wgpu_utils::*;
     let verts_pos_array = array_of_buffer_bindings_resource(&scene.verts_pos);
@@ -405,14 +423,33 @@ pub fn pathtrace_scene(device: &wgpu::Device, queue: &wgpu::Queue, scene: &Scene
         ]
     });
 
+    let camera_transform_uniform = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("Camera Buffer"),
+        contents: to_u8_slice(&[camera_transform]),
+        usage: wgpu::BufferUsages::UNIFORM,
+    });
+    let accum_counter_uniform = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("Frame ID Buffer"),
+        contents: to_u8_slice(&[accum_params.accum_counter]),
+        usage: wgpu::BufferUsages::UNIFORM,
+    });
+    let prev_frame_view = match accum_params.prev_frame
+    {
+        None      => shader_params.dummy_texture.create_view(&Default::default()),
+        Some(tex) => tex.create_view(&Default::default()),
+    };
+
     let settings_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
         label: None,
         layout: &shader_params.pipeline.get_bind_group_layout(1),
         entries: &[
             wgpu::BindGroupEntry { binding: 0, resource: buffer_resource(&camera_transform_uniform) },
-            wgpu::BindGroupEntry { binding: 1, resource: buffer_resource(&frame_id_uniform) }
+            wgpu::BindGroupEntry { binding: 1, resource: buffer_resource(&accum_counter_uniform) },
+            wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::TextureView(&prev_frame_view) }
         ]
     });
+
+    let render_target_view = render_target.create_view(&Default::default());
 
     let render_target_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
         label: None,

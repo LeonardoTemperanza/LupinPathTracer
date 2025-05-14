@@ -60,7 +60,7 @@ fn main()
 
     // Init rendering resources
     let scene = build_scene(&device, &queue);
-    let shader_params = lp::build_pathtrace_shader_params(&device, true);
+    let shader_params = lp::build_pathtrace_shader_params(&device, false);
     let tonemap_shader_params = lp::build_tonemap_shader_params(&device);
     let mut hdr_texture = device.create_texture(&wgpu::TextureDescriptor {
         label: None,
@@ -88,7 +88,8 @@ fn main()
     let mut cam_pos = Vec3 { x: 0.0, y: 1.0, z: -3.0 };
     let mut cam_rot = Quat::IDENTITY;
 
-    let mut frame_id: u32 = 0;
+    let mut accum_counter: u32 = 0;
+    let mut prev_cam_transform = Mat4::IDENTITY;
 
     window.set_visible(true);
 
@@ -128,10 +129,14 @@ fn main()
                     update_camera(&mut cam_pos, &mut cam_rot, &input, delta_time);
 
                     let camera_transform = xform_to_matrix(cam_pos, cam_rot, Vec3 { x: 1.0, y: 1.0, z: 1.0 });
+                    if camera_transform.m != prev_cam_transform.m {
+                        accum_counter = 0;
+                    }
+                    prev_cam_transform = camera_transform;
 
                     let accum_params = lp::AccumulationParams {
                         prev_frame: None,
-                        frame_id: frame_id,
+                        accum_counter: 0,  // TODO Change this
                     };
                     let frame = surface.get_current_texture().unwrap();
                     lp::pathtrace_scene(&device, &queue, &scene, &hdr_texture,
@@ -151,7 +156,7 @@ fn main()
                     frame.present();
 
                     begin_input_events(&mut input);
-                    frame_id += 1;
+                    accum_counter += 1;
 
                     // Continuously request drawing messages to let the main loop continue
                     window.request_redraw();
