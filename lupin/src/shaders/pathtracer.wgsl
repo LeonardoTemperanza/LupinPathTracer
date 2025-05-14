@@ -14,10 +14,10 @@
 @group(0) @binding(8)  var samplers: binding_array<sampler>;
 @group(0) @binding(9)  var env_map:  texture_2d<f32>;
 @group(0) @binding(10) var env_map_sampler: sampler;
-const frame_id: u32 = 0;
 
 // Group 1: Pathtrace settings
 @group(1) @binding(0) var<uniform> camera_transform: mat4x4f;
+@group(1) @binding(1) var<uniform> frame_id: u32;
 
 // Group 2: Render target
 @group(2) @binding(0) var output_texture: texture_storage_2d<rgba16float, write>;

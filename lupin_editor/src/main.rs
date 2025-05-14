@@ -88,6 +88,8 @@ fn main()
     let mut cam_pos = Vec3 { x: 0.0, y: 1.0, z: -3.0 };
     let mut cam_rot = Quat::IDENTITY;
 
+    let mut frame_id: u32 = 0;
+
     window.set_visible(true);
 
     event_loop.run(|event, target|
@@ -127,9 +129,13 @@ fn main()
 
                     let camera_transform = xform_to_matrix(cam_pos, cam_rot, Vec3 { x: 1.0, y: 1.0, z: 1.0 });
 
+                    let accum_params = lp::AccumulationParams {
+                        prev_frame: None,
+                        frame_id: frame_id,
+                    };
                     let frame = surface.get_current_texture().unwrap();
                     lp::pathtrace_scene(&device, &queue, &scene, &hdr_texture,
-                                        &shader_params, camera_transform.into());
+                                        &shader_params, &accum_params, camera_transform.into());
 
                     let tonemap_params = lp::TonemapParams {
                         operator: lp::TonemapOperator::Aces,
@@ -145,6 +151,7 @@ fn main()
                     frame.present();
 
                     begin_input_events(&mut input);
+                    frame_id += 1;
 
                     // Continuously request drawing messages to let the main loop continue
                     window.request_redraw();

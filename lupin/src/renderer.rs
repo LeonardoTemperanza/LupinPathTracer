@@ -280,8 +280,18 @@ pub fn build_pathtrace_shader_params(device: &wgpu::Device, with_runtime_checks:
     let settings_bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor{
         label: None,
         entries: &[
-            wgpu::BindGroupLayoutEntry {  // Camera transform
+            wgpu::BindGroupLayoutEntry {  // camera transform
                 binding: 0,
+                visibility: wgpu::ShaderStages::COMPUTE,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Uniform,
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None
+            },
+            wgpu::BindGroupLayoutEntry {  // frame id
+                binding: 1,
                 visibility: wgpu::ShaderStages::COMPUTE,
                 ty: wgpu::BindingType::Buffer {
                     ty: wgpu::BufferBindingType::Uniform,
@@ -343,7 +353,13 @@ pub fn build_pathtrace_shader_params(device: &wgpu::Device, with_runtime_checks:
     };
 }
 
-pub fn pathtrace_scene(device: &wgpu::Device, queue: &wgpu::Queue, scene: &SceneDesc, render_target: &wgpu::Texture, shader_params: &PathtraceShaderParams, camera_transform: Mat4)
+pub struct AccumulationParams<'a>
+{
+    pub prev_frame: Option<&'a wgpu::Texture>,
+    pub frame_id: u32,
+}
+
+pub fn pathtrace_scene(device: &wgpu::Device, queue: &wgpu::Queue, scene: &SceneDesc, render_target: &wgpu::Texture, shader_params: &PathtraceShaderParams, accum_params: &AccumulationParams, camera_transform: Mat4)
 {
     // TODO: Check format and usage of render target params and others
 
@@ -353,6 +369,11 @@ pub fn pathtrace_scene(device: &wgpu::Device, queue: &wgpu::Queue, scene: &Scene
     let camera_transform_uniform = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some("Camera Buffer"),
         contents: to_u8_slice(&[camera_transform]),
+        usage: wgpu::BufferUsages::UNIFORM,
+    });
+    let frame_id_uniform = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("Frame ID Buffer"),
+        contents: to_u8_slice(&[accum_params.frame_id]),
         usage: wgpu::BufferUsages::UNIFORM,
     });
 
@@ -388,7 +409,8 @@ pub fn pathtrace_scene(device: &wgpu::Device, queue: &wgpu::Queue, scene: &Scene
         label: None,
         layout: &shader_params.pipeline.get_bind_group_layout(1),
         entries: &[
-            wgpu::BindGroupEntry { binding: 0, resource: buffer_resource(&camera_transform_uniform) }
+            wgpu::BindGroupEntry { binding: 0, resource: buffer_resource(&camera_transform_uniform) },
+            wgpu::BindGroupEntry { binding: 1, resource: buffer_resource(&frame_id_uniform) }
         ]
     });
 
