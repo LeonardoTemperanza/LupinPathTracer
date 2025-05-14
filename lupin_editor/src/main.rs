@@ -151,13 +151,16 @@ fn main()
                     }
                     prev_cam_transform = camera_transform;
 
-                    let accum_params = lp::AccumulationParams {
-                        prev_frame: Some(&output_textures[output_tex_back]),
-                        accum_counter: accum_counter,
-                    };
                     let frame = surface.get_current_texture().unwrap();
-                    lp::pathtrace_scene(&device, &queue, &scene, &output_textures[output_tex_front],
-                                        &shader_params, &accum_params, camera_transform.into());
+                    if accum_counter < 2000
+                    {
+                        let accum_params = lp::AccumulationParams {
+                            prev_frame: Some(&output_textures[output_tex_back]),
+                            accum_counter: accum_counter,
+                        };
+                        lp::pathtrace_scene(&device, &queue, &scene, &output_textures[output_tex_front],
+                                            &shader_params, &accum_params, camera_transform.into());
+                    }
 
                     let tonemap_params = lp::TonemapParams {
                         operator: lp::TonemapOperator::Aces,
@@ -177,7 +180,7 @@ fn main()
                     output_tex_back  = output_tex_front;
                     output_tex_front = tmp;
 
-                    accum_counter += 1;
+                    accum_counter = (accum_counter + 1).min(2000);
 
                     // Continuously request drawing messages to let the main loop continue
                     window.request_redraw();

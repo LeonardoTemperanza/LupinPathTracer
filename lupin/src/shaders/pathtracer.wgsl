@@ -52,11 +52,17 @@ struct Instance
     // 8 bytes padding
 }
 
+const MAT_TYPE_MATTE: u32       = 0;
+const MAT_TYPE_GLOSSY: u32      = 1;
+const MAT_TYPE_REFLECTIVE: u32  = 2;
+const MAT_TYPE_TRANSPARENT: u32 = 3;
+
 struct Material
 {
     color: vec4f,
     emission: vec4f,
     scattering: vec4f,
+    mat_type: u32,
     roughness: f32,
     metallic: f32,
     ior: f32,
@@ -66,6 +72,7 @@ struct Material
     color_tex_idx:     u32,
     emission_tex_idx:  u32,
     roughness_tex_idx: u32,
+    // 12 bytes padding
 }
 
 // NOTE: The odd ordering of the fields
@@ -166,19 +173,67 @@ fn pathtrace(local_id: vec3u, ray: Ray) -> vec3f
 
             // Ray hit something.
 
-            // Matte material
             let mat = materials[hit.mat_idx];
             const mat_sampler_idx: u32 = 0;  // TODO!
-            let mat_color = textureSampleLevel(textures[mat.color_tex_idx], samplers[mat_sampler_idx], hit.tex_coords, 0.0f) * mat.color;
-
-            cur_ray.ori = ray.ori + normalize(ray.dir) * hit.dst;
-
-            // If this condition isn't met the next ray will go through.
-            if random_f32() < mat_color.a
+            switch mat.mat_type
             {
-                cur_ray.dir = cosine_weighted_random_direction(hit.normal);
-                cur_ray.inv_dir = 1.0f / cur_ray.dir;
-                ray_color *= mat_color.rgb;
+                case MAT_TYPE_MATTE:
+                {
+                    let mat_color = textureSampleLevel(textures[mat.color_tex_idx], samplers[mat_sampler_idx], hit.tex_coords, 0.0f) * mat.color;
+
+                    cur_ray.ori = ray.ori + ray.dir * hit.dst;
+
+                    // If this condition isn't met the next ray will go through.
+                    if random_f32() < mat_color.a
+                    {
+                        cur_ray.dir = cosine_weighted_random_direction(hit.normal);
+                        cur_ray.inv_dir = 1.0f / cur_ray.dir;
+                        ray_color *= mat_color.rgb;
+                    }
+                }
+                case MAT_TYPE_GLOSSY:
+                {
+                    cur_ray.ori = ray.ori + ray.dir * hit.dst;
+
+                    let fresnel = fresnel_schlick(0.04f, hit.normal, -cur_ray.dir);
+                    if random_f32() < fresnel
+                    {
+                        let mat_color = textureSampleLevel(textures[mat.color_tex_idx], samplers[mat_sampler_idx], hit.tex_coords, 0.0f) * mat.color;
+                        if random_f32() <= mat_color.a
+                        {
+                            let emitted_light = textureSampleLevel(textures[mat.emission_tex_idx], samplers[mat_sampler_idx], hit.tex_coords, 0.0f).rgb * mat.emission.rgb;
+                            luminance += emitted_light * ray_color;
+                            cur_ray.dir = reflect(cur_ray.dir, hit.normal);
+                            cur_ray.inv_dir = 1.0f / cur_ray.dir;
+                        }
+                    }
+                    else
+                    {
+                        // NOTE: This is just matte model. Should probably restructure this
+
+                        const mat_sampler_idx: u32 = 0;  // TODO!
+
+                        let mat_color = textureSampleLevel(textures[mat.color_tex_idx], samplers[mat_sampler_idx], hit.tex_coords, 0.0f) * mat.color;
+
+
+                        // If this condition isn't met the next ray will go through.
+                        if random_f32() < mat_color.a
+                        {
+                            cur_ray.dir = cosine_weighted_random_direction(hit.normal);
+                            cur_ray.inv_dir = 1.0f / cur_ray.dir;
+                            ray_color *= mat_color.rgb;
+                        }
+                    }
+                }
+                case MAT_TYPE_REFLECTIVE:
+                {
+                    
+                }
+                case MAT_TYPE_TRANSPARENT:
+                {
+
+                }
+                case default: {}
             }
         }
 
@@ -193,6 +248,23 @@ fn sample_env_map(dir: vec3f) -> vec3f
 {
     let coords = vec2f((atan2(dir.x, dir.z) + PI) / (2*PI), acos(dir.y / PI));
     return textureSampleLevel(env_map, env_map_sampler, coords, 0.0f).rgb;
+}
+
+// From: LittleCG Library
+fn fresnel_schlick_vec3f(color: vec3f, normal: vec3f, out_dir: vec3f) -> vec3f
+{
+    if all(color == vec3f(0.0f)) { return vec3f(0.0f); }
+
+    let cosine = dot(normal, out_dir);
+    return color + (1.0 - color) * pow(clamp(1.0f - abs(cosine), 0.0f, 1.0f), 5.0f);
+}
+
+fn fresnel_schlick(value: f32, normal: vec3f, out_dir: vec3f) -> f32
+{
+    if value == 0.0f { return 0.0f; }
+
+    let cosine = dot(normal, out_dir);
+    return value + (1.0 - value) * pow(clamp(1.0f - abs(cosine), 0.0f, 1.0f), 5.0f);
 }
 
 //////////////////////////////////////////////

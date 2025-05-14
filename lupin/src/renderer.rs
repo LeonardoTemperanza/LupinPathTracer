@@ -68,12 +68,24 @@ pub struct Instance
 }
 
 #[derive(Default, Clone, Copy, Debug)]
+#[repr(u32)]
+pub enum MaterialType
+{
+    #[default]
+    Matte  = 0,
+    Glossy = 1,
+    Reflective = 2,
+    Transparent = 3,
+}
+
+#[derive(Default, Clone, Copy, Debug)]
 #[repr(C)]
 pub struct Material
 {
     pub color: Vec4,
     pub emission: Vec4,
     pub scattering: Vec4,
+    pub mat_type: MaterialType,
     pub roughness: f32,
     pub metallic: f32,
     pub ior: f32,
@@ -83,6 +95,23 @@ pub struct Material
     pub color_tex_idx:     u32,
     pub emission_tex_idx:  u32,
     pub roughness_tex_idx: u32,
+    pub padding0: u32,
+    pub padding1: u32,
+    pub padding2: u32,
+}
+
+impl Material
+{
+    pub fn new(mat_type: MaterialType, color: Vec4, emission: Vec4, scattering: Vec4,
+               roughness: f32, metallic: f32, ior: f32, sc_anisotropy: f32, tr_depth: f32,
+               color_tex_idx: u32, emission_tex_idx: u32, roughness_tex_idx: u32) -> Self
+    {
+        return Self {
+            mat_type, color, emission, scattering, roughness, metallic, ior, sc_anisotropy, tr_depth,
+            color_tex_idx, emission_tex_idx, roughness_tex_idx,
+            padding0: 0, padding1: 0, padding2: 0
+        }
+    }
 }
 
 // This doesn't include positions, as that
