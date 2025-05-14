@@ -1178,7 +1178,11 @@ dependencies = [
 ]
 
 [[package]]
-name = "lupin_editor"
+name = "lupin_tests"
+version = "0.1.0"
+
+[[package]]
+name = "lupin_viewer"
 version = "0.1.0"
 dependencies = [
  "half",
@@ -1188,10 +1192,6 @@ dependencies = [
  "wgpu",
  "winit",
 ]
-
-[[package]]
-name = "lupin_tests"
-version = "0.1.0"
 
 [[package]]
 name = "malloc_buf"

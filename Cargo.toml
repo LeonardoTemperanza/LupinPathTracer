@@ -2,9 +2,9 @@
 [workspace]
 members = [
     "lupin",
+    "lupin_viewer",
     "lupin_tests",
     "lupin_benchmarks",
-    "lupin_editor"
 ]
 resolver = "2"
 
