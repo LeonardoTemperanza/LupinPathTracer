@@ -52,10 +52,15 @@ struct Instance
     // 8 bytes padding
 }
 
+// Wgsl doesn't have enums...
 const MAT_TYPE_MATTE: u32       = 0;
 const MAT_TYPE_GLOSSY: u32      = 1;
 const MAT_TYPE_REFLECTIVE: u32  = 2;
 const MAT_TYPE_TRANSPARENT: u32 = 3;
+const MAT_TYPE_REFRACTIVE: u32  = 4;
+const MAT_TYPE_SUBSURFACE: u32  = 5;
+const MAT_TYPE_VOLUMETRIC: u32  = 6;
+const MAT_TYPE_GLTFPBR: u32     = 7;
 
 struct Material
 {
@@ -69,10 +74,12 @@ struct Material
     sc_anisotropy: f32,
     tr_depth: f32,
 
-    color_tex_idx:     u32,
-    emission_tex_idx:  u32,
-    roughness_tex_idx: u32,
-    // 12 bytes padding
+    color_tex_idx:      u32,
+    emission_tex_idx:   u32,
+    roughness_tex_idx:  u32,
+    scattering_tex_idx: u32,
+    normal_tex_idx:     u32,
+    // 4 bytes padding
 }
 
 // NOTE: The odd ordering of the fields
@@ -110,7 +117,14 @@ fn main(@builtin(local_invocation_id) local_id: vec3u, @builtin(global_invocatio
     init_rng(global_id.y * global_id.x + global_id.x, output_dim.y * output_dim.x + output_dim.x);
     let camera_ray = compute_camera_ray(global_id, output_dim);
 
-    var color = pathtrace(local_id, camera_ray);
+    const NUM_SAMPLES: u32 = 1;
+    var color = vec3f(0.0f);
+    for(var sample: u32 = 0; sample < NUM_SAMPLES; sample++) {
+        color += pathtrace(local_id, camera_ray);
+    }
+
+    color /= f32(NUM_SAMPLES);
+
     color = max(color, vec3f(0.0f));
 
     // Progressive rendering.
@@ -151,97 +165,108 @@ fn compute_camera_ray(global_id: vec3u, output_dim: vec2u) -> Ray
 //////////////////////////////////////////////
 
 const NUM_BOUNCES: u32 = 5;
-const NUM_SAMPLES: u32 = 1;
 
-fn pathtrace(local_id: vec3u, ray: Ray) -> vec3f
+fn pathtrace(local_id: vec3u, start_ray: Ray) -> vec3f
 {
-    var final_color = vec3f(0.0f);
-
-    for(var sample = 0u; sample < NUM_SAMPLES; sample++)
+    var ray = start_ray;
+    var weight = vec3f(1.0f);  // Multiplicative terms.
+    var radiance = vec3f(0.0f);
+    var op_bounce: u32 = 0;
+    for(var bounce = 0u; bounce <= NUM_BOUNCES; bounce++)
     {
-        var cur_ray = ray;
-        var ray_color = vec3f(1.0f);  // Multiplicative terms.
-        var luminance = vec3f(0.0f);
-        for(var bounce = 0u; bounce <= NUM_BOUNCES; bounce++)
+        let hit = ray_scene_intersection(local_id, ray);
+        if hit.dst == F32_MAX  // Missed.
         {
-            let hit = ray_scene_intersection(local_id, cur_ray);
-            if hit.dst == F32_MAX  // Missed.
-            {
-                luminance += sample_env_map(cur_ray.dir) * ray_color;
-                break;
-            }
-
-            // Ray hit something.
-
-            let mat = materials[hit.mat_idx];
-            const mat_sampler_idx: u32 = 0;  // TODO!
-            switch mat.mat_type
-            {
-                case MAT_TYPE_MATTE:
-                {
-                    let mat_color = textureSampleLevel(textures[mat.color_tex_idx], samplers[mat_sampler_idx], hit.tex_coords, 0.0f) * mat.color;
-
-                    cur_ray.ori = ray.ori + ray.dir * hit.dst;
-
-                    // If this condition isn't met the next ray will go through.
-                    if random_f32() < mat_color.a
-                    {
-                        cur_ray.dir = cosine_weighted_random_direction(hit.normal);
-                        cur_ray.inv_dir = 1.0f / cur_ray.dir;
-                        ray_color *= mat_color.rgb;
-                    }
-                }
-                case MAT_TYPE_GLOSSY:
-                {
-                    cur_ray.ori = ray.ori + ray.dir * hit.dst;
-
-                    let fresnel = fresnel_schlick(0.04f, hit.normal, -cur_ray.dir);
-                    if random_f32() < fresnel
-                    {
-                        let mat_color = textureSampleLevel(textures[mat.color_tex_idx], samplers[mat_sampler_idx], hit.tex_coords, 0.0f) * mat.color;
-                        if random_f32() <= mat_color.a
-                        {
-                            let emitted_light = textureSampleLevel(textures[mat.emission_tex_idx], samplers[mat_sampler_idx], hit.tex_coords, 0.0f).rgb * mat.emission.rgb;
-                            luminance += emitted_light * ray_color;
-                            cur_ray.dir = reflect(cur_ray.dir, hit.normal);
-                            cur_ray.inv_dir = 1.0f / cur_ray.dir;
-                        }
-                    }
-                    else
-                    {
-                        // NOTE: This is just matte model. Should probably restructure this
-
-                        const mat_sampler_idx: u32 = 0;  // TODO!
-
-                        let mat_color = textureSampleLevel(textures[mat.color_tex_idx], samplers[mat_sampler_idx], hit.tex_coords, 0.0f) * mat.color;
-
-
-                        // If this condition isn't met the next ray will go through.
-                        if random_f32() < mat_color.a
-                        {
-                            cur_ray.dir = cosine_weighted_random_direction(hit.normal);
-                            cur_ray.inv_dir = 1.0f / cur_ray.dir;
-                            ray_color *= mat_color.rgb;
-                        }
-                    }
-                }
-                case MAT_TYPE_REFLECTIVE:
-                {
-                    
-                }
-                case MAT_TYPE_TRANSPARENT:
-                {
-
-                }
-                case default: {}
-            }
+            radiance += sample_env_map(ray.dir) * weight;
+            break;
         }
 
-        final_color += luminance;
+        // Ray hit something.
+
+        let mat = materials[hit.mat_idx];
+
+        // TODO: Handle volume transmission.
+
+        const in_volume = false;
+        if !in_volume
+        {
+            const mat_sampler_idx: u32 = 0;  // TODO!
+
+            // Eval material.
+            let color = textureSampleLevel(textures[mat.color_tex_idx], samplers[mat_sampler_idx], hit.tex_coords, 0.0f) * mat.color;
+
+            // Set next ray's origin at point of contact.
+            ray.ori = ray.ori + ray.dir * hit.dst;
+
+            // TODO: No caustics param.
+
+            // Handle coverage.
+            if color.a < 1.0f && random_f32() >= color.a
+            {
+                op_bounce++;
+                if op_bounce > 128 { break; }
+
+                bounce -= 1;
+                continue;
+            }
+
+            // Set hit variables. TODO
+
+            //let emission = textureSampleLevel(textures[mat.emission_tex_idx], samplers[mat_sampler_idx], hit.tex_coords, 0.0f) * mat.emission;
+            let emission = vec3f(0.0f);
+
+            // Accumulate emission.
+            radiance += weight * emission;
+
+            // Compute next direction.
+            /*
+            let outgoing = -ray.dir;
+            var incoming = vec3f(0.0f);
+            if !is_mat_delta(mat)
+            {
+                // TODO: Sample lights with 50/50 probability
+                incoming = sample_bsdfcos(mat, hit.normal, outgoing);
+                if all(incoming == vec3f(0.0f)) { break; }
+                weight *= eval_bsdfcos(mat, color.rgb, hit.normal, outgoing, incoming) / sample_bsdfcos_pdf(mat, hit.normal, outgoing, incoming);
+            }
+            else
+            {
+                incoming = sample_delta(mat, hit.normal, outgoing);
+                weight *= eval_delta(mat, color.rgb, hit.normal, outgoing, incoming) / sample_delta_pdf(mat, color.rgb, hit.normal, outgoing, incoming);
+            }
+            */
+
+            let outgoing = -ray.dir;
+            let sample = sample_bsdf(mat.mat_type, color.rgb, hit.normal, outgoing);
+            weight *= sample.weight / sample.prob;
+
+            // Update volume stack. TODO
+
+            ray.dir = -sample.incoming;
+        }
+        else  // Volumetric rendering. TODO
+        {
+
+        }
+
+        // Check weight.
+        if all(weight == vec3f(0.0f)) || !is_vec3f_finite(weight) { break; }
+
+        // Russian roulette.
+        if bounce > 3
+        {
+            let survive_prob = min(0.99, max(weight.x, max(weight.y, weight.z)));
+            if random_f32() >= survive_prob { break; }
+            weight *= 1.0f / survive_prob;
+        }
     }
 
-    final_color /= f32(NUM_SAMPLES);
-    return final_color;
+    return radiance;
+}
+
+fn pathtrace_mis(local_id: vec3u, ray: Ray) -> vec3f
+{
+    return vec3f(0.0f);
 }
 
 fn sample_env_map(dir: vec3f) -> vec3f
@@ -250,7 +275,73 @@ fn sample_env_map(dir: vec3f) -> vec3f
     return textureSampleLevel(env_map, env_map_sampler, coords, 0.0f).rgb;
 }
 
-// From: LittleCG Library
+struct BsdfSample
+{
+    incoming: vec3f,
+    weight: vec3f,
+    prob: f32
+}
+
+fn sample_bsdf(mat_type: u32, color: vec3f, normal: vec3f, outgoing: vec3f) -> BsdfSample
+{
+    var res = BsdfSample();
+    switch(mat_type)
+    {
+        case MAT_TYPE_MATTE:
+        {
+            let up_normal = select(normal, -normal, dot(normal, outgoing) <= 0);
+            res.incoming = random_direction_cos(up_normal);
+
+            var weight = vec3f();
+            if dot(normal, res.incoming) * dot(normal, outgoing) <= 0.0f {
+                weight = vec3f(0.0f);
+            } else {
+                weight = color / PI * abs(dot(normal, res.incoming));
+            }
+            res.weight = weight;
+
+            var prob = 0.0f;
+            if dot(normal, res.incoming) * dot(normal, outgoing) <= 0.0f
+            {
+                prob = 0.0f;
+            }
+            else
+            {
+                let cosw = dot(up_normal, res.incoming);
+                prob = select(cosw / PI, 0.0f, cosw <= 0.0f);
+            }
+            res.prob = prob;
+        }
+        case MAT_TYPE_REFLECTIVE:
+        {
+            
+        }
+        case MAT_TYPE_TRANSPARENT:
+        {
+
+        }
+        case MAT_TYPE_REFRACTIVE:
+        {
+
+        }
+        case MAT_TYPE_VOLUMETRIC:
+        {
+
+        }
+        case default: {}
+    }
+
+    return res;
+}
+
+fn reflectivity_to_eta(reflectivity: vec3f) -> vec3f
+{
+    var r = clamp(reflectivity, vec3f(0.0f), vec3f(0.99f));
+    return (1.0f + sqrt(r)) / (1.0f - sqrt(r));
+}
+
+// All Fresnel functions are from:
+// https://seblagarde.wordpress.com/2013/04/29/memo-on-fresnel-equations/
 fn fresnel_schlick_vec3f(color: vec3f, normal: vec3f, out_dir: vec3f) -> vec3f
 {
     if all(color == vec3f(0.0f)) { return vec3f(0.0f); }
@@ -259,12 +350,57 @@ fn fresnel_schlick_vec3f(color: vec3f, normal: vec3f, out_dir: vec3f) -> vec3f
     return color + (1.0 - color) * pow(clamp(1.0f - abs(cosine), 0.0f, 1.0f), 5.0f);
 }
 
-fn fresnel_schlick(value: f32, normal: vec3f, out_dir: vec3f) -> f32
+fn fresnel_schlick(eta: f32, normal: vec3f, out_dir: vec3f) -> f32
 {
-    if value == 0.0f { return 0.0f; }
+    if eta == 0.0f { return 0.0f; }
 
     let cosine = dot(normal, out_dir);
-    return value + (1.0 - value) * pow(clamp(1.0f - abs(cosine), 0.0f, 1.0f), 5.0f);
+    return eta + (1.0 - eta) * pow(clamp(1.0f - abs(cosine), 0.0f, 1.0f), 5.0f);
+}
+
+fn fresnel_dielectric(eta: f32, normal: vec3f, outgoing: vec3f) -> f32
+{
+    let cosw = abs(dot(normal, outgoing));
+
+    let sin2 = 1.0f - cosw * cosw;
+    let eta2 = eta * eta;
+
+    let cos2t = 1.0f - sin2 / eta2;
+    if cos2t < 0.0f { return 1.0f; }  // tir
+
+    let t0 = sqrt(cos2t);
+    let t1 = eta * t0;
+    let t2 = eta * cosw;
+
+    let rs = (cosw - t1) / (cosw + t1);
+    let rp = (t0 - t2) / (t0 + t2);
+
+    return (rs * rs + rp * rp) / 2.0f;
+}
+
+fn fresnel_conductor(eta: vec3f, etak: vec3f, normal: vec3f, outgoing: vec3f) -> vec3f
+{
+    var cosw = dot(normal, outgoing);
+    if cosw <= 0.0f { return vec3f(0.0f); }
+
+    cosw       = clamp(cosw, -1.0f, 1.0f);
+    let cos2  = cosw * cosw;
+    let sin2  = clamp(1.0f - cos2, 0.0f, 1.0f);
+    let eta2  = eta * eta;
+    let etak2 = etak * etak;
+
+    let t0       = eta2 - etak2 - sin2;
+    let a2plusb2 = sqrt(t0 * t0 + 4 * eta2 * etak2);
+    let t1       = a2plusb2 + cos2;
+    let a        = sqrt((a2plusb2 + t0) / 2.0f);
+    let t2       = 2.0f * a * cosw;
+    let rs       = (t1 - t2) / (t1 + t2);
+
+    let t3 = cos2 * a2plusb2 + sin2 * sin2;
+    let t4 = t2 * sin2;
+    let rp = rs * (t3 - t4) / (t3 + t4);
+
+    return (rp + rs) / 2.0f;
 }
 
 //////////////////////////////////////////////
@@ -333,7 +469,7 @@ fn random_in_hemisphere(normal: vec3f) -> vec3f
 }
 
 // TODO: Can we make this faster?
-fn cosine_weighted_random_direction(normal: vec3f) -> vec3f
+fn random_direction_cos(normal: vec3f) -> vec3f
 {
     let r1 = random_f32();
     let r2 = random_f32();
@@ -657,4 +793,14 @@ fn transform_ray(ray: Ray, transform: mat4x4f) -> Ray
     res.dir = transform_dir(res.dir, transform);
     res.inv_dir = 1.0f / res.dir;
     return res;
+}
+
+fn is_f32_finite(v: f32) -> bool
+{
+    return v == v && abs(v) <= F32_MAX;
+}
+
+fn is_vec3f_finite(v: vec3f) -> bool
+{
+    return is_f32_finite(v.x) && is_f32_finite(v.y) && is_f32_finite(v.z);
 }

@@ -5,7 +5,7 @@ use crate::wgpu_utils::*;
 pub static DEFAULT_PATHTRACER_SRC: &str = include_str!("shaders/pathtracer.wgsl");
 pub static TONEMAPPING_SRC: &str = include_str!("shaders/tonemapping.wgsl");
 
-#[derive(Debug, Default, Clone, Copy)]
+#[derive(Default, Clone, Copy, Debug)]
 #[repr(C)]
 pub struct Vec2
 {
@@ -13,7 +13,7 @@ pub struct Vec2
     pub y: f32
 }
 
-#[derive(Debug, Default, Clone, Copy)]
+#[derive(Default, Clone, Copy, Debug)]
 #[repr(C)]
 pub struct Vec3
 {
@@ -72,10 +72,14 @@ pub struct Instance
 pub enum MaterialType
 {
     #[default]
-    Matte  = 0,
-    Glossy = 1,
-    Reflective = 2,
+    Matte       = 0,
+    Glossy      = 1,
+    Reflective  = 2,
     Transparent = 3,
+    Refractive  = 4,
+    Subsurface  = 5,
+    Volumetric  = 6,
+    GltfPbr     = 7,
 }
 
 #[derive(Default, Clone, Copy, Debug)]
@@ -92,24 +96,25 @@ pub struct Material
     pub sc_anisotropy: f32,
     pub tr_depth: f32,
 
-    pub color_tex_idx:     u32,
-    pub emission_tex_idx:  u32,
-    pub roughness_tex_idx: u32,
+    pub color_tex_idx:      u32,
+    pub emission_tex_idx:   u32,
+    pub roughness_tex_idx:  u32,
+    pub scattering_tex_idx: u32,
+    pub normal_tex_idx:     u32,
     pub padding0: u32,
-    pub padding1: u32,
-    pub padding2: u32,
 }
 
 impl Material
 {
     pub fn new(mat_type: MaterialType, color: Vec4, emission: Vec4, scattering: Vec4,
                roughness: f32, metallic: f32, ior: f32, sc_anisotropy: f32, tr_depth: f32,
-               color_tex_idx: u32, emission_tex_idx: u32, roughness_tex_idx: u32) -> Self
+               color_tex_idx: u32, emission_tex_idx: u32, roughness_tex_idx: u32, scattering_tex_idx: u32,
+               normal_tex_idx: u32) -> Self
     {
         return Self {
             mat_type, color, emission, scattering, roughness, metallic, ior, sc_anisotropy, tr_depth,
-            color_tex_idx, emission_tex_idx, roughness_tex_idx,
-            padding0: 0, padding1: 0, padding2: 0
+            color_tex_idx, emission_tex_idx, roughness_tex_idx, scattering_tex_idx, normal_tex_idx,
+            padding0: 0
         }
     }
 }

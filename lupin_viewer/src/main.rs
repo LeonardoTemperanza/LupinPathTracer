@@ -176,11 +176,17 @@ fn main()
                     frame.present();
 
                     begin_input_events(&mut input);
-                    let tmp = output_tex_back;
-                    output_tex_back  = output_tex_front;
-                    output_tex_front = tmp;
 
-                    accum_counter = (accum_counter + 1).min(2000);
+                    // Swap output textures
+                    const MAX_ACCUMS: u32 = 2000;
+                    if accum_counter < MAX_ACCUMS
+                    {
+                        let tmp = output_tex_back;
+                        output_tex_back  = output_tex_front;
+                        output_tex_front = tmp;
+                    }
+
+                    accum_counter = (accum_counter + 1).min(MAX_ACCUMS);
 
                     // Continuously request drawing messages to let the main loop continue
                     window.request_redraw();

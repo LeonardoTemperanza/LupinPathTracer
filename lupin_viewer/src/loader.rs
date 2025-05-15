@@ -87,7 +87,7 @@ pub fn build_scene(device: &wgpu::Device, queue: &wgpu::Queue) -> lp::SceneDesc
     let materials = [
         lp::Material::new(
             lp::MaterialType::Matte,            // Mat type
-            lp::Vec4::new(1.0, 0.8, 0.8, 1.0),  // Color
+            lp::Vec4::new(1.0, 1.0, 1.0, 1.0),  // Color
             lp::Vec4::new(0.0, 0.0, 0.0, 0.0),  // Emission
             lp::Vec4::new(0.0, 0.0, 0.0, 0.0),  // Scattering
             0.0,                                // Roughness
@@ -97,7 +97,9 @@ pub fn build_scene(device: &wgpu::Device, queue: &wgpu::Queue) -> lp::SceneDesc
             0.0,                                // depth
             0,                                  // Color tex
             0,                                  // Emission tex
-            0                                   // Roughness tex
+            0,                                  // Roughness tex
+            0,                                  // Scattering tex
+            0,                                  // Normal tex
         ),
         lp::Material::new(
             lp::MaterialType::Glossy,           // Mat type
@@ -111,7 +113,9 @@ pub fn build_scene(device: &wgpu::Device, queue: &wgpu::Queue) -> lp::SceneDesc
             0.0,                                // depth
             0,                                  // Color tex
             0,                                  // Emission tex
-            0                                   // Roughness tex
+            0,                                  // Roughness tex
+            0,                                  // Scattering tex
+            0,                                  // Normal tex
         ),
         lp::Material::new(
             lp::MaterialType::Reflective,       // Mat type
@@ -125,7 +129,9 @@ pub fn build_scene(device: &wgpu::Device, queue: &wgpu::Queue) -> lp::SceneDesc
             0.0,                                // depth
             0,                                  // Color tex
             0,                                  // Emission tex
-            0                                   // Roughness tex
+            0,                                  // Roughness tex
+            0,                                  // Scattering tex
+            0,                                  // Normal tex
         ),
         lp::Material::new(
             lp::MaterialType::Transparent,      // Mat type
@@ -139,7 +145,9 @@ pub fn build_scene(device: &wgpu::Device, queue: &wgpu::Queue) -> lp::SceneDesc
             0.0,                                // depth
             0,                                  // Color tex
             0,                                  // Emission tex
-            0                                   // Roughness tex
+            0,                                  // Roughness tex
+            0,                                  // Scattering tex
+            0,                                  // Normal tex
         ),
     ];
 
