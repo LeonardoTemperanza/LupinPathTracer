@@ -115,11 +115,12 @@ fn main(@builtin(local_invocation_id) local_id: vec3u, @builtin(global_invocatio
 {
     let output_dim = textureDimensions(output_texture).xy;
     init_rng(global_id.y * global_id.x + global_id.x, output_dim.y * output_dim.x + output_dim.x);
-    let camera_ray = compute_camera_ray(global_id, output_dim);
 
     const NUM_SAMPLES: u32 = 1;
     var color = vec3f(0.0f);
-    for(var sample: u32 = 0; sample < NUM_SAMPLES; sample++) {
+    for(var sample: u32 = 0; sample < NUM_SAMPLES; sample++)
+    {
+        let camera_ray = compute_camera_ray(global_id, output_dim);
         color += pathtrace(local_id, camera_ray);
     }
 
@@ -150,8 +151,12 @@ fn compute_camera_ray(global_id: vec3u, output_dim: vec2u) -> Ray
     let frag_coord = vec2f(global_id.xy) + 0.5f;
     let resolution = vec2f(output_dim);
 
+    let rnd_vec = vec2f(random_f32(), random_f32());
+    var nudged_uv = frag_coord + (rnd_vec - 0.5f);  // Move 0.5 to the left and right
+    nudged_uv = clamp(nudged_uv, vec2(0.0f), resolution.xy) / resolution;
+
     let uv = frag_coord / resolution;
-    var coord = 2.0f * uv - 1.0f;
+    var coord = 2.0f * nudged_uv - 1.0f;
     coord.y *= -resolution.y / resolution.x;
 
     let look_at = normalize(vec3(coord, 1.0f));
@@ -314,7 +319,7 @@ fn sample_bsdf(mat_type: u32, color: vec3f, normal: vec3f, outgoing: vec3f) -> B
         }
         case MAT_TYPE_REFLECTIVE:
         {
-            
+
         }
         case MAT_TYPE_TRANSPARENT:
         {
