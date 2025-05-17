@@ -159,6 +159,10 @@ pub struct TlasNode
 
 // Constants
 pub const BVH_MAX_DEPTH: i32 = 25;
+pub const MAX_MESHES:    u32 = 15000;
+pub const MAX_TEXTURES:  u32 = 15000;
+pub const MAX_SAMPLERS:  u32 = 32;
+pub const NUM_STORAGE_BUFFERS_PER_MESH: u32 = 4;
 
 // This will need to be used when creating the device
 pub fn get_required_device_spec()->wgpu::DeviceDescriptor<'static>
@@ -173,9 +177,9 @@ pub fn get_required_device_spec()->wgpu::DeviceDescriptor<'static>
                            wgpu::Features::SAMPLED_TEXTURE_AND_STORAGE_BUFFER_ARRAY_NON_UNIFORM_INDEXING |
                            wgpu::Features::PARTIALLY_BOUND_BINDING_ARRAY,
         required_limits: wgpu::Limits {
-            max_storage_buffers_per_shader_stage: 16384,
-            max_sampled_textures_per_shader_stage: 16384,
-            max_samplers_per_shader_stage: 64,
+            max_storage_buffers_per_shader_stage: MAX_MESHES * NUM_STORAGE_BUFFERS_PER_MESH + 64,
+            max_sampled_textures_per_shader_stage: MAX_TEXTURES + 64,
+            max_samplers_per_shader_stage: MAX_SAMPLERS + 8,
             ..Default::default()
         },
         memory_hints: Default::default(),
@@ -216,7 +220,7 @@ pub fn build_pathtrace_shader_params(device: &wgpu::Device, with_runtime_checks:
                     has_dynamic_offset: false,
                     min_binding_size: None,
                 },
-                count: std::num::NonZero::new(100)
+                count: std::num::NonZero::new(MAX_MESHES)
             },
             wgpu::BindGroupLayoutEntry {  // verts
                 binding: 1,
@@ -226,7 +230,7 @@ pub fn build_pathtrace_shader_params(device: &wgpu::Device, with_runtime_checks:
                     has_dynamic_offset: false,
                     min_binding_size: None,
                 },
-                count: std::num::NonZero::new(100)
+                count: std::num::NonZero::new(MAX_MESHES)
             },
             wgpu::BindGroupLayoutEntry {  // indices
                 binding: 2,
@@ -236,7 +240,7 @@ pub fn build_pathtrace_shader_params(device: &wgpu::Device, with_runtime_checks:
                     has_dynamic_offset: false,
                     min_binding_size: None,
                 },
-                count: std::num::NonZero::new(100)
+                count: std::num::NonZero::new(MAX_MESHES)
             },
             wgpu::BindGroupLayoutEntry {  // bvh_nodes
                 binding: 3,
@@ -246,7 +250,7 @@ pub fn build_pathtrace_shader_params(device: &wgpu::Device, with_runtime_checks:
                     has_dynamic_offset: false,
                     min_binding_size: None,
                 },
-                count: std::num::NonZero::new(100)
+                count: std::num::NonZero::new(MAX_MESHES)
             },
             wgpu::BindGroupLayoutEntry {  // tlas_nodes
                 binding: 4,
@@ -286,13 +290,13 @@ pub fn build_pathtrace_shader_params(device: &wgpu::Device, with_runtime_checks:
                     view_dimension: wgpu::TextureViewDimension::D2,
                     multisampled: false,
                 },
-                count: std::num::NonZero::new(100)
+                count: std::num::NonZero::new(MAX_TEXTURES)
             },
             wgpu::BindGroupLayoutEntry {  // samplers
                 binding: 8,
                 visibility: wgpu::ShaderStages::COMPUTE,
                 ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-                count: std::num::NonZero::new(32)
+                count: std::num::NonZero::new(MAX_SAMPLERS)
             },
             wgpu::BindGroupLayoutEntry {  // env map texture
                 binding: 9,
@@ -312,6 +316,8 @@ pub fn build_pathtrace_shader_params(device: &wgpu::Device, with_runtime_checks:
             },
         ]
     });
+
+    assert!(NUM_STORAGE_BUFFERS_PER_MESH == 4);
 
     let settings_bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor{
         label: None,

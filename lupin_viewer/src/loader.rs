@@ -92,7 +92,7 @@ pub fn build_scene(device: &wgpu::Device, queue: &wgpu::Queue) -> lp::SceneDesc
             lp::Vec4::new(1.0, 1.0, 1.0, 1.0),  // Color
             lp::Vec4::new(0.0, 0.0, 0.0, 0.0),  // Emission
             lp::Vec4::new(0.0, 0.0, 0.0, 0.0),  // Scattering
-            0.2,                                // Roughness
+            0.0,                                // Roughness
             0.0,                                // Metallic
             1.5,                                // ior
             0.0,                                // anisotropy

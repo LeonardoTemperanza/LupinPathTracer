@@ -381,7 +381,37 @@ fn sample_bsdf(mat_type: u32, color: vec3f, normal: vec3f, roughness: f32, ior: 
         }
         case MAT_TYPE_GLOSSY:
         {
+            /*
+            let fresnel = fresnel_dielectric(ior, up_normal, outgoing);
+            if random_f32() < fresnel
+            {
+                // TODO: Roughness
 
+                res.incoming = reflect(-outgoing, up_normal);
+                if !same_hemisphere(up_normal, outgoing, res.incoming) { return res; }
+            }
+            else
+            {
+                res.incoming = random_direction_cos(up_normal);
+            }
+
+            // This could probably be a function...
+            let fresnel_out  = fresnel_dielectric(ior, up_normal, outgoing);
+            let halfway      = normalize(incoming + outgoing);
+            let fresnel_in   = fresnel_dielectric(ior, halfway, res.incoming);
+            let micro_dist   = microfacet_distribution(roughness, up_normal, halfway);
+            let micro_shadow = microfacet_shadowing(roughness, up_normal, halfway, outgoing, res.incoming);
+            res.weight = color * (1.0f - fresnel_out) / PI * abs(dot(up_normal, res.incoming)) +
+                         vec3f(1.0f) * fresnel_in * micro_dist * micro_shadow / (4.0f * dot(up_normal, outgoing) * dot(up_normal, incoming)) * abs(dot(up_normal, incoming));
+
+            if dot(normal, incoming) * dot(normal, outgoing) <= 0 { return 0; }
+            let halfway = normalize(outgoing + incoming);
+            // let microfacet_prob = ;
+            let cosw = dot(up_normal, res.incoming);
+            let cos_prob = select(cosw / PI, 0.0f, cosw <= 0.0f);
+            let microfacet_prob = 1.0f;
+            res.prob = fresnel_out * microfacet_prob / (4.0f * abs(dot(outgoing, halfway))) + (1.0f - fresnel_out) * cos_prob;
+            */
         }
         case MAT_TYPE_REFLECTIVE:
         {
@@ -393,7 +423,7 @@ fn sample_bsdf(mat_type: u32, color: vec3f, normal: vec3f, roughness: f32, ior: 
 
             }
 
-            res.incoming = reflect(-outgoing, up_normal);
+            res.incoming = reflect(-outgoing, microfacet_normal);
             if !same_hemisphere(up_normal, outgoing, res.incoming) { return res; }
             res.weight = fresnel_conductor(reflectivity_to_eta(color), vec3f(0.0f), up_normal, outgoing);
         }
@@ -957,14 +987,9 @@ fn transform_ray(ray: Ray, transform: mat4x4f) -> Ray
     return res;
 }
 
-fn is_f32_finite(v: f32) -> bool
-{
-    return v == v && abs(v) <= F32_MAX;
-}
-
 fn is_vec3f_finite(v: vec3f) -> bool
 {
-    return is_f32_finite(v.x) && is_f32_finite(v.y) && is_f32_finite(v.z);
+    return all(v == v && abs(v) <= vec3f(F32_MAX));
 }
 
 fn same_hemisphere(normal: vec3f, outgoing: vec3f, incoming: vec3f) -> bool
