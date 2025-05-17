@@ -80,7 +80,7 @@ pub fn build_scene(device: &wgpu::Device, queue: &wgpu::Queue) -> lp::SceneDesc
         lp::Instance { inv_transform: lp::mat4_inverse(xform_to_matrix(Vec3 { x: 0.0, y: 0.0, z: 0.0 }.into(), Quat::default(), Vec3::ones()).into()), mesh_idx: 0, mat_idx: 0, padding0: 0.0, padding1: 0.0 },
         lp::Instance { inv_transform: lp::mat4_inverse(xform_to_matrix(Vec3 { x: -2.0, y: 0.0, z: 0.0 }.into(), angle_axis(Vec3::RIGHT, 45.0 * 3.1415 / 180.0), Vec3::ones()).into()), mesh_idx: 0, mat_idx: 1, padding0: 0.0, padding1: 0.0 },
         lp::Instance { inv_transform: lp::mat4_inverse(xform_to_matrix(Vec3 { x: -4.0, y: 0.0, z: 0.0 }.into(), angle_axis(Vec3::RIGHT, 90.0 * 3.1415 / 180.0), Vec3::ones()).into()), mesh_idx: 0, mat_idx: 1, padding0: 0.0, padding1: 0.0 },
-        lp::Instance { inv_transform: lp::mat4_inverse(xform_to_matrix(Vec3 { x: 2.0, y: 0.0, z: 0.0 }.into(), Quat::default(), Vec3 { x: 0.8, y: 1.3, z: 1.0 }).into()), mesh_idx: 0, mat_idx: 2, padding0: 0.0, padding1: 0.0 },
+        lp::Instance { inv_transform: lp::mat4_inverse(xform_to_matrix(Vec3 { x: 2.0, y: 0.0, z: 0.0 }.into(), Quat::default(), Vec3 { x: 1.0, y: 1.0, z: 1.0 }).into()), mesh_idx: 0, mat_idx: 2, padding0: 0.0, padding1: 0.0 },
         lp::Instance { inv_transform: lp::mat4_inverse(xform_to_matrix(Vec3 { x: 4.0, y: 0.0, z: 0.0 }.into(), Quat::default(), Vec3::ones()).into()), mesh_idx: 0, mat_idx: 3, padding0: 0.0, padding1: 0.0 },
     ];
 

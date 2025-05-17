@@ -351,7 +351,7 @@ fn mis_heuristic(this_prob: f32, other_prob: f32) -> f32
 
 fn sample_env_map(dir: vec3f) -> vec3f
 {
-    let coords = vec2f((atan2(dir.x, dir.z) + PI) / (2*PI), acos(dir.y / PI));
+    let coords = vec2f((atan2(dir.x, dir.z) + PI) / (2*PI), acos(dir.y) / PI);
     return textureSampleLevel(env_map, env_map_sampler, coords, 0.0f).rgb;
 }
 
