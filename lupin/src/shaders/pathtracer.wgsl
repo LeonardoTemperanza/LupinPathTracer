@@ -123,9 +123,7 @@ fn main(@builtin(local_invocation_id) local_id: vec3u, @builtin(global_invocatio
         let camera_ray = compute_camera_ray(global_id, output_dim);
         color += pathtrace(local_id, camera_ray);
     }
-
     color /= f32(NUM_SAMPLES);
-
     color = max(color, vec3f(0.0f));
 
     // Progressive rendering.
@@ -146,6 +144,27 @@ fn main(@builtin(local_invocation_id) local_id: vec3u, @builtin(global_invocatio
     }
 }
 
+@compute
+@workgroup_size(8, 8, 1)
+fn main_(@builtin(local_invocation_id) local_id: vec3u, @builtin(global_invocation_id) global_id: vec3u)
+{
+    let output_dim = textureDimensions(output_texture).xy;
+    init_rng(global_id.y * global_id.x + global_id.x, output_dim.y * output_dim.x + output_dim.x);
+
+    var color = vec3f(0.0f);
+    let camera_ray = compute_camera_ray(global_id, output_dim);
+    let hit = ray_scene_intersection(local_id, camera_ray);
+    if hit.dst != F32_MAX
+    {
+        color = hit.normal;
+    }
+
+    if global_id.x < output_dim.x && global_id.y < output_dim.y {
+        textureStore(output_texture, global_id.xy, vec4f(color, 1.0f));
+    }
+}
+
+// Applies pixel jittering.
 fn compute_camera_ray(global_id: vec3u, output_dim: vec2u) -> Ray
 {
     let frag_coord = vec2f(global_id.xy) + 0.5f;
@@ -169,7 +188,7 @@ fn compute_camera_ray(global_id: vec3u, output_dim: vec2u) -> Ray
 // Pathtracing
 //////////////////////////////////////////////
 
-const NUM_BOUNCES: u32 = 5;
+const MAX_BOUNCES: u32 = 5;
 
 fn pathtrace(local_id: vec3u, start_ray: Ray) -> vec3f
 {
@@ -177,7 +196,7 @@ fn pathtrace(local_id: vec3u, start_ray: Ray) -> vec3f
     var weight = vec3f(1.0f);  // Multiplicative terms.
     var radiance = vec3f(0.0f);
     var op_bounce: u32 = 0;
-    for(var bounce = 0u; bounce <= NUM_BOUNCES; bounce++)
+    for(var bounce = 0u; bounce <= MAX_BOUNCES; bounce++)
     {
         let hit = ray_scene_intersection(local_id, ray);
         if hit.dst == F32_MAX  // Missed.
@@ -210,44 +229,26 @@ fn pathtrace(local_id: vec3u, start_ray: Ray) -> vec3f
             {
                 op_bounce++;
                 if op_bounce > 128 { break; }
-
                 bounce -= 1;
                 continue;
             }
 
-            // Set hit variables. TODO
-
-            //let emission = textureSampleLevel(textures[mat.emission_tex_idx], samplers[mat_sampler_idx], hit.tex_coords, 0.0f) * mat.emission;
-            let emission = vec3f(0.0f);
+            //let emission = textureSampleLevel(textures[mat.emission_tex_idx], samplers[mat_sampler_idx], hit.tex_coords, 0.0f).rgb * mat.emission.rgb;
+            let emission = mat.emission.rgb;
+            //let roughness = textureSampleLevel(textures[mat.roughness_tex_idx], samplers[mat_sampler_idx], hit.tex_coords, 0.0f).r * mat.roughness;
+            let roughness = mat.roughness;
 
             // Accumulate emission.
             radiance += weight * emission;
 
-            // Compute next direction.
-            /*
             let outgoing = -ray.dir;
-            var incoming = vec3f(0.0f);
-            if !is_mat_delta(mat)
-            {
-                // TODO: Sample lights with 50/50 probability
-                incoming = sample_bsdfcos(mat, hit.normal, outgoing);
-                if all(incoming == vec3f(0.0f)) { break; }
-                weight *= eval_bsdfcos(mat, color.rgb, hit.normal, outgoing, incoming) / sample_bsdfcos_pdf(mat, hit.normal, outgoing, incoming);
-            }
-            else
-            {
-                incoming = sample_delta(mat, hit.normal, outgoing);
-                weight *= eval_delta(mat, color.rgb, hit.normal, outgoing, incoming) / sample_delta_pdf(mat, color.rgb, hit.normal, outgoing, incoming);
-            }
-            */
-
-            let outgoing = -ray.dir;
-            let sample = sample_bsdf(mat.mat_type, color.rgb, hit.normal, outgoing);
+            let sample = sample_bsdf(mat.mat_type, color.rgb, hit.normal, roughness, mat.ior, outgoing);
             weight *= sample.weight / sample.prob;
 
             // Update volume stack. TODO
 
-            ray.dir = -sample.incoming;
+            ray.dir = sample.incoming;
+            ray.inv_dir = 1.0f / ray.dir;
         }
         else  // Volumetric rendering. TODO
         {
@@ -260,7 +261,7 @@ fn pathtrace(local_id: vec3u, start_ray: Ray) -> vec3f
         // Russian roulette.
         if bounce > 3
         {
-            let survive_prob = min(0.99, max(weight.x, max(weight.y, weight.z)));
+            let survive_prob = min(0.99f, max(weight.x, max(weight.y, weight.z)));
             if random_f32() >= survive_prob { break; }
             weight *= 1.0f / survive_prob;
         }
@@ -282,51 +283,69 @@ fn sample_env_map(dir: vec3f) -> vec3f
 
 struct BsdfSample
 {
-    incoming: vec3f,
+    incoming: vec3f,  // Keep in mind this also points outwards.
     weight: vec3f,
-    prob: f32
+    prob: f32,
 }
 
-fn sample_bsdf(mat_type: u32, color: vec3f, normal: vec3f, outgoing: vec3f) -> BsdfSample
+fn sample_bsdf(mat_type: u32, color: vec3f, normal: vec3f, roughness: f32, ior: f32, outgoing: vec3f) -> BsdfSample
 {
     var res = BsdfSample();
+
+    let up_normal = select(-normal, normal, dot(normal, outgoing) > 0.0f);
+
     switch(mat_type)
     {
         case MAT_TYPE_MATTE:
         {
-            let up_normal = select(normal, -normal, dot(normal, outgoing) <= 0);
             res.incoming = random_direction_cos(up_normal);
+            if !same_hemisphere(up_normal, outgoing, res.incoming) { return res; }
 
-            var weight = vec3f();
-            if dot(normal, res.incoming) * dot(normal, outgoing) <= 0.0f {
-                weight = vec3f(0.0f);
-            } else {
-                weight = color / PI * abs(dot(normal, res.incoming));
-            }
-            res.weight = weight;
-
-            var prob = 0.0f;
-            if dot(normal, res.incoming) * dot(normal, outgoing) <= 0.0f
-            {
-                prob = 0.0f;
-            }
-            else
-            {
-                let cosw = dot(up_normal, res.incoming);
-                prob = select(cosw / PI, 0.0f, cosw <= 0.0f);
-            }
-            res.prob = prob;
+            res.weight = color / PI * abs(dot(up_normal, res.incoming));
+            let cosw = dot(up_normal, res.incoming);
+            res.prob = select(cosw / PI, 0.0f, cosw <= 0.0f);
         }
         case MAT_TYPE_REFLECTIVE:
         {
+            // Microfacet sampling is pretty expensive so we do it conditionally.
+            let microfacet_normal = up_normal;
+            res.prob = 1.0f;
+            if roughness > 0.0f
+            {
 
+            }
+
+            res.incoming = reflect(-outgoing, up_normal);
+            if !same_hemisphere(up_normal, outgoing, res.incoming) { return res; }
+            res.weight = fresnel_conductor(reflectivity_to_eta(color), vec3f(0.0f), up_normal, outgoing);
         }
         case MAT_TYPE_TRANSPARENT:
         {
+            // Microfacet sampling is pretty expensive so we do it conditionally.
+            let microfacet_normal = normal;
+            let microfacet_prob = 1.0f;
+            if roughness > 0.0f
+            {
 
+            }
+
+            let fresnel = fresnel_dielectric(ior, up_normal, outgoing);
+            if random_f32() < fresnel
+            {
+                res.incoming = reflect(-outgoing, up_normal);
+                res.weight = vec3f(1.0f) * fresnel;
+                res.prob = fresnel;
+            }
+            else
+            {
+                res.incoming = -outgoing;
+                res.weight = color * (1.0f - fresnel);
+                res.prob = 1.0f - fresnel;
+            }
         }
         case MAT_TYPE_REFRACTIVE:
         {
+            // Microfacet sampling is pretty expensive so we do it conditionally.
 
         }
         case MAT_TYPE_VOLUMETRIC:
@@ -388,7 +407,7 @@ fn fresnel_conductor(eta: vec3f, etak: vec3f, normal: vec3f, outgoing: vec3f) ->
     var cosw = dot(normal, outgoing);
     if cosw <= 0.0f { return vec3f(0.0f); }
 
-    cosw       = clamp(cosw, -1.0f, 1.0f);
+    cosw      = clamp(cosw, -1.0f, 1.0f);
     let cos2  = cosw * cosw;
     let sin2  = clamp(1.0f - cos2, 0.0f, 1.0f);
     let eta2  = eta * eta;
@@ -406,6 +425,56 @@ fn fresnel_conductor(eta: vec3f, etak: vec3f, normal: vec3f, outgoing: vec3f) ->
     let rp = rs * (t3 - t4) / (t3 + t4);
 
     return (rp + rs) / 2.0f;
+}
+
+fn microfacet_distribution(roughness: f32, normal: vec3f, halfway: vec3f, ggx: bool) -> f32
+{
+    // From:
+    // https://google.github.io/filament/Filament.html#materialsystem/specularbrdf
+    // http://graphicrants.blogspot.com/2013/08/specular-brdf-reference.html
+    let cosine = dot(normal, halfway);
+    if cosine <= 0.0f { return 0.0f; }
+    let roughness2 = roughness * roughness;
+    let cosine2    = cosine * cosine;
+    if (ggx) {
+        return roughness2 / (PI * (cosine2 * roughness2 + 1 - cosine2) * (cosine2 * roughness2 + 1 - cosine2));
+    } else {
+        return exp((cosine2 - 1) / (roughness2 * cosine2)) / (PI * roughness2 * cosine2 * cosine2);
+    }
+}
+
+fn microfacet_shadowing1(roughness: f32, normal: vec3f, halfway: vec3f, direction: vec3f, ggx: bool) -> f32
+{
+    // From:
+    // https://google.github.io/filament/Filament.html#materialsystem/specularbrdf
+    // http://graphicrants.blogspot.com/2013/08/specular-brdf-reference.html
+    // https://github.com/KhronosGroup/glTF/tree/master/specification/2.0#appendix-b-brdf-implementation
+
+    let cosine  = dot(normal, direction);
+    let cosineh = dot(halfway, direction);
+    if cosine * cosineh <= 0.0f { return 0.0f; }
+
+    let roughness2 = roughness * roughness;
+    let cosine2    = cosine * cosine;
+    if ggx
+    {
+        return 2.0f * abs(cosine) / (abs(cosine) + sqrt(cosine2 - roughness2 * cosine2 + roughness2));
+    }
+    else
+    {
+        let ci = abs(cosine) / (roughness * sqrt(1 - cosine2));
+        if ci < 1.6f {
+            return (3.535f * ci + 2.181f * ci * ci) / (1.0f + 2.276f * ci + 2.577f * ci * ci);
+        } else {
+            return 1.0f;
+        }
+    }
+}
+
+fn microfacet_shadowing(roughness: f32, normal: vec3f, halfway: vec3f, outgoing: vec3f, incoming: vec3f, ggx: bool) -> f32
+{
+    return microfacet_shadowing1(roughness, normal, halfway, outgoing, ggx) *
+           microfacet_shadowing1(roughness, normal, halfway, incoming, ggx);
 }
 
 //////////////////////////////////////////////
@@ -433,9 +502,9 @@ fn random_u32() -> u32
 fn random_f32() -> f32
 {
     RNG_STATE = RNG_STATE * 747796405u + 2891336453u;
-    var result: u32 = ((RNG_STATE >> ((RNG_STATE >> 28) + 4u)) ^ RNG_STATE) * 277803737u;
-    result = (result >> 22) ^ result;
-    return f32(result) / 4294967295.0;
+    var result: u32 = ((RNG_STATE >> ((RNG_STATE >> 28u) + 4u)) ^ RNG_STATE) * 277803737u;
+    result = (result >> 22u) ^ result;
+    return f32(result) / 4294967295.0f;
 }
 
 fn random_f32_normal_dist() -> f32
@@ -507,7 +576,7 @@ struct Ray
     inv_dir: vec3f  // Precomputed inverse of the ray direction, for performance.
 }
 
-const RAY_HIT_MIN_DIST: f32 = 0.001;
+const RAY_HIT_MIN_DIST: f32 = 0.0001;
 
 // From: https://tavianator.com/2011/ray_box.html
 // For misses, t = F32_MAX
@@ -540,7 +609,8 @@ fn ray_tri_dst(ray: Ray, v0: vec3f, v1: vec3f, v2: vec3f)->vec3f
     // it all to:
     let n = cross(v1v0, v2v0);
     let q = cross(rov0, ray.dir);
-    let d = 1.0 / dot(ray.dir, n);
+    let det = dot(ray.dir, n);
+    let d = 1.0 / det;
     let u = d * dot(-q, v2v0);
     let v = d * dot(q, v1v0);
     var t = d * dot(-n, rov0);
@@ -661,7 +731,7 @@ fn ray_scene_intersection(local_id: vec3u, ray: Ray)->HitInfo
         let w = 1.0 - u - v;
 
         hit_info.dst = min_hit.x;
-        hit_info.normal = vert0.normal*w + vert1.normal*u + vert2.normal*v;
+        hit_info.normal = normalize(vert0.normal*w + vert1.normal*u + vert2.normal*v);
         hit_info.tex_coords = vert0.tex_coords*w + vert1.tex_coords*u + vert2.tex_coords*v;
         hit_info.mat_idx = mat_idx;
     }
@@ -671,7 +741,7 @@ fn ray_scene_intersection(local_id: vec3u, ray: Ray)->HitInfo
 
 const MAX_BVH_DEPTH: u32 = 25;
 const BVH_STACK_SIZE: u32 = (MAX_BVH_DEPTH + 1) * 8 * 8;  // shared memory
-var<workgroup> bvh_stack: array<u32, BVH_STACK_SIZE>;         // shared memory
+var<workgroup> bvh_stack: array<u32, BVH_STACK_SIZE>;     // shared memory
 
 struct RayMeshIntersectionResult
 {
@@ -808,4 +878,9 @@ fn is_f32_finite(v: f32) -> bool
 fn is_vec3f_finite(v: vec3f) -> bool
 {
     return is_f32_finite(v.x) && is_f32_finite(v.y) && is_f32_finite(v.z);
+}
+
+fn same_hemisphere(normal: vec3f, outgoing: vec3f, incoming: vec3f) -> bool
+{
+    return dot(normal, outgoing) * dot(normal, incoming) >= 0;
 }

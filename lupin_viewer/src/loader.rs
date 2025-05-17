@@ -80,6 +80,7 @@ pub fn build_scene(device: &wgpu::Device, queue: &wgpu::Queue) -> lp::SceneDesc
         lp::Instance { inv_transform: lp::mat4_inverse(xform_to_matrix(Vec3 { x: 0.0, y: 0.0, z: 0.0 }.into(), Quat::default(), Vec3::ones()).into()), mesh_idx: 0, mat_idx: 0, padding0: 0.0, padding1: 0.0 },
         lp::Instance { inv_transform: lp::mat4_inverse(xform_to_matrix(Vec3 { x: -2.0, y: 0.0, z: 0.0 }.into(), angle_axis(Vec3::RIGHT, 40.0 * 3.1415 / 180.0), Vec3::ones()).into()), mesh_idx: 0, mat_idx: 1, padding0: 0.0, padding1: 0.0 },
         lp::Instance { inv_transform: lp::mat4_inverse(xform_to_matrix(Vec3 { x: 2.0, y: 0.0, z: 0.0 }.into(), Quat::default(), Vec3 { x: 0.8, y: 1.3, z: 1.0 }).into()), mesh_idx: 0, mat_idx: 2, padding0: 0.0, padding1: 0.0 },
+        lp::Instance { inv_transform: lp::mat4_inverse(xform_to_matrix(Vec3 { x: 4.0, y: 0.0, z: 0.0 }.into(), Quat::default(), Vec3::ones()).into()), mesh_idx: 0, mat_idx: 3, padding0: 0.0, padding1: 0.0 },
     ];
 
     let instances_buf = lp::upload_storage_buffer(&device, &queue, unsafe { to_u8_slice(&instances) });
@@ -90,9 +91,9 @@ pub fn build_scene(device: &wgpu::Device, queue: &wgpu::Queue) -> lp::SceneDesc
             lp::Vec4::new(1.0, 1.0, 1.0, 1.0),  // Color
             lp::Vec4::new(0.0, 0.0, 0.0, 0.0),  // Emission
             lp::Vec4::new(0.0, 0.0, 0.0, 0.0),  // Scattering
-            0.0,                                // Roughness
+            0.2,                                // Roughness
             0.0,                                // Metallic
-            0.0,                                // ior
+            1.5,                                // ior
             0.0,                                // anisotropy
             0.0,                                // depth
             0,                                  // Color tex
@@ -108,7 +109,7 @@ pub fn build_scene(device: &wgpu::Device, queue: &wgpu::Queue) -> lp::SceneDesc
             lp::Vec4::new(0.0, 0.0, 0.0, 0.0),  // Scattering
             0.0,                                // Roughness
             0.0,                                // Metallic
-            0.0,                                // ior
+            1.5,                                // ior
             0.0,                                // anisotropy
             0.0,                                // depth
             0,                                  // Color tex
@@ -124,7 +125,7 @@ pub fn build_scene(device: &wgpu::Device, queue: &wgpu::Queue) -> lp::SceneDesc
             lp::Vec4::new(0.0, 0.0, 0.0, 0.0),  // Scattering
             0.0,                                // Roughness
             0.0,                                // Metallic
-            0.0,                                // ior
+            1.5,                                // ior
             0.0,                                // anisotropy
             0.0,                                // depth
             0,                                  // Color tex
@@ -140,7 +141,7 @@ pub fn build_scene(device: &wgpu::Device, queue: &wgpu::Queue) -> lp::SceneDesc
             lp::Vec4::new(0.0, 0.0, 0.0, 0.0),  // Scattering
             0.0,                                // Roughness
             0.0,                                // Metallic
-            0.0,                                // ior
+            1.5,                                // ior
             0.0,                                // anisotropy
             0.0,                                // depth
             0,                                  // Color tex

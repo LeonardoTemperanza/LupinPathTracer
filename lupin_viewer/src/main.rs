@@ -35,7 +35,7 @@ fn main()
     // Initialize window
     let event_loop = EventLoop::new().unwrap();
     let window = WindowBuilder::new().with_title("Lupin Raytracer")
-                                     .with_inner_size(LogicalSize::new(1080.0, 720.0))
+                                     .with_inner_size(PhysicalSize::new(1920.0, 1080.0))
                                      .with_visible(false)
                                      .build(&event_loop)
                                      .unwrap();
@@ -59,9 +59,9 @@ fn main()
     log_backend(&adapter);
 
     // Init rendering resources
-    let scene = build_scene(&device, &queue);
     let shader_params = lp::build_pathtrace_shader_params(&device, false);
     let tonemap_shader_params = lp::build_tonemap_shader_params(&device);
+    let scene = build_scene(&device, &queue);
     let mut output_textures = [
         device.create_texture(&wgpu::TextureDescriptor {
             label: None,
@@ -125,6 +125,7 @@ fn main()
                     // Resize screen dependent resources
                     resize_texture(&device, &mut output_textures[0], new_size.width, new_size.height);
                     resize_texture(&device, &mut output_textures[1], new_size.width, new_size.height);
+                    accum_counter = 0;
 
                     // Resize surface
                     surface_config.width  = new_size.width;
@@ -229,9 +230,16 @@ fn update_camera(cam_pos: &mut Vec3, cam_rot: &mut Quat, input: &Input, delta_ti
     static mut CUR_VEL: Vec3 = Vec3 { x: 0.0, y: 0.0, z: 0.0 };
     let move_speed: f32 = 6.0;
     let move_speed_fast: f32 = 15.0;
+    let move_speed_slow: f32 = 0.5;
     let move_accel: f32 = 100.0;
 
-    let cur_move_speed = if input.keys[Key::LSHIFT].pressing { move_speed_fast } else { move_speed };
+    let cur_move_speed = if input.keys[Key::LSHIFT].pressing {
+        move_speed_fast
+    } else if input.keys[Key::LCTRL].pressing {
+        move_speed_slow
+    } else {
+        move_speed
+    };
 
     let mut keyboard_dir_xz = Vec3::default();
     let mut keyboard_dir_y: f32 = 0.0;

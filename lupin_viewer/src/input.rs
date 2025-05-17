@@ -124,6 +124,7 @@ pub fn process_input_event(input: &mut Input, event: &winit::event::Event<()>)
                     Character(c) if c.eq_ignore_ascii_case("q") => { action(&mut input.keys[Key::Q]); }
                     Character(c) if c.eq_ignore_ascii_case("e") => { action(&mut input.keys[Key::E]); }
                     Named(k) if *k == NamedKey::Shift => { action(&mut input.keys[Key::LSHIFT]); }
+                    Named(k) if *k == NamedKey::Control => { action(&mut input.keys[Key::LCTRL]); }
                     _ => (),
                 }
             },
