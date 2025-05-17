@@ -59,22 +59,22 @@ pub fn build_scene(device: &wgpu::Device, queue: &wgpu::Queue) -> lp::SceneDesc
     let verts_buf = lp::upload_storage_buffer(&device, &queue, unsafe { to_u8_slice(&verts) });
 
     // Stress-test
-    /*
+/*
     let mut instances = Vec::<lp::Instance>::default();
-    for i in 0..100
+    for i in 0..120
     {
-        for j in 0..100
+        for j in 0..120
         {
             let offset: f32 = 1.5;
             instances.push(lp::Instance {
-                pos: Vec3 { x: offset * i as f32, y: 0.0, z: offset * j as f32 }.into(),
+                inv_transform: lp::mat4_inverse(xform_to_matrix(Vec3 { x: offset * i as f32, y: 0.0, z: offset * j as f32 }.into(), Quat::default(), Vec3::ones()).into()),
                 mesh_idx: 0,
                 mat_idx: 0,
-                padding0: 0.0, padding1: 0.0, padding2: 0.0,
+                padding0: 0.0, padding1: 0.0
             });
         }
     }
-    */
+*/
 
     let instances = [
         lp::Instance { inv_transform: lp::mat4_inverse(xform_to_matrix(Vec3 { x: 0.0, y: 0.0, z: 0.0 }.into(), Quat::default(), Vec3::ones()).into()), mesh_idx: 0, mat_idx: 0, padding0: 0.0, padding1: 0.0 },
@@ -82,6 +82,7 @@ pub fn build_scene(device: &wgpu::Device, queue: &wgpu::Queue) -> lp::SceneDesc
         lp::Instance { inv_transform: lp::mat4_inverse(xform_to_matrix(Vec3 { x: -4.0, y: 0.0, z: 0.0 }.into(), angle_axis(Vec3::RIGHT, 90.0 * 3.1415 / 180.0), Vec3::ones()).into()), mesh_idx: 0, mat_idx: 1, padding0: 0.0, padding1: 0.0 },
         lp::Instance { inv_transform: lp::mat4_inverse(xform_to_matrix(Vec3 { x: 2.0, y: 0.0, z: 0.0 }.into(), Quat::default(), Vec3 { x: 1.0, y: 1.0, z: 1.0 }).into()), mesh_idx: 0, mat_idx: 2, padding0: 0.0, padding1: 0.0 },
         lp::Instance { inv_transform: lp::mat4_inverse(xform_to_matrix(Vec3 { x: 4.0, y: 0.0, z: 0.0 }.into(), Quat::default(), Vec3::ones()).into()), mesh_idx: 0, mat_idx: 3, padding0: 0.0, padding1: 0.0 },
+        lp::Instance { inv_transform: lp::mat4_inverse(xform_to_matrix(Vec3 { x: 6.0, y: 0.0, z: 0.0 }.into(), Quat::default(), Vec3::ones()).into()), mesh_idx: 0, mat_idx: 4, padding0: 0.0, padding1: 0.0 },
     ];
 
     let instances_buf = lp::upload_storage_buffer(&device, &queue, unsafe { to_u8_slice(&instances) });
@@ -143,6 +144,22 @@ pub fn build_scene(device: &wgpu::Device, queue: &wgpu::Queue) -> lp::SceneDesc
             0.0,                                // Roughness
             0.0,                                // Metallic
             1.5,                                // ior
+            0.0,                                // anisotropy
+            0.0,                                // depth
+            0,                                  // Color tex
+            0,                                  // Emission tex
+            0,                                  // Roughness tex
+            0,                                  // Scattering tex
+            0,                                  // Normal tex
+        ),
+        lp::Material::new(
+            lp::MaterialType::Refractive,       // Mat type
+            lp::Vec4::new(0.1, 0.1, 1.0, 1.0),  // Color
+            lp::Vec4::new(0.0, 0.0, 0.0, 0.0),  // Emission
+            lp::Vec4::new(0.0, 0.0, 0.0, 0.0),  // Scattering
+            0.0,                                // Roughness
+            0.0,                                // Metallic
+            1.1,                                // ior
             0.0,                                // anisotropy
             0.0,                                // depth
             0,                                  // Color tex

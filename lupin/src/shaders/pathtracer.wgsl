@@ -309,12 +309,11 @@ fn pathtrace_mis(local_id: vec3u, start_ray: Ray) -> vec3f
         const in_volume = false;
         if !in_volume
         {
-            const mat_sampler_idx: u32 = 0;  // TODO!
-
-            let color = textureSampleLevel(textures[mat.color_tex_idx], samplers[mat_sampler_idx], hit.tex_coords, 0.0f) * mat.color;
-
             // Set next ray's origin at point of contact.
             ray.ori = ray.ori + ray.dir * hit.dst;
+
+            const mat_sampler_idx: u32 = 0;  // TODO!
+            let color = textureSampleLevel(textures[mat.color_tex_idx], samplers[mat_sampler_idx], hit.tex_coords, 0.0f) * mat.color;
 
             // TODO: No caustics param.
 
@@ -381,6 +380,8 @@ fn sample_bsdf(mat_type: u32, color: vec3f, normal: vec3f, roughness: f32, ior: 
         }
         case MAT_TYPE_GLOSSY:
         {
+            // Could maybe simplify this part by calling recursively with argument MATTE.
+
             let fresnel = fresnel_dielectric(ior, up_normal, outgoing);
             if random_f32() < fresnel
             {
@@ -398,7 +399,6 @@ fn sample_bsdf(mat_type: u32, color: vec3f, normal: vec3f, roughness: f32, ior: 
 
             let halfway = normalize(res.incoming + outgoing);
 
-            // This could probably be a function...
             let fresnel_out  = fresnel_dielectric(ior, up_normal, outgoing);
             let fresnel_in   = fresnel_dielectric(ior, halfway, res.incoming);
             //let micro_dist   = microfacet_distribution(roughness, up_normal, halfway);
@@ -461,10 +461,46 @@ fn sample_bsdf(mat_type: u32, color: vec3f, normal: vec3f, roughness: f32, ior: 
             {
 
             }
+
+            let entering = dot(normal, outgoing) >= 0;
+            let rel_ior = select(1.0f / ior, ior, entering);
+            let fresnel = fresnel_dielectric(rel_ior, up_normal, outgoing);
+
+            if (random_f32() < fresnel) {
+                res.incoming = reflect(-outgoing, up_normal);
+            } else {
+                res.incoming = refract(-outgoing, up_normal, 1.0f / rel_ior);
+            }
+
+            let same_hemisphere = same_hemisphere(up_normal, outgoing, res.incoming);
+
+            if abs(ior - 1.0f) < 1e-3
+            {
+                if same_hemisphere
+                {
+                    res.prob = 0.0f;
+                    res.weight = vec3f(0.0f);
+                }
+                else
+                {
+                    res.prob = 1.0f;
+                    res.weight = vec3f(1.0f);
+                }
+            }
+            else
+            {
+                if same_hemisphere {
+                    res.prob = fresnel;
+                } else {
+                    res.prob = (1.0f - fresnel);
+                }
+
+                res.weight = vec3f(1.0f) * (1.0f / (rel_ior * rel_ior)) * (1.0f - fresnel_dielectric(rel_ior, up_normal, outgoing));
+            }
         }
         case MAT_TYPE_VOLUMETRIC:
         {
-
+            
         }
         case default: {}
     }
