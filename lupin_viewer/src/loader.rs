@@ -78,7 +78,8 @@ pub fn build_scene(device: &wgpu::Device, queue: &wgpu::Queue) -> lp::SceneDesc
 
     let instances = [
         lp::Instance { inv_transform: lp::mat4_inverse(xform_to_matrix(Vec3 { x: 0.0, y: 0.0, z: 0.0 }.into(), Quat::default(), Vec3::ones()).into()), mesh_idx: 0, mat_idx: 0, padding0: 0.0, padding1: 0.0 },
-        lp::Instance { inv_transform: lp::mat4_inverse(xform_to_matrix(Vec3 { x: -2.0, y: 0.0, z: 0.0 }.into(), angle_axis(Vec3::RIGHT, 40.0 * 3.1415 / 180.0), Vec3::ones()).into()), mesh_idx: 0, mat_idx: 1, padding0: 0.0, padding1: 0.0 },
+        lp::Instance { inv_transform: lp::mat4_inverse(xform_to_matrix(Vec3 { x: -2.0, y: 0.0, z: 0.0 }.into(), angle_axis(Vec3::RIGHT, 45.0 * 3.1415 / 180.0), Vec3::ones()).into()), mesh_idx: 0, mat_idx: 1, padding0: 0.0, padding1: 0.0 },
+        lp::Instance { inv_transform: lp::mat4_inverse(xform_to_matrix(Vec3 { x: -4.0, y: 0.0, z: 0.0 }.into(), angle_axis(Vec3::RIGHT, 90.0 * 3.1415 / 180.0), Vec3::ones()).into()), mesh_idx: 0, mat_idx: 1, padding0: 0.0, padding1: 0.0 },
         lp::Instance { inv_transform: lp::mat4_inverse(xform_to_matrix(Vec3 { x: 2.0, y: 0.0, z: 0.0 }.into(), Quat::default(), Vec3 { x: 0.8, y: 1.3, z: 1.0 }).into()), mesh_idx: 0, mat_idx: 2, padding0: 0.0, padding1: 0.0 },
         lp::Instance { inv_transform: lp::mat4_inverse(xform_to_matrix(Vec3 { x: 4.0, y: 0.0, z: 0.0 }.into(), Quat::default(), Vec3::ones()).into()), mesh_idx: 0, mat_idx: 3, padding0: 0.0, padding1: 0.0 },
     ];
@@ -96,7 +97,7 @@ pub fn build_scene(device: &wgpu::Device, queue: &wgpu::Queue) -> lp::SceneDesc
             1.5,                                // ior
             0.0,                                // anisotropy
             0.0,                                // depth
-            0,                                  // Color tex
+            1,                                  // Color tex
             0,                                  // Emission tex
             0,                                  // Roughness tex
             0,                                  // Scattering tex
@@ -104,7 +105,7 @@ pub fn build_scene(device: &wgpu::Device, queue: &wgpu::Queue) -> lp::SceneDesc
         ),
         lp::Material::new(
             lp::MaterialType::Glossy,           // Mat type
-            lp::Vec4::new(1.0, 1.0, 1.0, 1.0),  // Color
+            lp::Vec4::new(0.9, 0.2, 0.2, 1.0),  // Color
             lp::Vec4::new(0.0, 0.0, 0.0, 0.0),  // Emission
             lp::Vec4::new(0.0, 0.0, 0.0, 0.0),  // Scattering
             0.0,                                // Roughness
@@ -120,7 +121,7 @@ pub fn build_scene(device: &wgpu::Device, queue: &wgpu::Queue) -> lp::SceneDesc
         ),
         lp::Material::new(
             lp::MaterialType::Reflective,       // Mat type
-            lp::Vec4::new(1.0, 1.0, 1.0, 1.0),  // Color
+            lp::Vec4::new(0.9, 0.2, 0.2, 1.0),  // Color
             lp::Vec4::new(0.0, 0.0, 0.0, 0.0),  // Emission
             lp::Vec4::new(0.0, 0.0, 0.0, 0.0),  // Scattering
             0.0,                                // Roughness
@@ -136,7 +137,7 @@ pub fn build_scene(device: &wgpu::Device, queue: &wgpu::Queue) -> lp::SceneDesc
         ),
         lp::Material::new(
             lp::MaterialType::Transparent,      // Mat type
-            lp::Vec4::new(1.0, 1.0, 1.0, 1.0),  // Color
+            lp::Vec4::new(0.1, 0.1, 1.0, 1.0),  // Color
             lp::Vec4::new(0.0, 0.0, 0.0, 0.0),  // Emission
             lp::Vec4::new(0.0, 0.0, 0.0, 0.0),  // Scattering
             0.0,                                // Roughness
@@ -156,6 +157,11 @@ pub fn build_scene(device: &wgpu::Device, queue: &wgpu::Queue) -> lp::SceneDesc
 
     let lp_aabb: lp::Aabb = aabb.into();
     let tlas_buf = lp::build_tlas(&device, &queue, instances.as_slice(), &[lp_aabb]);
+
+    let textures = vec![
+        lp::create_white_texture(device, queue),
+        load_texture(device, queue, "bunny_color.png", false),
+    ];
 
     let linear_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
         label: None,
@@ -189,7 +195,7 @@ pub fn build_scene(device: &wgpu::Device, queue: &wgpu::Queue) -> lp::SceneDesc
         instances:  instances_buf,
         materials:  materials_buf,
 
-        textures: vec![load_texture(device, queue, "bunny_color.png", false)],
+        textures: textures,
         samplers: vec![linear_sampler],
         env_map: load_texture(device, queue, "poly_haven_studio_1k.hdr", true),
         env_map_sampler: env_map_sampler,

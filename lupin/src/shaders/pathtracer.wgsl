@@ -188,6 +188,9 @@ fn compute_camera_ray(global_id: vec3u, output_dim: vec2u) -> Ray
 // Pathtracing
 //////////////////////////////////////////////
 
+// General algorithms and structure from:
+// https://github.com/xelatihy/yocto-gl
+
 const MAX_BOUNCES: u32 = 5;
 
 fn pathtrace(local_id: vec3u, start_ray: Ray) -> vec3f
@@ -216,7 +219,6 @@ fn pathtrace(local_id: vec3u, start_ray: Ray) -> vec3f
         {
             const mat_sampler_idx: u32 = 0;  // TODO!
 
-            // Eval material.
             let color = textureSampleLevel(textures[mat.color_tex_idx], samplers[mat_sampler_idx], hit.tex_coords, 0.0f) * mat.color;
 
             // Set next ray's origin at point of contact.
@@ -252,7 +254,14 @@ fn pathtrace(local_id: vec3u, start_ray: Ray) -> vec3f
         }
         else  // Volumetric rendering. TODO
         {
+            let hit = ray_scene_intersection(local_id, ray);
+            if hit.dst == F32_MAX  // Missed.
+            {
+                radiance += sample_env_map(ray.dir) * weight;
+                break;
+            }
 
+            // Ray hit something.
         }
 
         // Check weight.
@@ -270,9 +279,74 @@ fn pathtrace(local_id: vec3u, start_ray: Ray) -> vec3f
     return radiance;
 }
 
-fn pathtrace_mis(local_id: vec3u, ray: Ray) -> vec3f
+// TODO: Just a test to see if I should restructure the code or not.
+// Multiple Importance Sampling.
+fn pathtrace_mis(local_id: vec3u, start_ray: Ray) -> vec3f
 {
+    var ray = start_ray;
+    var weight = vec3f(1.0f);  // Multiplicative terms.
+    var radiance = vec3f(0.0f);
+    var op_bounce: u32 = 0;
+    var next_emission = true;
+    var next_intersection = HitInfo();
+
+    for(var bounce = 0u; bounce <= MAX_BOUNCES; bounce++)
+    {
+        var hit = next_intersection;
+        if next_emission { hit = ray_scene_intersection(local_id, ray); }
+        if hit.dst == F32_MAX  // Missed.
+        {
+            radiance += sample_env_map(ray.dir) * weight;
+            break;
+        }
+
+        // Ray hit something.
+
+        let mat = materials[hit.mat_idx];
+
+        // TODO: Handle volume transmission.
+
+        const in_volume = false;
+        if !in_volume
+        {
+            const mat_sampler_idx: u32 = 0;  // TODO!
+
+            let color = textureSampleLevel(textures[mat.color_tex_idx], samplers[mat_sampler_idx], hit.tex_coords, 0.0f) * mat.color;
+
+            // Set next ray's origin at point of contact.
+            ray.ori = ray.ori + ray.dir * hit.dst;
+
+            // TODO: No caustics param.
+
+            // Handle coverage.
+            if color.a < 1.0f && random_f32() >= color.a
+            {
+                op_bounce++;
+                if op_bounce > 128 { break; }
+                bounce -= 1;
+                continue;
+            }
+
+            // For deltas and non deltas, we have two very different paths here
+            // The non delta path does:
+            // incoming = sample_lights or sample_bsdfcos
+
+            break;
+        }
+        else
+        {
+            // TODO
+        }
+
+        // Ray hit something.
+    }
+
     return vec3f(0.0f);
+}
+
+fn mis_heuristic(this_prob: f32, other_prob: f32) -> f32
+{
+    return (this_prob * this_prob) / (this_prob * this_prob + other_prob * other_prob);
 }
 
 fn sample_env_map(dir: vec3f) -> vec3f
@@ -305,6 +379,10 @@ fn sample_bsdf(mat_type: u32, color: vec3f, normal: vec3f, roughness: f32, ior: 
             let cosw = dot(up_normal, res.incoming);
             res.prob = select(cosw / PI, 0.0f, cosw <= 0.0f);
         }
+        case MAT_TYPE_GLOSSY:
+        {
+
+        }
         case MAT_TYPE_REFLECTIVE:
         {
             // Microfacet sampling is pretty expensive so we do it conditionally.
@@ -322,7 +400,7 @@ fn sample_bsdf(mat_type: u32, color: vec3f, normal: vec3f, roughness: f32, ior: 
         case MAT_TYPE_TRANSPARENT:
         {
             // Microfacet sampling is pretty expensive so we do it conditionally.
-            let microfacet_normal = normal;
+            let microfacet_normal = up_normal;
             let microfacet_prob = 1.0f;
             if roughness > 0.0f
             {
@@ -346,7 +424,12 @@ fn sample_bsdf(mat_type: u32, color: vec3f, normal: vec3f, roughness: f32, ior: 
         case MAT_TYPE_REFRACTIVE:
         {
             // Microfacet sampling is pretty expensive so we do it conditionally.
+            let microfacet_normal = up_normal;
+            let microfacet_prob = 1.0f;
+            if roughness > 0.0f
+            {
 
+            }
         }
         case MAT_TYPE_VOLUMETRIC:
         {
@@ -432,6 +515,7 @@ fn microfacet_distribution(roughness: f32, normal: vec3f, halfway: vec3f, ggx: b
     // From:
     // https://google.github.io/filament/Filament.html#materialsystem/specularbrdf
     // http://graphicrants.blogspot.com/2013/08/specular-brdf-reference.html
+
     let cosine = dot(normal, halfway);
     if cosine <= 0.0f { return 0.0f; }
     let roughness2 = roughness * roughness;
@@ -651,6 +735,7 @@ fn ray_scene_intersection(local_id: vec3u, ray: Ray)->HitInfo
     var tri_idx: u32 = 0;
     var mesh_idx: u32 = 0;
     var mat_idx: u32 = 0;
+    var inv_trans = mat4x4f();
     while stack_idx > 1
     {
         stack_idx--;
@@ -663,10 +748,11 @@ fn ray_scene_intersection(local_id: vec3u, ray: Ray)->HitInfo
             let result = ray_mesh_intersection(local_id, ray_trans, instance.mesh_idx);
             if result.hit.x < min_hit.x
             {
-                min_hit  = result.hit;
-                tri_idx  = result.tri_idx;
-                mesh_idx = instance.mesh_idx;
-                mat_idx  = instance.mat_idx;
+                min_hit   = result.hit;
+                tri_idx   = result.tri_idx;
+                mesh_idx  = instance.mesh_idx;
+                mat_idx   = instance.mat_idx;
+                inv_trans = instance.inv_transform;
             }
         }
         else  // Non-leaf node
@@ -731,7 +817,8 @@ fn ray_scene_intersection(local_id: vec3u, ray: Ray)->HitInfo
         let w = 1.0 - u - v;
 
         hit_info.dst = min_hit.x;
-        hit_info.normal = normalize(vert0.normal*w + vert1.normal*u + vert2.normal*v);
+        let local_normal = normalize(vert0.normal*w + vert1.normal*u + vert2.normal*v);
+        hit_info.normal = (transpose(inv_trans) * vec4f(local_normal, 1.0f)).xyz;
         hit_info.tex_coords = vert0.tex_coords*w + vert1.tex_coords*u + vert2.tex_coords*v;
         hit_info.mat_idx = mat_idx;
     }

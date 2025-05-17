@@ -173,8 +173,9 @@ pub fn get_required_device_spec()->wgpu::DeviceDescriptor<'static>
                            wgpu::Features::SAMPLED_TEXTURE_AND_STORAGE_BUFFER_ARRAY_NON_UNIFORM_INDEXING |
                            wgpu::Features::PARTIALLY_BOUND_BINDING_ARRAY,
         required_limits: wgpu::Limits {
-            max_storage_buffers_per_shader_stage: 2048,
-            max_samplers_per_shader_stage: 16,
+            max_storage_buffers_per_shader_stage: 16384,
+            max_sampled_textures_per_shader_stage: 16384,
+            max_samplers_per_shader_stage: 64,
             ..Default::default()
         },
         memory_hints: Default::default(),
@@ -215,7 +216,7 @@ pub fn build_pathtrace_shader_params(device: &wgpu::Device, with_runtime_checks:
                     has_dynamic_offset: false,
                     min_binding_size: None,
                 },
-                count: std::num::NonZero::new(1)
+                count: std::num::NonZero::new(100)
             },
             wgpu::BindGroupLayoutEntry {  // verts
                 binding: 1,
@@ -225,7 +226,7 @@ pub fn build_pathtrace_shader_params(device: &wgpu::Device, with_runtime_checks:
                     has_dynamic_offset: false,
                     min_binding_size: None,
                 },
-                count: std::num::NonZero::new(1)
+                count: std::num::NonZero::new(100)
             },
             wgpu::BindGroupLayoutEntry {  // indices
                 binding: 2,
@@ -235,7 +236,7 @@ pub fn build_pathtrace_shader_params(device: &wgpu::Device, with_runtime_checks:
                     has_dynamic_offset: false,
                     min_binding_size: None,
                 },
-                count: std::num::NonZero::new(1)
+                count: std::num::NonZero::new(100)
             },
             wgpu::BindGroupLayoutEntry {  // bvh_nodes
                 binding: 3,
@@ -245,7 +246,7 @@ pub fn build_pathtrace_shader_params(device: &wgpu::Device, with_runtime_checks:
                     has_dynamic_offset: false,
                     min_binding_size: None,
                 },
-                count: std::num::NonZero::new(1)
+                count: std::num::NonZero::new(100)
             },
             wgpu::BindGroupLayoutEntry {  // tlas_nodes
                 binding: 4,
@@ -285,13 +286,13 @@ pub fn build_pathtrace_shader_params(device: &wgpu::Device, with_runtime_checks:
                     view_dimension: wgpu::TextureViewDimension::D2,
                     multisampled: false,
                 },
-                count: std::num::NonZero::new(1)
+                count: std::num::NonZero::new(100)
             },
             wgpu::BindGroupLayoutEntry {  // samplers
                 binding: 8,
                 visibility: wgpu::ShaderStages::COMPUTE,
                 ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-                count: std::num::NonZero::new(1)
+                count: std::num::NonZero::new(32)
             },
             wgpu::BindGroupLayoutEntry {  // env map texture
                 binding: 9,
