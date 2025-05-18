@@ -5,7 +5,204 @@ use crate::base::*;
 
 pub fn build_scene(device: &wgpu::Device, queue: &wgpu::Queue) -> lp::SceneDesc
 {
-    let scene = tobj::load_obj("stanford_bunny.obj", &tobj::GPU_LOAD_OPTIONS);
+    let meshes_aabbs = vec![
+        load_obj_mesh(device, queue, "stanford_bunny.obj"),
+        load_obj_mesh(device, queue, "quad.obj"),
+    ];
+
+    let mut meshes = Vec::<lp::Mesh>::with_capacity(meshes_aabbs.len());
+    let mut aabbs = Vec::<lp::Aabb>::with_capacity(meshes_aabbs.len());
+    for mesh_aabb in meshes_aabbs
+    {
+        meshes.push(mesh_aabb.0);
+        aabbs.push(mesh_aabb.1);
+    }
+
+    // Stress-test
+/*
+    let mut instances = Vec::<lp::Instance>::default();
+    for i in 0..120
+    {
+        for j in 0..120
+        {
+            let offset: f32 = 1.5;
+            instances.push(lp::Instance {
+                inv_transform: lp::mat4_inverse(xform_to_matrix(Vec3 { x: offset * i as f32, y: 0.0, z: offset * j as f32 }.into(), Quat::default(), Vec3::ones()).into()),
+                mesh_idx: 0,
+                mat_idx: 0,
+                padding0: 0.0, padding1: 0.0
+            });
+        }
+    }
+*/
+
+    let instances = [
+        lp::Instance { inv_transform: lp::mat4_inverse(xform_to_matrix(Vec3 { x: 0.0, y: 0.0, z: 0.0 }.into(), Quat::default(), Vec3::ones()).into()), mesh_idx: 0, mat_idx: 0, padding0: 0.0, padding1: 0.0 },
+        lp::Instance { inv_transform: lp::mat4_inverse(xform_to_matrix(Vec3 { x: -2.0, y: 0.0, z: 0.0 }.into(), angle_axis(Vec3::RIGHT, 45.0 * 3.1415 / 180.0), Vec3::ones()).into()), mesh_idx: 0, mat_idx: 1, padding0: 0.0, padding1: 0.0 },
+        lp::Instance { inv_transform: lp::mat4_inverse(xform_to_matrix(Vec3 { x: -4.0, y: 0.0, z: 0.0 }.into(), angle_axis(Vec3::RIGHT, 90.0 * 3.1415 / 180.0), Vec3::ones()).into()), mesh_idx: 0, mat_idx: 1, padding0: 0.0, padding1: 0.0 },
+        lp::Instance { inv_transform: lp::mat4_inverse(xform_to_matrix(Vec3 { x: 2.0, y: 0.0, z: 0.0 }.into(), Quat::default(), Vec3 { x: 1.0, y: 1.0, z: 1.0 }).into()), mesh_idx: 0, mat_idx: 2, padding0: 0.0, padding1: 0.0 },
+        lp::Instance { inv_transform: lp::mat4_inverse(xform_to_matrix(Vec3 { x: 4.0, y: 0.0, z: 0.0 }.into(), Quat::default(), Vec3::ones()).into()), mesh_idx: 0, mat_idx: 3, padding0: 0.0, padding1: 0.0 },
+        lp::Instance { inv_transform: lp::mat4_inverse(xform_to_matrix(Vec3 { x: 6.0, y: 0.0, z: 0.0 }.into(), Quat::default(), Vec3::ones()).into()), mesh_idx: 0, mat_idx: 4, padding0: 0.0, padding1: 0.0 },
+        // Floor
+        lp::Instance { inv_transform: lp::mat4_inverse(xform_to_matrix(Vec3 { x: 0.0, y: -0.01, z: 0.0 }.into(), Quat::default(), Vec3::ones() * 10.0).into()), mesh_idx: 1, mat_idx: 5, padding0: 0.0, padding1: 0.0 },
+    ];
+
+    let instances_buf = lp::upload_storage_buffer(&device, &queue, unsafe { to_u8_slice(&instances) });
+
+    let materials = [
+        // Bunny matte
+        // 0
+        lp::Material::new(
+            lp::MaterialType::Matte,            // Mat type
+            lp::Vec4::new(1.0, 1.0, 1.0, 1.0),  // Color
+            lp::Vec4::new(0.0, 0.0, 0.0, 0.0),  // Emission
+            lp::Vec4::new(0.0, 0.0, 0.0, 0.0),  // Scattering
+            0.0,                                // Roughness
+            0.0,                                // Metallic
+            1.5,                                // ior
+            0.0,                                // anisotropy
+            0.0,                                // depth
+            1,                                  // Color tex
+            0,                                  // Emission tex
+            0,                                  // Roughness tex
+            0,                                  // Scattering tex
+            0,                                  // Normal tex
+        ),
+        // 1
+        lp::Material::new(
+            lp::MaterialType::Glossy,           // Mat type
+            lp::Vec4::new(0.9, 0.2, 0.2, 1.0),  // Color
+            lp::Vec4::new(0.0, 0.0, 0.0, 0.0),  // Emission
+            lp::Vec4::new(0.0, 0.0, 0.0, 0.0),  // Scattering
+            0.0,                                // Roughness
+            0.0,                                // Metallic
+            1.5,                                // ior
+            0.0,                                // anisotropy
+            0.0,                                // depth
+            0,                                  // Color tex
+            0,                                  // Emission tex
+            0,                                  // Roughness tex
+            0,                                  // Scattering tex
+            0,                                  // Normal tex
+        ),
+        // 2
+        lp::Material::new(
+            lp::MaterialType::Reflective,       // Mat type
+            lp::Vec4::new(0.9, 0.2, 0.2, 1.0),  // Color
+            lp::Vec4::new(0.0, 0.0, 0.0, 0.0),  // Emission
+            lp::Vec4::new(0.0, 0.0, 0.0, 0.0),  // Scattering
+            0.0,                                // Roughness
+            0.0,                                // Metallic
+            1.5,                                // ior
+            0.0,                                // anisotropy
+            0.0,                                // depth
+            0,                                  // Color tex
+            0,                                  // Emission tex
+            0,                                  // Roughness tex
+            0,                                  // Scattering tex
+            0,                                  // Normal tex
+        ),
+        // 3
+        lp::Material::new(
+            lp::MaterialType::Transparent,      // Mat type
+            lp::Vec4::new(0.1, 0.1, 1.0, 1.0),  // Color
+            lp::Vec4::new(0.0, 0.0, 0.0, 0.0),  // Emission
+            lp::Vec4::new(0.0, 0.0, 0.0, 0.0),  // Scattering
+            0.0,                                // Roughness
+            0.0,                                // Metallic
+            1.5,                                // ior
+            0.0,                                // anisotropy
+            0.0,                                // depth
+            0,                                  // Color tex
+            0,                                  // Emission tex
+            0,                                  // Roughness tex
+            0,                                  // Scattering tex
+            0,                                  // Normal tex
+        ),
+        // 4
+        lp::Material::new(
+            lp::MaterialType::Refractive,       // Mat type
+            lp::Vec4::new(0.1, 0.1, 1.0, 1.0),  // Color
+            lp::Vec4::new(0.0, 0.0, 0.0, 0.0),  // Emission
+            lp::Vec4::new(0.0, 0.0, 0.0, 0.0),  // Scattering
+            0.0,                                // Roughness
+            0.0,                                // Metallic
+            1.1,                                // ior
+            0.0,                                // anisotropy
+            0.0,                                // depth
+            0,                                  // Color tex
+            0,                                  // Emission tex
+            0,                                  // Roughness tex
+            0,                                  // Scattering tex
+            0,                                  // Normal tex
+        ),
+        // White matte
+        // 5
+        lp::Material::new(
+            lp::MaterialType::Matte,            // Mat type
+            lp::Vec4::new(1.0, 1.0, 1.0, 1.0),  // Color
+            lp::Vec4::new(0.0, 0.0, 0.0, 0.0),  // Emission
+            lp::Vec4::new(0.0, 0.0, 0.0, 0.0),  // Scattering
+            0.0,                                // Roughness
+            0.0,                                // Metallic
+            1.5,                                // ior
+            0.0,                                // anisotropy
+            0.0,                                // depth
+            0,                                  // Color tex
+            0,                                  // Emission tex
+            0,                                  // Roughness tex
+            0,                                  // Scattering tex
+            0,                                  // Normal tex
+        ),
+    ];
+
+    let materials_buf = lp::upload_storage_buffer(&device, &queue, unsafe { to_u8_slice(&materials) });
+
+    let tlas_buf = lp::build_tlas(&device, &queue, instances.as_slice(), &aabbs);
+
+    let textures = vec![
+        lp::create_white_texture(device, queue),
+        load_texture(device, queue, "bunny_color.png", false),
+    ];
+
+    let linear_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+        label: None,
+        address_mode_u: wgpu::AddressMode::Repeat,
+        address_mode_v: wgpu::AddressMode::Repeat,
+        address_mode_w: wgpu::AddressMode::Repeat,
+        mag_filter: wgpu::FilterMode::Linear,
+        min_filter: wgpu::FilterMode::Linear,
+        mipmap_filter: wgpu::FilterMode::Linear,
+        ..Default::default()
+    });
+
+    let env_map_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+        label: None,
+        address_mode_u: wgpu::AddressMode::Repeat,
+        address_mode_v: wgpu::AddressMode::Repeat,
+        address_mode_w: wgpu::AddressMode::Repeat,
+        mag_filter: wgpu::FilterMode::Linear,
+        min_filter: wgpu::FilterMode::Linear,
+        mipmap_filter: wgpu::FilterMode::Linear,
+        ..Default::default()
+    });
+
+    return lp::SceneDesc {
+        meshes: meshes,
+        tlas_nodes: tlas_buf,
+        instances:  instances_buf,
+        materials:  materials_buf,
+
+        textures: textures,
+        samplers: vec![linear_sampler],
+        env_map: load_texture(device, queue, "poly_haven_studio_1k.hdr", true),
+        env_map_sampler: env_map_sampler,
+    };
+}
+
+pub fn load_obj_mesh(device: &wgpu::Device, queue: &wgpu::Queue, path: &str) -> (lp::Mesh, lp::Aabb)
+{
+    let scene = tobj::load_obj(path, &tobj::GPU_LOAD_OPTIONS);
 
     assert!(scene.is_ok());
     let (mut models, _materials) = scene.expect("Failed to load OBJ file");
@@ -58,165 +255,12 @@ pub fn build_scene(device: &wgpu::Device, queue: &wgpu::Queue) -> lp::SceneDesc
 
     let verts_buf = lp::upload_storage_buffer(&device, &queue, unsafe { to_u8_slice(&verts) });
 
-    // Stress-test
-/*
-    let mut instances = Vec::<lp::Instance>::default();
-    for i in 0..120
-    {
-        for j in 0..120
-        {
-            let offset: f32 = 1.5;
-            instances.push(lp::Instance {
-                inv_transform: lp::mat4_inverse(xform_to_matrix(Vec3 { x: offset * i as f32, y: 0.0, z: offset * j as f32 }.into(), Quat::default(), Vec3::ones()).into()),
-                mesh_idx: 0,
-                mat_idx: 0,
-                padding0: 0.0, padding1: 0.0
-            });
-        }
-    }
-*/
-
-    let instances = [
-        lp::Instance { inv_transform: lp::mat4_inverse(xform_to_matrix(Vec3 { x: 0.0, y: 0.0, z: 0.0 }.into(), Quat::default(), Vec3::ones()).into()), mesh_idx: 0, mat_idx: 0, padding0: 0.0, padding1: 0.0 },
-        lp::Instance { inv_transform: lp::mat4_inverse(xform_to_matrix(Vec3 { x: -2.0, y: 0.0, z: 0.0 }.into(), angle_axis(Vec3::RIGHT, 45.0 * 3.1415 / 180.0), Vec3::ones()).into()), mesh_idx: 0, mat_idx: 1, padding0: 0.0, padding1: 0.0 },
-        lp::Instance { inv_transform: lp::mat4_inverse(xform_to_matrix(Vec3 { x: -4.0, y: 0.0, z: 0.0 }.into(), angle_axis(Vec3::RIGHT, 90.0 * 3.1415 / 180.0), Vec3::ones()).into()), mesh_idx: 0, mat_idx: 1, padding0: 0.0, padding1: 0.0 },
-        lp::Instance { inv_transform: lp::mat4_inverse(xform_to_matrix(Vec3 { x: 2.0, y: 0.0, z: 0.0 }.into(), Quat::default(), Vec3 { x: 1.0, y: 1.0, z: 1.0 }).into()), mesh_idx: 0, mat_idx: 2, padding0: 0.0, padding1: 0.0 },
-        lp::Instance { inv_transform: lp::mat4_inverse(xform_to_matrix(Vec3 { x: 4.0, y: 0.0, z: 0.0 }.into(), Quat::default(), Vec3::ones()).into()), mesh_idx: 0, mat_idx: 3, padding0: 0.0, padding1: 0.0 },
-        lp::Instance { inv_transform: lp::mat4_inverse(xform_to_matrix(Vec3 { x: 6.0, y: 0.0, z: 0.0 }.into(), Quat::default(), Vec3::ones()).into()), mesh_idx: 0, mat_idx: 4, padding0: 0.0, padding1: 0.0 },
-    ];
-
-    let instances_buf = lp::upload_storage_buffer(&device, &queue, unsafe { to_u8_slice(&instances) });
-
-    let materials = [
-        lp::Material::new(
-            lp::MaterialType::Matte,            // Mat type
-            lp::Vec4::new(1.0, 1.0, 1.0, 1.0),  // Color
-            lp::Vec4::new(0.0, 0.0, 0.0, 0.0),  // Emission
-            lp::Vec4::new(0.0, 0.0, 0.0, 0.0),  // Scattering
-            0.0,                                // Roughness
-            0.0,                                // Metallic
-            1.5,                                // ior
-            0.0,                                // anisotropy
-            0.0,                                // depth
-            1,                                  // Color tex
-            0,                                  // Emission tex
-            0,                                  // Roughness tex
-            0,                                  // Scattering tex
-            0,                                  // Normal tex
-        ),
-        lp::Material::new(
-            lp::MaterialType::Glossy,           // Mat type
-            lp::Vec4::new(0.9, 0.2, 0.2, 1.0),  // Color
-            lp::Vec4::new(0.0, 0.0, 0.0, 0.0),  // Emission
-            lp::Vec4::new(0.0, 0.0, 0.0, 0.0),  // Scattering
-            0.0,                                // Roughness
-            0.0,                                // Metallic
-            1.5,                                // ior
-            0.0,                                // anisotropy
-            0.0,                                // depth
-            0,                                  // Color tex
-            0,                                  // Emission tex
-            0,                                  // Roughness tex
-            0,                                  // Scattering tex
-            0,                                  // Normal tex
-        ),
-        lp::Material::new(
-            lp::MaterialType::Reflective,       // Mat type
-            lp::Vec4::new(0.9, 0.2, 0.2, 1.0),  // Color
-            lp::Vec4::new(0.0, 0.0, 0.0, 0.0),  // Emission
-            lp::Vec4::new(0.0, 0.0, 0.0, 0.0),  // Scattering
-            0.0,                                // Roughness
-            0.0,                                // Metallic
-            1.5,                                // ior
-            0.0,                                // anisotropy
-            0.0,                                // depth
-            0,                                  // Color tex
-            0,                                  // Emission tex
-            0,                                  // Roughness tex
-            0,                                  // Scattering tex
-            0,                                  // Normal tex
-        ),
-        lp::Material::new(
-            lp::MaterialType::Transparent,      // Mat type
-            lp::Vec4::new(0.1, 0.1, 1.0, 1.0),  // Color
-            lp::Vec4::new(0.0, 0.0, 0.0, 0.0),  // Emission
-            lp::Vec4::new(0.0, 0.0, 0.0, 0.0),  // Scattering
-            0.0,                                // Roughness
-            0.0,                                // Metallic
-            1.5,                                // ior
-            0.0,                                // anisotropy
-            0.0,                                // depth
-            0,                                  // Color tex
-            0,                                  // Emission tex
-            0,                                  // Roughness tex
-            0,                                  // Scattering tex
-            0,                                  // Normal tex
-        ),
-        lp::Material::new(
-            lp::MaterialType::Refractive,       // Mat type
-            lp::Vec4::new(0.1, 0.1, 1.0, 1.0),  // Color
-            lp::Vec4::new(0.0, 0.0, 0.0, 0.0),  // Emission
-            lp::Vec4::new(0.0, 0.0, 0.0, 0.0),  // Scattering
-            0.0,                                // Roughness
-            0.0,                                // Metallic
-            1.1,                                // ior
-            0.0,                                // anisotropy
-            0.0,                                // depth
-            0,                                  // Color tex
-            0,                                  // Emission tex
-            0,                                  // Roughness tex
-            0,                                  // Scattering tex
-            0,                                  // Normal tex
-        ),
-    ];
-
-    let materials_buf = lp::upload_storage_buffer(&device, &queue, unsafe { to_u8_slice(&materials) });
-
-    let lp_aabb: lp::Aabb = aabb.into();
-    let tlas_buf = lp::build_tlas(&device, &queue, instances.as_slice(), &[lp_aabb]);
-
-    let textures = vec![
-        lp::create_white_texture(device, queue),
-        load_texture(device, queue, "bunny_color.png", false),
-    ];
-
-    let linear_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
-        label: None,
-        address_mode_u: wgpu::AddressMode::Repeat,
-        address_mode_v: wgpu::AddressMode::Repeat,
-        address_mode_w: wgpu::AddressMode::Repeat,
-        mag_filter: wgpu::FilterMode::Linear,
-        min_filter: wgpu::FilterMode::Linear,
-        mipmap_filter: wgpu::FilterMode::Linear,
-        ..Default::default()
-    });
-
-    let env_map_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
-        label: None,
-        address_mode_u: wgpu::AddressMode::Repeat,
-        address_mode_v: wgpu::AddressMode::Repeat,
-        address_mode_w: wgpu::AddressMode::Repeat,
-        mag_filter: wgpu::FilterMode::Linear,
-        min_filter: wgpu::FilterMode::Linear,
-        mipmap_filter: wgpu::FilterMode::Linear,
-        ..Default::default()
-    });
-
-    return lp::SceneDesc {
-        verts_pos: vec![verts_pos_buf],
-        verts:     vec![verts_buf],
-        indices:   vec![indices_buf],
-        bvh_nodes: vec![bvh_buf],
-
-        tlas_nodes: tlas_buf,
-        instances:  instances_buf,
-        materials:  materials_buf,
-
-        textures: textures,
-        samplers: vec![linear_sampler],
-        env_map: load_texture(device, queue, "poly_haven_studio_1k.hdr", true),
-        env_map_sampler: env_map_sampler,
-    };
+    return (lp::Mesh {
+        verts_pos: verts_pos_buf,
+        verts: verts_buf,
+        indices: indices_buf,
+        bvh_nodes: bvh_buf,
+    }, aabb.into());
 }
 
 pub fn load_texture(device: &wgpu::Device, queue: &wgpu::Queue, path: &str, hdr: bool) -> wgpu::Texture

@@ -39,13 +39,7 @@ pub struct Aabb
 
 pub struct SceneDesc
 {
-    // It would be more ergonomic to do a AoS here
-    // (which could then just be turned into SoA)
-    pub verts_pos: Vec<wgpu::Buffer>,
-    pub verts: Vec<wgpu::Buffer>,
-    pub indices: Vec<wgpu::Buffer>,
-    pub bvh_nodes: Vec<wgpu::Buffer>,
-
+    pub meshes: Vec<Mesh>,
     pub tlas_nodes: wgpu::Buffer,
     pub instances: wgpu::Buffer,
     pub materials: wgpu::Buffer,
@@ -54,6 +48,14 @@ pub struct SceneDesc
     pub samplers: Vec<wgpu::Sampler>,
     pub env_map: wgpu::Texture,
     pub env_map_sampler: wgpu::Sampler,
+}
+
+pub struct Mesh
+{
+    pub verts_pos: wgpu::Buffer,
+    pub verts: wgpu::Buffer,
+    pub indices: wgpu::Buffer,
+    pub bvh_nodes: wgpu::Buffer,
 }
 
 #[derive(Default, Clone, Copy, Debug)]
@@ -436,11 +438,24 @@ pub fn pathtrace_scene(device: &wgpu::Device, queue: &wgpu::Queue, scene: &Scene
 
     // TODO: Check format and usage of render target params and others
 
+    // Convert AoS to SoA.
+    let mut verts_pos = Vec::<&wgpu::Buffer>::with_capacity(scene.meshes.len());
+    let mut verts = Vec::<&wgpu::Buffer>::with_capacity(scene.meshes.len());
+    let mut indices = Vec::<&wgpu::Buffer>::with_capacity(scene.meshes.len());
+    let mut bvh_nodes = Vec::<&wgpu::Buffer>::with_capacity(scene.meshes.len());
+    for mesh in &scene.meshes
+    {
+        verts_pos.push(&mesh.verts_pos);
+        verts.push(&mesh.verts);
+        indices.push(&mesh.indices);
+        bvh_nodes.push(&mesh.bvh_nodes);
+    }
+
     use crate::wgpu_utils::*;
-    let verts_pos_array = array_of_buffer_bindings_resource(&scene.verts_pos);
-    let verts_array     = array_of_buffer_bindings_resource(&scene.verts);
-    let indices_array   = array_of_buffer_bindings_resource(&scene.indices);
-    let bvh_nodes_array = array_of_buffer_bindings_resource(&scene.bvh_nodes);
+    let verts_pos_array = array_of_buffer_bindings_ref_resource(&verts_pos);
+    let verts_array     = array_of_buffer_bindings_ref_resource(&verts);
+    let indices_array   = array_of_buffer_bindings_ref_resource(&indices);
+    let bvh_nodes_array = array_of_buffer_bindings_ref_resource(&bvh_nodes);
     let texture_views   = array_of_texture_views(&scene.textures);
     let textures_array  = array_of_texture_bindings_resource(&texture_views);
     let samplers_array  = array_of_sampler_bindings_resource(&scene.samplers);
@@ -568,10 +583,23 @@ pub fn pathtrace_scene_debug(device: &wgpu::Device, queue: &wgpu::Queue, scene: 
         usage: wgpu::BufferUsages::UNIFORM,
     });
 
-    let verts_pos_array = array_of_buffer_bindings_resource(&scene.verts_pos);
-    let verts_array     = array_of_buffer_bindings_resource(&scene.verts);
-    let indices_array   = array_of_buffer_bindings_resource(&scene.indices);
-    let bvh_nodes_array = array_of_buffer_bindings_resource(&scene.bvh_nodes);
+    // Convert AoS to SoA.
+    let mut verts_pos = Vec::<&wgpu::Buffer>::with_capacity(scene.meshes.len());
+    let mut verts = Vec::<&wgpu::Buffer>::with_capacity(scene.meshes.len());
+    let mut indices = Vec::<&wgpu::Buffer>::with_capacity(scene.meshes.len());
+    let mut bvh_nodes = Vec::<&wgpu::Buffer>::with_capacity(scene.meshes.len());
+    for mesh in &scene.meshes
+    {
+        verts_pos.push(&mesh.verts_pos);
+        verts.push(&mesh.verts);
+        indices.push(&mesh.indices);
+        bvh_nodes.push(&mesh.bvh_nodes);
+    }
+
+    let verts_pos_array = array_of_buffer_bindings_ref_resource(&verts_pos);
+    let verts_array     = array_of_buffer_bindings_ref_resource(&verts);
+    let indices_array   = array_of_buffer_bindings_ref_resource(&indices);
+    let bvh_nodes_array = array_of_buffer_bindings_ref_resource(&bvh_nodes);
     let texture_views   = array_of_texture_views(&scene.textures);
     let textures_array  = array_of_texture_bindings_resource(&texture_views);
     let samplers_array  = array_of_sampler_bindings_resource(&scene.samplers);
@@ -1380,6 +1408,21 @@ fn array_of_buffer_bindings_resource(buffers: &Vec<wgpu::Buffer>) -> Vec<wgpu::B
     {
         bindings.push(wgpu::BufferBinding {
             buffer: &buffers[i],
+            offset: 0,
+            size: None
+        });
+    }
+
+    return bindings;
+}
+
+fn array_of_buffer_bindings_ref_resource<'a>(buffers: &Vec<&'a wgpu::Buffer>) -> Vec<wgpu::BufferBinding<'a>>
+{
+    let mut bindings: Vec<wgpu::BufferBinding> = Vec::with_capacity(buffers.len());
+    for i in 0..buffers.len()
+    {
+        bindings.push(wgpu::BufferBinding {
+            buffer: buffers[i],
             offset: 0,
             size: None
         });

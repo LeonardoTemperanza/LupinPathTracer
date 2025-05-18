@@ -500,7 +500,7 @@ fn sample_bsdf(mat_type: u32, color: vec3f, normal: vec3f, roughness: f32, ior: 
         }
         case MAT_TYPE_VOLUMETRIC:
         {
-            
+
         }
         case default: {}
     }
