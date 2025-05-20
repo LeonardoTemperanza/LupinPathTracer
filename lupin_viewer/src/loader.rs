@@ -59,7 +59,7 @@ pub fn build_scene(device: &wgpu::Device, queue: &wgpu::Queue) -> lp::SceneDesc
             lp::Vec4::new(0.0, 0.0, 0.0, 0.0),  // Scattering
             0.0,                                // Roughness
             0.0,                                // Metallic
-            1.5,                                // ior
+            1.33,                               // ior
             0.0,                                // anisotropy
             0.0,                                // depth
             1,                                  // Color tex
@@ -76,7 +76,7 @@ pub fn build_scene(device: &wgpu::Device, queue: &wgpu::Queue) -> lp::SceneDesc
             lp::Vec4::new(0.0, 0.0, 0.0, 0.0),  // Scattering
             0.0,                                // Roughness
             0.0,                                // Metallic
-            1.5,                                // ior
+            1.33,                               // ior
             0.0,                                // anisotropy
             0.0,                                // depth
             0,                                  // Color tex
@@ -110,7 +110,7 @@ pub fn build_scene(device: &wgpu::Device, queue: &wgpu::Queue) -> lp::SceneDesc
             lp::Vec4::new(0.0, 0.0, 0.0, 0.0),  // Scattering
             0.0,                                // Roughness
             0.0,                                // Metallic
-            1.5,                                // ior
+            1.33,                               // ior
             0.0,                                // anisotropy
             0.0,                                // depth
             0,                                  // Color tex
@@ -127,7 +127,7 @@ pub fn build_scene(device: &wgpu::Device, queue: &wgpu::Queue) -> lp::SceneDesc
             lp::Vec4::new(0.0, 0.0, 0.0, 0.0),  // Scattering
             0.0,                                // Roughness
             0.0,                                // Metallic
-            1.1,                                // ior
+            1.33,                               // ior
             0.0,                                // anisotropy
             0.0,                                // depth
             0,                                  // Color tex

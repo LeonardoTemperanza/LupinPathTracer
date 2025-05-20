@@ -121,7 +121,7 @@ fn main(@builtin(local_invocation_id) local_id: vec3u, @builtin(global_invocatio
     for(var sample: u32 = 0; sample < NUM_SAMPLES; sample++)
     {
         let camera_ray = compute_camera_ray(global_id, output_dim);
-        color += pathtrace(local_id, camera_ray);
+        color += pathtrace_naive(local_id, camera_ray);
     }
     color /= f32(NUM_SAMPLES);
     color = max(color, vec3f(0.0f));
@@ -193,7 +193,7 @@ fn compute_camera_ray(global_id: vec3u, output_dim: vec2u) -> Ray
 
 const MAX_BOUNCES: u32 = 5;
 
-fn pathtrace(local_id: vec3u, start_ray: Ray) -> vec3f
+fn pathtrace_naive(local_id: vec3u, start_ray: Ray) -> vec3f
 {
     var ray = start_ray;
     var weight = vec3f(1.0f);  // Multiplicative terms.
@@ -211,58 +211,60 @@ fn pathtrace(local_id: vec3u, start_ray: Ray) -> vec3f
         // Ray hit something.
 
         let mat = materials[hit.mat_idx];
+        const mat_sampler_idx: u32 = 0;  // TODO!
 
-        // TODO: Handle volume transmission.
+        let color = textureSampleLevel(textures[mat.color_tex_idx], samplers[mat_sampler_idx], hit.tex_coords, 0.0f) * mat.color;
 
-        const in_volume = false;
-        if !in_volume
+        // Set next ray's origin at point of contact.
+        ray.ori = ray.ori + ray.dir * hit.dst;
+
+        // TODO: No caustics param.
+
+        // Handle coverage.
+        if color.a < 1.0f && random_f32() >= color.a
         {
-            const mat_sampler_idx: u32 = 0;  // TODO!
-
-            let color = textureSampleLevel(textures[mat.color_tex_idx], samplers[mat_sampler_idx], hit.tex_coords, 0.0f) * mat.color;
-
-            // Set next ray's origin at point of contact.
-            ray.ori = ray.ori + ray.dir * hit.dst;
-
-            // TODO: No caustics param.
-
-            // Handle coverage.
-            if color.a < 1.0f && random_f32() >= color.a
-            {
-                op_bounce++;
-                if op_bounce > 128 { break; }
-                bounce -= 1;
-                continue;
-            }
-
-            //let emission = textureSampleLevel(textures[mat.emission_tex_idx], samplers[mat_sampler_idx], hit.tex_coords, 0.0f).rgb * mat.emission.rgb;
-            let emission = mat.emission.rgb;
-            //let roughness = textureSampleLevel(textures[mat.roughness_tex_idx], samplers[mat_sampler_idx], hit.tex_coords, 0.0f).r * mat.roughness;
-            let roughness = mat.roughness;
-
-            // Accumulate emission.
-            radiance += weight * emission;
-
-            let outgoing = -ray.dir;
-            let sample = sample_bsdf(mat.mat_type, color.rgb, hit.normal, roughness, mat.ior, outgoing);
-            weight *= sample.weight / sample.prob;
-
-            // Update volume stack. TODO
-
-            ray.dir = sample.incoming;
-            ray.inv_dir = 1.0f / ray.dir;
+            op_bounce++;
+            if op_bounce > 128 { break; }
+            bounce -= 1;
+            continue;
         }
-        else  // Volumetric rendering. TODO
+
+        let emission = textureSampleLevel(textures[mat.emission_tex_idx], samplers[mat_sampler_idx], hit.tex_coords, 0.0f).rgb * mat.emission.rgb;
+        let roughness = textureSampleLevel(textures[mat.roughness_tex_idx], samplers[mat_sampler_idx], hit.tex_coords, 0.0f).r * mat.roughness;
+        let density = select(vec3f(0.0f), -log(clamp(color.rgb, 0.0001f, 1.0f)) / mat.tr_depth, mat.mat_type == MAT_TYPE_REFRACTIVE || mat.mat_type == MAT_TYPE_VOLUMETRIC || mat.mat_type == MAT_TYPE_SUBSURFACE);
+
+        let mat_point = MaterialPoint(mat.mat_type, emission, color.rgb, roughness, mat.metallic, mat.ior, density, mat.scattering, mat.sc_anisotropy, mat.tr_depth);
+
+        // Accumulate emission.
+        radiance += weight * emission;
+
+        // Compute next direction.
+        let incoming = vec3f();
+        if (roughness != 0)
         {
-            let hit = ray_scene_intersection(local_id, ray);
-            if hit.dst == F32_MAX  // Missed.
-            {
-                radiance += sample_env_map(ray.dir) * weight;
-                break;
-            }
+            incoming = sample_bsdfcos(material, normal, outgoing, rand1f(rng), rand2f(rng));
+            if incoming == vec3f(0.0f) { break; }
 
-            // Ray hit something.
+            weight *= eval_bsdfcos(material, normal, outgoing, incoming) / sample_bsdfcos_pdf(material, normal, outgoing, incoming);
         }
+        else
+        {
+            incoming = sample_delta(material, normal, outgoing, rand1f(rng));
+            if incoming == vec3f(0.0f) { break; }
+
+            weight *= eval_delta(material, normal, outgoing, incoming) / sample_delta_pdf(material, normal, outgoing, incoming);
+        }
+
+        /*
+        let outgoing = -ray.dir;
+        let sample = sample_bsdf(mat.mat_type, color.rgb, hit.normal, roughness, mat.ior, outgoing);
+        weight *= sample.weight / sample.prob;
+        */
+
+        // Update volume stack. TODO
+
+        ray.dir = sample.incoming;
+        ray.inv_dir = 1.0f / ray.dir;
 
         // Check weight.
         if all(weight == vec3f(0.0f)) || !is_vec3f_finite(weight) { break; }
@@ -277,6 +279,20 @@ fn pathtrace(local_id: vec3u, start_ray: Ray) -> vec3f
     }
 
     return radiance;
+}
+
+struct MaterialPoint
+{
+    mat_type: u32,
+    emission: vec3f,
+    color: vec3f,
+    roughness: f32,
+    metallic: f32,
+    ior: f32,
+    density: vec3f,
+    scattering: vec3f,
+    scanisotropy: f32,
+    trdepth: f32,
 }
 
 // TODO: Just a test to see if I should restructure the code or not.
@@ -1012,6 +1028,8 @@ fn transform_point(p: vec3f, transform: mat4x4f)->vec3f
 fn transform_dir(dir: vec3f, transform: mat4x4f)->vec3f
 {
     let dir_vec4 = vec4f(dir, 0.0f);
+    // TODO: Normalize here causes bugs??
+    //return normalize((transform * dir_vec4).xyz);
     return (transform * dir_vec4).xyz;
 }
 

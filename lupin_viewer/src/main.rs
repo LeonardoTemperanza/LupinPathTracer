@@ -32,6 +32,14 @@ pub use ui::*;
 
 fn main()
 {
+    let mut compile_shaders_only = false;
+
+    let args: Vec<String> = std::env::args().collect();
+    for arg in args
+    {
+        if arg == "-compile_shaders_only" { compile_shaders_only = true; }
+    }
+
     // Initialize window
     let event_loop = EventLoop::new().unwrap();
     let window = WindowBuilder::new().with_title("Lupin Raytracer")
@@ -61,6 +69,9 @@ fn main()
     // Init rendering resources
     let shader_params = lp::build_pathtrace_shader_params(&device, false);
     let tonemap_shader_params = lp::build_tonemap_shader_params(&device);
+
+    if compile_shaders_only { return; }
+
     let scene = build_scene(&device, &queue);
     let mut output_textures = [
         device.create_texture(&wgpu::TextureDescriptor {
