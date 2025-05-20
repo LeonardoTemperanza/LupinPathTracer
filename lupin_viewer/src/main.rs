@@ -64,7 +64,7 @@ fn main()
     };
 
     let (device, queue, surface, adapter) = lp::init_default_wgpu_context(device_spec, &surface_config, &window, width, height);
-    log_backend(&adapter);
+    //log_backend(&adapter);
 
     // Init rendering resources
     let shader_params = lp::build_pathtrace_shader_params(&device, false);

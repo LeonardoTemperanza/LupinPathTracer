@@ -39,10 +39,15 @@ pub fn build_scene(device: &wgpu::Device, queue: &wgpu::Queue) -> lp::SceneDesc
     let instances = [
         lp::Instance { inv_transform: lp::mat4_inverse(xform_to_matrix(Vec3 { x: 0.0, y: 0.0, z: 0.0 }.into(), Quat::default(), Vec3::ones()).into()), mesh_idx: 0, mat_idx: 0, padding0: 0.0, padding1: 0.0 },
         lp::Instance { inv_transform: lp::mat4_inverse(xform_to_matrix(Vec3 { x: -2.0, y: 0.0, z: 0.0 }.into(), angle_axis(Vec3::RIGHT, 45.0 * 3.1415 / 180.0), Vec3::ones()).into()), mesh_idx: 0, mat_idx: 1, padding0: 0.0, padding1: 0.0 },
-        lp::Instance { inv_transform: lp::mat4_inverse(xform_to_matrix(Vec3 { x: -4.0, y: 0.0, z: 0.0 }.into(), angle_axis(Vec3::RIGHT, 90.0 * 3.1415 / 180.0), Vec3::ones()).into()), mesh_idx: 0, mat_idx: 1, padding0: 0.0, padding1: 0.0 },
+        lp::Instance { inv_transform: lp::mat4_inverse(xform_to_matrix(Vec3 { x: -2.0, y: 0.0, z: -2.0 }.into(), angle_axis(Vec3::RIGHT, 45.0 * 3.1415 / 180.0), Vec3::ones()).into()), mesh_idx: 0, mat_idx: 7, padding0: 0.0, padding1: 0.0 },
         lp::Instance { inv_transform: lp::mat4_inverse(xform_to_matrix(Vec3 { x: 2.0, y: 0.0, z: 0.0 }.into(), Quat::default(), Vec3 { x: 1.0, y: 1.0, z: 1.0 }).into()), mesh_idx: 0, mat_idx: 2, padding0: 0.0, padding1: 0.0 },
+        lp::Instance { inv_transform: lp::mat4_inverse(xform_to_matrix(Vec3 { x: 2.0, y: 0.0, z: -2.0 }.into(), Quat::default(), Vec3 { x: 1.0, y: 1.0, z: 1.0 }).into()), mesh_idx: 0, mat_idx: 6, padding0: 0.0, padding1: 0.0 },
         lp::Instance { inv_transform: lp::mat4_inverse(xform_to_matrix(Vec3 { x: 4.0, y: 0.0, z: 0.0 }.into(), Quat::default(), Vec3::ones()).into()), mesh_idx: 0, mat_idx: 3, padding0: 0.0, padding1: 0.0 },
+        lp::Instance { inv_transform: lp::mat4_inverse(xform_to_matrix(Vec3 { x: 4.0, y: 0.0, z: -2.0 }.into(), Quat::default(), Vec3::ones()).into()), mesh_idx: 0, mat_idx: 10, padding0: 0.0, padding1: 0.0 },
         lp::Instance { inv_transform: lp::mat4_inverse(xform_to_matrix(Vec3 { x: 6.0, y: 0.0, z: 0.0 }.into(), Quat::default(), Vec3::ones()).into()), mesh_idx: 0, mat_idx: 4, padding0: 0.0, padding1: 0.0 },
+        lp::Instance { inv_transform: lp::mat4_inverse(xform_to_matrix(Vec3 { x: 6.0, y: 0.0, z: -2.0 }.into(), Quat::default(), Vec3::ones()).into()), mesh_idx: 0, mat_idx: 11, padding0: 0.0, padding1: 0.0 },
+        lp::Instance { inv_transform: lp::mat4_inverse(xform_to_matrix(Vec3 { x: 8.0, y: 0.0, z: 0.0 }.into(), Quat::default(), Vec3::ones()).into()), mesh_idx: 0, mat_idx: 8, padding0: 0.0, padding1: 0.0 },
+        lp::Instance { inv_transform: lp::mat4_inverse(xform_to_matrix(Vec3 { x: 10.0, y: 0.0, z: 0.0 }.into(), Quat::default(), Vec3::ones()).into()), mesh_idx: 0, mat_idx: 9, padding0: 0.0, padding1: 0.0 },
         // Floor
         lp::Instance { inv_transform: lp::mat4_inverse(xform_to_matrix(Vec3 { x: 0.0, y: -0.01, z: 0.0 }.into(), Quat::default(), Vec3::ones() * 10.0).into()), mesh_idx: 1, mat_idx: 5, padding0: 0.0, padding1: 0.0 },
     ];
@@ -57,7 +62,7 @@ pub fn build_scene(device: &wgpu::Device, queue: &wgpu::Queue) -> lp::SceneDesc
             lp::Vec4::new(1.0, 1.0, 1.0, 1.0),  // Color
             lp::Vec4::new(0.0, 0.0, 0.0, 0.0),  // Emission
             lp::Vec4::new(0.0, 0.0, 0.0, 0.0),  // Scattering
-            0.0,                                // Roughness
+            0.01,                                // Roughness
             0.0,                                // Metallic
             1.33,                               // ior
             0.0,                                // anisotropy
@@ -68,6 +73,7 @@ pub fn build_scene(device: &wgpu::Device, queue: &wgpu::Queue) -> lp::SceneDesc
             0,                                  // Scattering tex
             0,                                  // Normal tex
         ),
+
         // 1
         lp::Material::new(
             lp::MaterialType::Glossy,           // Mat type
@@ -85,6 +91,7 @@ pub fn build_scene(device: &wgpu::Device, queue: &wgpu::Queue) -> lp::SceneDesc
             0,                                  // Scattering tex
             0,                                  // Normal tex
         ),
+
         // 2
         lp::Material::new(
             lp::MaterialType::Reflective,       // Mat type
@@ -102,6 +109,7 @@ pub fn build_scene(device: &wgpu::Device, queue: &wgpu::Queue) -> lp::SceneDesc
             0,                                  // Scattering tex
             0,                                  // Normal tex
         ),
+
         // 3
         lp::Material::new(
             lp::MaterialType::Transparent,      // Mat type
@@ -119,6 +127,7 @@ pub fn build_scene(device: &wgpu::Device, queue: &wgpu::Queue) -> lp::SceneDesc
             0,                                  // Scattering tex
             0,                                  // Normal tex
         ),
+
         // 4
         lp::Material::new(
             lp::MaterialType::Refractive,       // Mat type
@@ -136,6 +145,7 @@ pub fn build_scene(device: &wgpu::Device, queue: &wgpu::Queue) -> lp::SceneDesc
             0,                                  // Scattering tex
             0,                                  // Normal tex
         ),
+
         // White matte
         // 5
         lp::Material::new(
@@ -143,7 +153,7 @@ pub fn build_scene(device: &wgpu::Device, queue: &wgpu::Queue) -> lp::SceneDesc
             lp::Vec4::new(1.0, 1.0, 1.0, 1.0),  // Color
             lp::Vec4::new(0.0, 0.0, 0.0, 0.0),  // Emission
             lp::Vec4::new(0.0, 0.0, 0.0, 0.0),  // Scattering
-            0.0,                                // Roughness
+            0.01,                                // Roughness
             0.0,                                // Metallic
             1.5,                                // ior
             0.0,                                // anisotropy
@@ -154,6 +164,121 @@ pub fn build_scene(device: &wgpu::Device, queue: &wgpu::Queue) -> lp::SceneDesc
             0,                                  // Scattering tex
             0,                                  // Normal tex
         ),
+
+        // Rough reflective
+        // 6
+        lp::Material::new(
+            lp::MaterialType::Reflective,       // Mat type
+            lp::Vec4::new(0.9, 0.2, 0.2, 1.0),  // Color
+            lp::Vec4::new(0.0, 0.0, 0.0, 0.0),  // Emission
+            lp::Vec4::new(0.0, 0.0, 0.0, 0.0),  // Scattering
+            0.2,                                // Roughness
+            0.0,                                // Metallic
+            1.5,                                // ior
+            0.0,                                // anisotropy
+            0.0,                                // depth
+            0,                                  // Color tex
+            0,                                  // Emission tex
+            0,                                  // Roughness tex
+            0,                                  // Scattering tex
+            0,                                  // Normal tex
+        ),
+
+        // Rough glossy
+        // 7
+        lp::Material::new(
+            lp::MaterialType::Glossy,           // Mat type
+            lp::Vec4::new(0.9, 0.2, 0.2, 1.0),  // Color
+            lp::Vec4::new(0.0, 0.0, 0.0, 0.0),  // Emission
+            lp::Vec4::new(0.0, 0.0, 0.0, 0.0),  // Scattering
+            0.05,                               // Roughness
+            0.0,                                // Metallic
+            1.33,                               // ior
+            0.0,                                // anisotropy
+            0.0,                                // depth
+            0,                                  // Color tex
+            0,                                  // Emission tex
+            0,                                  // Roughness tex
+            0,                                  // Scattering tex
+            0,                                  // Normal tex
+        ),
+
+        // Rough glossy
+        // 8
+        lp::Material::new(
+            lp::MaterialType::Glossy,           // Mat type
+            lp::Vec4::new(0.9, 0.2, 0.2, 1.0),  // Color
+            lp::Vec4::new(0.0, 0.0, 0.0, 0.0),  // Emission
+            lp::Vec4::new(0.0, 0.0, 0.0, 0.0),  // Scattering
+            0.1,                                // Roughness
+            0.0,                                // Metallic
+            1.33,                               // ior
+            0.0,                                // anisotropy
+            0.0,                                // depth
+            0,                                  // Color tex
+            0,                                  // Emission tex
+            0,                                  // Roughness tex
+            0,                                  // Scattering tex
+            0,                                  // Normal tex
+        ),
+
+        // Gltf 1
+        // 9
+        lp::Material::new(
+            lp::MaterialType::GltfPbr,           // Mat type
+            lp::Vec4::new(0.9, 0.2, 0.2, 1.0),  // Color
+            lp::Vec4::new(0.0, 0.0, 0.0, 0.0),  // Emission
+            lp::Vec4::new(0.0, 0.0, 0.0, 0.0),  // Scattering
+            0.1,                                // Roughness
+            0.0,                                // Metallic
+            1.33,                               // ior
+            0.0,                                // anisotropy
+            0.0,                                // depth
+            0,                                  // Color tex
+            0,                                  // Emission tex
+            0,                                  // Roughness tex
+            0,                                  // Scattering tex
+            0,                                  // Normal tex
+        ),
+
+        // Rough transparent
+        // 10
+        lp::Material::new(
+            lp::MaterialType::Transparent,      // Mat type
+            lp::Vec4::new(0.1, 0.1, 1.0, 1.0),  // Color
+            lp::Vec4::new(0.0, 0.0, 0.0, 0.0),  // Emission
+            lp::Vec4::new(0.0, 0.0, 0.0, 0.0),  // Scattering
+            0.05,                               // Roughness
+            0.0,                                // Metallic
+            1.33,                               // ior
+            0.0,                                // anisotropy
+            0.0,                                // depth
+            0,                                  // Color tex
+            0,                                  // Emission tex
+            0,                                  // Roughness tex
+            0,                                  // Scattering tex
+            0,                                  // Normal tex
+        ),
+
+        // Rough refractive
+        // 11
+        lp::Material::new(
+            lp::MaterialType::Refractive,       // Mat type
+            lp::Vec4::new(0.1, 0.1, 1.0, 1.0),  // Color
+            lp::Vec4::new(0.0, 0.0, 0.0, 0.0),  // Emission
+            lp::Vec4::new(0.0, 0.0, 0.0, 0.0),  // Scattering
+            0.05,                                // Roughness
+            0.0,                                // Metallic
+            1.33,                               // ior
+            0.0,                                // anisotropy
+            0.0,                                // depth
+            0,                                  // Color tex
+            0,                                  // Emission tex
+            0,                                  // Roughness tex
+            0,                                  // Scattering tex
+            0,                                  // Normal tex
+        ),
+
     ];
 
     let materials_buf = lp::upload_storage_buffer(&device, &queue, unsafe { to_u8_slice(&materials) });
