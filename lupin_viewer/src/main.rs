@@ -164,6 +164,11 @@ fn main()
                     prev_cam_transform = camera_transform;
 
                     let frame = surface.get_current_texture().unwrap();
+
+                    lp::raycast_albedo(&device, &queue, &scene, &frame.texture,
+                                       &shader_params, camera_transform.into());
+
+                    /*
                     if accum_counter < 2000
                     {
                         let accum_params = lp::AccumulationParams {
@@ -176,7 +181,7 @@ fn main()
 
                     let tonemap_params = lp::TonemapParams {
                         operator: lp::TonemapOperator::Aces,
-                        exposure: 2.0
+                        exposure: 0.0
                     };
                     lp::apply_tonemapping(&device, &queue, &tonemap_shader_params,
                                           &output_textures[output_tex_front], &frame.texture, &tonemap_params);
@@ -184,6 +189,8 @@ fn main()
 
                     //lp::convert_to_ldr_no_tonemap(&device, &queue, &tonemap_shader_params,
                     //                              &hdr_texture, &frame.texture);
+
+                    */
 
                     frame.present();
 

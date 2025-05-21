@@ -22,8 +22,8 @@
 
 // Group 2: Render targets
 @group(2) @binding(0) var output_texture: texture_storage_2d<rgba16float, write>;
-@group(2) @binding(1) var output_albedo: texture_storage_2d<rgba8unorm, write>;
-@group(2) @binding(2) var output_normals: texture_storage_2d<rgba8unorm, write>;
+@group(2) @binding(1) var output_albedo: texture_storage_2d<bgra8unorm, write>;
+@group(2) @binding(2) var output_normals: texture_storage_2d<bgra8unorm, write>;
 
 // We need these wrappers, or we get a
 // compilation error, for some reason...
@@ -158,11 +158,15 @@ fn gbuffer_albedo_main(@builtin(local_invocation_id) local_id: vec3u, @builtin(g
     let hit = ray_scene_intersection(local_id, camera_ray);
     if hit.dst != F32_MAX
     {
-        color = hit.normal;
+        let mat = materials[hit.mat_idx];
+        const mat_sampler_idx: u32 = 0;  // TODO!
+
+        let mat_color = textureSampleLevel(textures[mat.color_tex_idx], samplers[mat_sampler_idx], hit.tex_coords, 0.0f) * mat.color;
+        color = mat_color.rgb;
     }
 
     if global_id.x < output_dim.x && global_id.y < output_dim.y {
-        textureStore(output_texture, global_id.xy, vec4f(color, 1.0f));
+        textureStore(output_albedo, global_id.xy, vec4f(color, 1.0f));
     }
 }
 
@@ -182,7 +186,7 @@ fn gbuffer_normals_main(@builtin(local_invocation_id) local_id: vec3u, @builtin(
     }
 
     if global_id.x < output_dim.x && global_id.y < output_dim.y {
-        textureStore(output_texture, global_id.xy, vec4f(color, 1.0f));
+        textureStore(output_normals, global_id.xy, vec4f(color, 1.0f));
     }
 }
 
