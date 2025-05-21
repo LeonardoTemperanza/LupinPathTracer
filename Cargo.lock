@@ -1165,7 +1165,6 @@ name = "lupin"
 version = "0.1.0"
 dependencies = [
  "wgpu",
- "winapi",
 ]
 
 [[package]]

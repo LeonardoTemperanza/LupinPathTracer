@@ -176,7 +176,7 @@ fn main()
 
                     let tonemap_params = lp::TonemapParams {
                         operator: lp::TonemapOperator::Aces,
-                        exposure: 0.0
+                        exposure: 2.0
                     };
                     lp::apply_tonemapping(&device, &queue, &tonemap_shader_params,
                                           &output_textures[output_tex_front], &frame.texture, &tonemap_params);

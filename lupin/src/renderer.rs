@@ -194,7 +194,10 @@ pub struct PathtraceShaderParams
 {
     pub pipeline: wgpu::ComputePipeline,
     pub debug_pipeline: wgpu::ComputePipeline,
-    pub dummy_texture: wgpu::Texture,
+    pub gbuffer_albedo_pipeline: wgpu::ComputePipeline,
+    pub gbuffer_normals_pipeline: wgpu::ComputePipeline,
+    pub dummy_prev_frame_texture: wgpu::Texture,
+    pub dummy_gbuffer_texture: wgpu::Texture,
 }
 
 pub fn build_pathtrace_shader_params(device: &wgpu::Device, with_runtime_checks: bool) -> PathtraceShaderParams
@@ -370,6 +373,26 @@ pub fn build_pathtrace_shader_params(device: &wgpu::Device, with_runtime_checks:
                 },
                 count: None
             },
+            wgpu::BindGroupLayoutEntry {
+                binding: 1,
+                visibility: wgpu::ShaderStages::COMPUTE,
+                ty: wgpu::BindingType::StorageTexture {
+                    access: wgpu::StorageTextureAccess::WriteOnly,
+                    format: wgpu::TextureFormat::Rgba8Unorm,
+                    view_dimension: wgpu::TextureViewDimension::D2
+                },
+                count: None
+            },
+            wgpu::BindGroupLayoutEntry {
+                binding: 2,
+                visibility: wgpu::ShaderStages::COMPUTE,
+                ty: wgpu::BindingType::StorageTexture {
+                    access: wgpu::StorageTextureAccess::WriteOnly,
+                    format: wgpu::TextureFormat::Rgba8Unorm,
+                    view_dimension: wgpu::TextureViewDimension::D2
+                },
+                count: None
+            },
         ]
     });
 
@@ -387,7 +410,7 @@ pub fn build_pathtrace_shader_params(device: &wgpu::Device, with_runtime_checks:
         label: Some("Lupin Pathtracer Pipeline"),
         layout: Some(&pipeline_layout),
         module: &shader,
-        entry_point: Some("main"),
+        entry_point: Some("pathtrace_main"),
         compilation_options: Default::default(),
         cache: None,
     });
@@ -396,7 +419,25 @@ pub fn build_pathtrace_shader_params(device: &wgpu::Device, with_runtime_checks:
         label: Some("Lupin Pathtracer Debug Pipeline"),
         layout: Some(&pipeline_layout),
         module: &shader,
-        entry_point: Some("main"),
+        entry_point: Some("pathtrace_main"),
+        compilation_options: Default::default(),
+        cache: None,
+    });
+
+    let gbuffer_albedo_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+        label: Some("Lupin Pathtracer GBuffer Albedo Pipeline"),
+        layout: Some(&pipeline_layout),
+        module: &shader,
+        entry_point: Some("gbuffer_albedo_main"),
+        compilation_options: Default::default(),
+        cache: None,
+    });
+
+    let gbuffer_normals_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+        label: Some("Lupin Pathtracer GBuffer Normals Pipeline"),
+        layout: Some(&pipeline_layout),
+        module: &shader,
+        entry_point: Some("gbuffer_normals_main"),
         compilation_options: Default::default(),
         cache: None,
     });
@@ -408,21 +449,36 @@ pub fn build_pathtrace_shader_params(device: &wgpu::Device, with_runtime_checks:
     };
 
     // TODO: Make this a 1x1 white texture instead of garbage data.
-    let dummy_texture = device.create_texture(&wgpu::TextureDescriptor {
-        label: Some("Dummy Texture"),
+    let dummy_prev_frame_texture = device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("Dummy Sample Texture"),
         size,
         mip_level_count: 1,
         sample_count: 1,
         dimension: wgpu::TextureDimension::D2,
-        format: wgpu::TextureFormat::Rgba16Float, // Match your main texture format
+        format: wgpu::TextureFormat::Rgba16Float,
         usage: wgpu::TextureUsages::TEXTURE_BINDING,
+        view_formats: &[],
+    });
+
+    // TODO: Make this a 1x1 white texture instead of garbage data.
+    let dummy_gbuffer_texture = device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("Dummy Storage Texture"),
+        size,
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: wgpu::TextureFormat::Rgba8Unorm,
+        usage: wgpu::TextureUsages::STORAGE_BINDING,
         view_formats: &[],
     });
 
     return PathtraceShaderParams {
         pipeline,
         debug_pipeline,
-        dummy_texture,
+        gbuffer_albedo_pipeline,
+        gbuffer_normals_pipeline,
+        dummy_prev_frame_texture,
+        dummy_gbuffer_texture,
     };
 }
 
@@ -491,7 +547,7 @@ pub fn pathtrace_scene(device: &wgpu::Device, queue: &wgpu::Queue, scene: &Scene
     });
     let prev_frame_view = match accum_params.prev_frame
     {
-        None      => shader_params.dummy_texture.create_view(&Default::default()),
+        None      => shader_params.dummy_prev_frame_texture.create_view(&Default::default()),
         Some(tex) => tex.create_view(&Default::default()),
     };
 
@@ -505,13 +561,17 @@ pub fn pathtrace_scene(device: &wgpu::Device, queue: &wgpu::Queue, scene: &Scene
         ]
     });
 
-    let render_target_view = render_target.create_view(&Default::default());
+    let render_target_view  = render_target.create_view(&Default::default());
+    let gbuffer_albedo_view = shader_params.dummy_gbuffer_texture.create_view(&Default::default());
+    let gbuffer_normals_view = shader_params.dummy_gbuffer_texture.create_view(&Default::default());
 
     let render_target_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
         label: None,
         layout: &shader_params.pipeline.get_bind_group_layout(2),
         entries: &[
             wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(&render_target_view) },
+            wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::TextureView(&gbuffer_albedo_view) },
+            wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::TextureView(&gbuffer_normals_view) },
         ]
     });
 
@@ -1259,6 +1319,7 @@ pub fn apply_tonemapping(device: &wgpu::Device, queue: &wgpu::Queue, shader_para
     }
 
     let mut params = TonemapShaderParams::default();
+    params.exposure = tonemap_params.exposure;
 
     let pipeline = match tonemap_params.operator
     {

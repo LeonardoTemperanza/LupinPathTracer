@@ -6,9 +6,4 @@ edition = "2021"
 
 [dependencies]
 wgpu = "24.0.1"
-
-# Shader debugging dependencies
-winapi = { version = "0.3", features = ["winuser"], optional = true }
-
-[features]
-fancy-shader-debugging = ["dep:winapi"]
+#oidn = "2.3.2"

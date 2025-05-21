@@ -80,7 +80,7 @@ pub fn build_scene(device: &wgpu::Device, queue: &wgpu::Queue) -> lp::SceneDesc
             lp::Vec4::new(0.9, 0.2, 0.2, 1.0),  // Color
             lp::Vec4::new(0.0, 0.0, 0.0, 0.0),  // Emission
             lp::Vec4::new(0.0, 0.0, 0.0, 0.0),  // Scattering
-            0.0,                                // Roughness
+            0.00001,                                // Roughness
             0.0,                                // Metallic
             1.33,                               // ior
             0.0,                                // anisotropy
@@ -248,7 +248,7 @@ pub fn build_scene(device: &wgpu::Device, queue: &wgpu::Queue) -> lp::SceneDesc
             lp::Vec4::new(0.1, 0.1, 1.0, 1.0),  // Color
             lp::Vec4::new(0.0, 0.0, 0.0, 0.0),  // Emission
             lp::Vec4::new(0.0, 0.0, 0.0, 0.0),  // Scattering
-            0.05,                               // Roughness
+            0.008,                               // Roughness
             0.0,                                // Metallic
             1.33,                               // ior
             0.0,                                // anisotropy
