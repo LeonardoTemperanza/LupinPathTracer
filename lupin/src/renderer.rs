@@ -2,6 +2,8 @@
 use crate::base::*;
 use crate::wgpu_utils::*;
 
+use wgpu::util::DeviceExt;  // For some extra device traits.
+
 pub static DEFAULT_PATHTRACER_SRC: &str = include_str!("shaders/pathtracer.wgsl");
 pub static TONEMAPPING_SRC: &str = include_str!("shaders/tonemapping.wgsl");
 
@@ -197,7 +199,8 @@ pub struct PathtraceShaderParams
     pub gbuffer_albedo_pipeline: wgpu::ComputePipeline,
     pub gbuffer_normals_pipeline: wgpu::ComputePipeline,
     pub dummy_prev_frame_texture: wgpu::Texture,
-    pub dummy_gbuffer_texture: wgpu::Texture,
+    pub dummy_albedo_texture: wgpu::Texture,
+    pub dummy_normals_texture: wgpu::Texture,
     pub dummy_output_texture: wgpu::Texture,
 }
 
@@ -379,7 +382,7 @@ pub fn build_pathtrace_shader_params(device: &wgpu::Device, with_runtime_checks:
                 visibility: wgpu::ShaderStages::COMPUTE,
                 ty: wgpu::BindingType::StorageTexture {
                     access: wgpu::StorageTextureAccess::WriteOnly,
-                    format: wgpu::TextureFormat::Bgra8Unorm,
+                    format: wgpu::TextureFormat::Rgba8Unorm,
                     view_dimension: wgpu::TextureViewDimension::D2
                 },
                 count: None
@@ -389,7 +392,7 @@ pub fn build_pathtrace_shader_params(device: &wgpu::Device, with_runtime_checks:
                 visibility: wgpu::ShaderStages::COMPUTE,
                 ty: wgpu::BindingType::StorageTexture {
                     access: wgpu::StorageTextureAccess::WriteOnly,
-                    format: wgpu::TextureFormat::Bgra8Unorm,
+                    format: wgpu::TextureFormat::Rgba8Snorm,
                     view_dimension: wgpu::TextureViewDimension::D2
                 },
                 count: None
@@ -474,13 +477,25 @@ pub fn build_pathtrace_shader_params(device: &wgpu::Device, with_runtime_checks:
     });
 
     // TODO: Make this a 1x1 white texture instead of garbage data.
-    let dummy_gbuffer_texture = device.create_texture(&wgpu::TextureDescriptor {
+    let dummy_albedo_texture = device.create_texture(&wgpu::TextureDescriptor {
         label: Some("Dummy Storage Texture"),
         size,
         mip_level_count: 1,
         sample_count: 1,
         dimension: wgpu::TextureDimension::D2,
-        format: wgpu::TextureFormat::Bgra8Unorm,
+        format: wgpu::TextureFormat::Rgba8Unorm,
+        usage: wgpu::TextureUsages::STORAGE_BINDING,
+        view_formats: &[],
+    });
+
+    // TODO: Make this a 1x1 white texture instead of garbage data.
+    let dummy_normals_texture = device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("Dummy Storage Texture"),
+        size,
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: wgpu::TextureFormat::Rgba8Snorm,
         usage: wgpu::TextureUsages::STORAGE_BINDING,
         view_formats: &[],
     });
@@ -492,7 +507,8 @@ pub fn build_pathtrace_shader_params(device: &wgpu::Device, with_runtime_checks:
         gbuffer_normals_pipeline,
         dummy_prev_frame_texture,
         dummy_output_texture,
-        dummy_gbuffer_texture,
+        dummy_albedo_texture,
+        dummy_normals_texture,
     };
 }
 
@@ -504,95 +520,13 @@ pub struct AccumulationParams<'a>
 
 pub fn pathtrace_scene(device: &wgpu::Device, queue: &wgpu::Queue, scene: &SceneDesc, render_target: &wgpu::Texture, shader_params: &PathtraceShaderParams, accum_params: &AccumulationParams, camera_transform: Mat4)
 {
-    use wgpu::util::DeviceExt;  // For some extra device traits.
-
     // TODO: Check format and usage of render target params and others.
 
-    // TODO: Move this "binding" functionality into a separate function because it's duplicated quite often.
-
-    // Convert AoS to SoA.
-    let mut verts_pos = Vec::<&wgpu::Buffer>::with_capacity(scene.meshes.len());
-    let mut verts = Vec::<&wgpu::Buffer>::with_capacity(scene.meshes.len());
-    let mut indices = Vec::<&wgpu::Buffer>::with_capacity(scene.meshes.len());
-    let mut bvh_nodes = Vec::<&wgpu::Buffer>::with_capacity(scene.meshes.len());
-    for mesh in &scene.meshes
-    {
-        verts_pos.push(&mesh.verts_pos);
-        verts.push(&mesh.verts);
-        indices.push(&mesh.indices);
-        bvh_nodes.push(&mesh.bvh_nodes);
-    }
-
-    use crate::wgpu_utils::*;
-    let verts_pos_array = array_of_buffer_bindings_ref_resource(&verts_pos);
-    let verts_array     = array_of_buffer_bindings_ref_resource(&verts);
-    let indices_array   = array_of_buffer_bindings_ref_resource(&indices);
-    let bvh_nodes_array = array_of_buffer_bindings_ref_resource(&bvh_nodes);
-    let texture_views   = array_of_texture_views(&scene.textures);
-    let textures_array  = array_of_texture_bindings_resource(&texture_views);
-    let samplers_array  = array_of_sampler_bindings_resource(&scene.samplers);
-    let env_map_view    = scene.env_map.create_view(&Default::default());
-
-    let scene_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-        label: None,
-        layout: &shader_params.pipeline.get_bind_group_layout(0),
-        entries: &[
-            wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::BufferArray(verts_pos_array.as_slice()) },
-            wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::BufferArray(verts_array.as_slice())     },
-            wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::BufferArray(indices_array.as_slice())   },
-            wgpu::BindGroupEntry { binding: 3, resource: wgpu::BindingResource::BufferArray(bvh_nodes_array.as_slice()) },
-            wgpu::BindGroupEntry { binding: 4, resource: buffer_resource(&scene.tlas_nodes) },
-            wgpu::BindGroupEntry { binding: 5, resource: buffer_resource(&scene.instances) },
-            wgpu::BindGroupEntry { binding: 6, resource: buffer_resource(&scene.materials) },
-            wgpu::BindGroupEntry { binding: 7, resource: wgpu::BindingResource::TextureViewArray(textures_array.as_slice()) },
-            wgpu::BindGroupEntry { binding: 8, resource: wgpu::BindingResource::SamplerArray(samplers_array.as_slice()) },
-            wgpu::BindGroupEntry { binding: 9, resource: wgpu::BindingResource::TextureView(&env_map_view) },
-            wgpu::BindGroupEntry { binding: 10, resource: wgpu::BindingResource::Sampler(&scene.env_map_sampler) },
-        ]
-    });
-
-    let camera_transform_uniform = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: Some("Camera Buffer"),
-        contents: to_u8_slice(&[camera_transform]),
-        usage: wgpu::BufferUsages::UNIFORM,
-    });
-    let accum_counter_uniform = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: Some("Frame ID Buffer"),
-        contents: to_u8_slice(&[accum_params.accum_counter]),
-        usage: wgpu::BufferUsages::UNIFORM,
-    });
-    let prev_frame_view = match accum_params.prev_frame
-    {
-        None      => shader_params.dummy_prev_frame_texture.create_view(&Default::default()),
-        Some(tex) => tex.create_view(&Default::default()),
-    };
-
-    let settings_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-        label: None,
-        layout: &shader_params.pipeline.get_bind_group_layout(1),
-        entries: &[
-            wgpu::BindGroupEntry { binding: 0, resource: buffer_resource(&camera_transform_uniform) },
-            wgpu::BindGroupEntry { binding: 1, resource: buffer_resource(&accum_counter_uniform) },
-            wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::TextureView(&prev_frame_view) }
-        ]
-    });
-
-    let render_target_view  = render_target.create_view(&Default::default());
-    let gbuffer_albedo_view = shader_params.dummy_gbuffer_texture.create_view(&Default::default());
-    let gbuffer_normals_view = shader_params.dummy_gbuffer_texture.create_view(&Default::default());
-
-    let render_target_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-        label: None,
-        layout: &shader_params.pipeline.get_bind_group_layout(2),
-        entries: &[
-            wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(&render_target_view) },
-            wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::TextureView(&gbuffer_albedo_view) },
-            wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::TextureView(&gbuffer_normals_view) },
-        ]
-    });
+    let scene_bindgroup = create_pathtracer_scene_bindgroup(device, queue, shader_params, scene);
+    let settings_bindgroup = create_pathtracer_settings_bindgroup(device, queue, shader_params, Some(accum_params), camera_transform);
+    let output_bindgroup = create_pathtracer_output_bindgroup(device, queue, shader_params, Some(render_target), None, None);
 
     let mut encoder = device.create_command_encoder(&Default::default());
-
     {
         let mut compute_pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
             label: None,
@@ -600,9 +534,9 @@ pub fn pathtrace_scene(device: &wgpu::Device, queue: &wgpu::Queue, scene: &Scene
         });
 
         compute_pass.set_pipeline(&shader_params.pipeline);
-        compute_pass.set_bind_group(0, &scene_bind_group, &[]);
-        compute_pass.set_bind_group(1, &settings_bind_group, &[]);
-        compute_pass.set_bind_group(2, &render_target_bind_group, &[]);
+        compute_pass.set_bind_group(0, &scene_bindgroup, &[]);
+        compute_pass.set_bind_group(1, &settings_bindgroup, &[]);
+        compute_pass.set_bind_group(2, &output_bindgroup, &[]);
         // NOTE: This is tied to the corresponding value in the shader
         const WORKGROUP_SIZE_X: u32 = 8;
         const WORKGROUP_SIZE_Y: u32 = 8;
@@ -646,10 +580,12 @@ struct DebugInput
     level: i32,
 }
 
+/*
 pub fn pathtrace_scene_debug(device: &wgpu::Device, queue: &wgpu::Queue, scene: &SceneDesc, render_target: &wgpu::Texture, shader_params: &PathtraceShaderParams, camera_transform: Mat4)
 {
 
 }
+*/
 
 pub fn raycast_gbuffers(device: &wgpu::Device, queue: &wgpu::Queue, scene: &SceneDesc, albedo_target: &wgpu::Texture, normals_target: &wgpu::Texture, shader_params: &PathtraceShaderParams, camera_transform: Mat4)
 {
@@ -657,90 +593,13 @@ pub fn raycast_gbuffers(device: &wgpu::Device, queue: &wgpu::Queue, scene: &Scen
     raycast_normals(device, queue, scene, normals_target, shader_params, camera_transform);
 }
 
-pub fn raycast_albedo(device: &wgpu::Device, queue: &wgpu::Queue, scene: &SceneDesc, render_target: &wgpu::Texture, shader_params: &PathtraceShaderParams, camera_transform: Mat4)
+pub fn raycast_albedo(device: &wgpu::Device, queue: &wgpu::Queue, scene: &SceneDesc, albedo_target: &wgpu::Texture, shader_params: &PathtraceShaderParams, camera_transform: Mat4)
 {
-    use wgpu::util::DeviceExt;  // For some extra device traits.
-
     // TODO: Check format and usage of render target params and others.
 
-    // TODO: Move this "binding" functionality into a separate function because it's duplicated quite often.
-
-    // Convert AoS to SoA.
-    let mut verts_pos = Vec::<&wgpu::Buffer>::with_capacity(scene.meshes.len());
-    let mut verts = Vec::<&wgpu::Buffer>::with_capacity(scene.meshes.len());
-    let mut indices = Vec::<&wgpu::Buffer>::with_capacity(scene.meshes.len());
-    let mut bvh_nodes = Vec::<&wgpu::Buffer>::with_capacity(scene.meshes.len());
-    for mesh in &scene.meshes
-    {
-        verts_pos.push(&mesh.verts_pos);
-        verts.push(&mesh.verts);
-        indices.push(&mesh.indices);
-        bvh_nodes.push(&mesh.bvh_nodes);
-    }
-
-    use crate::wgpu_utils::*;
-    let verts_pos_array = array_of_buffer_bindings_ref_resource(&verts_pos);
-    let verts_array     = array_of_buffer_bindings_ref_resource(&verts);
-    let indices_array   = array_of_buffer_bindings_ref_resource(&indices);
-    let bvh_nodes_array = array_of_buffer_bindings_ref_resource(&bvh_nodes);
-    let texture_views   = array_of_texture_views(&scene.textures);
-    let textures_array  = array_of_texture_bindings_resource(&texture_views);
-    let samplers_array  = array_of_sampler_bindings_resource(&scene.samplers);
-    let env_map_view    = scene.env_map.create_view(&Default::default());
-
-    let scene_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-        label: None,
-        layout: &shader_params.pipeline.get_bind_group_layout(0),
-        entries: &[
-            wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::BufferArray(verts_pos_array.as_slice()) },
-            wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::BufferArray(verts_array.as_slice())     },
-            wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::BufferArray(indices_array.as_slice())   },
-            wgpu::BindGroupEntry { binding: 3, resource: wgpu::BindingResource::BufferArray(bvh_nodes_array.as_slice()) },
-            wgpu::BindGroupEntry { binding: 4, resource: buffer_resource(&scene.tlas_nodes) },
-            wgpu::BindGroupEntry { binding: 5, resource: buffer_resource(&scene.instances) },
-            wgpu::BindGroupEntry { binding: 6, resource: buffer_resource(&scene.materials) },
-            wgpu::BindGroupEntry { binding: 7, resource: wgpu::BindingResource::TextureViewArray(textures_array.as_slice()) },
-            wgpu::BindGroupEntry { binding: 8, resource: wgpu::BindingResource::SamplerArray(samplers_array.as_slice()) },
-            wgpu::BindGroupEntry { binding: 9, resource: wgpu::BindingResource::TextureView(&env_map_view) },
-            wgpu::BindGroupEntry { binding: 10, resource: wgpu::BindingResource::Sampler(&scene.env_map_sampler) },
-        ]
-    });
-
-    let camera_transform_uniform = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: Some("Camera Buffer"),
-        contents: to_u8_slice(&[camera_transform]),
-        usage: wgpu::BufferUsages::UNIFORM,
-    });
-    let accum_counter_uniform = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: Some("Frame ID Buffer"),
-        contents: &[0],
-        usage: wgpu::BufferUsages::UNIFORM,
-    });
-    let prev_frame_view = shader_params.dummy_prev_frame_texture.create_view(&Default::default());
-
-    let settings_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-        label: None,
-        layout: &shader_params.pipeline.get_bind_group_layout(1),
-        entries: &[
-            wgpu::BindGroupEntry { binding: 0, resource: buffer_resource(&camera_transform_uniform) },
-            wgpu::BindGroupEntry { binding: 1, resource: buffer_resource(&accum_counter_uniform) },
-            wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::TextureView(&prev_frame_view) }
-        ]
-    });
-
-    let render_target_view  = shader_params.dummy_output_texture.create_view(&Default::default());
-    let gbuffer_albedo_view = render_target.create_view(&Default::default());
-    let gbuffer_normals_view = shader_params.dummy_gbuffer_texture.create_view(&Default::default());
-
-    let render_target_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-        label: None,
-        layout: &shader_params.pipeline.get_bind_group_layout(2),
-        entries: &[
-            wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(&render_target_view) },
-            wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::TextureView(&gbuffer_albedo_view) },
-            wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::TextureView(&gbuffer_normals_view) },
-        ]
-    });
+    let scene_bindgroup = create_pathtracer_scene_bindgroup(device, queue, shader_params, scene);
+    let settings_bindgroup = create_pathtracer_settings_bindgroup(device, queue, shader_params, None, camera_transform);
+    let output_bindgroup = create_pathtracer_output_bindgroup(device, queue, shader_params, None, Some(albedo_target), None);
 
     let mut encoder = device.create_command_encoder(&Default::default());
 
@@ -750,24 +609,48 @@ pub fn raycast_albedo(device: &wgpu::Device, queue: &wgpu::Queue, scene: &SceneD
             timestamp_writes: None
         });
 
-        compute_pass.set_pipeline(&shader_params.pipeline);
-        compute_pass.set_bind_group(0, &scene_bind_group, &[]);
-        compute_pass.set_bind_group(1, &settings_bind_group, &[]);
-        compute_pass.set_bind_group(2, &render_target_bind_group, &[]);
+        compute_pass.set_pipeline(&shader_params.gbuffer_albedo_pipeline);
+        compute_pass.set_bind_group(0, &scene_bindgroup, &[]);
+        compute_pass.set_bind_group(1, &settings_bindgroup, &[]);
+        compute_pass.set_bind_group(2, &output_bindgroup, &[]);
         // NOTE: This is tied to the corresponding value in the shader
         const WORKGROUP_SIZE_X: u32 = 8;
         const WORKGROUP_SIZE_Y: u32 = 8;
-        let num_workers_x = (render_target.width() + WORKGROUP_SIZE_X - 1) / WORKGROUP_SIZE_X;
-        let num_workers_y = (render_target.height() + WORKGROUP_SIZE_Y - 1) / WORKGROUP_SIZE_Y;
+        let num_workers_x = (albedo_target.width() + WORKGROUP_SIZE_X - 1) / WORKGROUP_SIZE_X;
+        let num_workers_y = (albedo_target.height() + WORKGROUP_SIZE_Y - 1) / WORKGROUP_SIZE_Y;
         compute_pass.dispatch_workgroups(num_workers_x, num_workers_y, 1);
     }
 
     queue.submit(Some(encoder.finish()));
 }
 
-pub fn raycast_normals(device: &wgpu::Device, queue: &wgpu::Queue, scene: &SceneDesc, render_target: &wgpu::Texture, shader_params: &PathtraceShaderParams, camera_transform: Mat4)
+pub fn raycast_normals(device: &wgpu::Device, queue: &wgpu::Queue, scene: &SceneDesc, normals_target: &wgpu::Texture, shader_params: &PathtraceShaderParams, camera_transform: Mat4)
 {
+    let scene_bindgroup = create_pathtracer_scene_bindgroup(device, queue, shader_params, scene);
+    let settings_bindgroup = create_pathtracer_settings_bindgroup(device, queue, shader_params, None, camera_transform);
+    let output_bindgroup = create_pathtracer_output_bindgroup(device, queue, shader_params, None, None, Some(normals_target));
 
+    let mut encoder = device.create_command_encoder(&Default::default());
+
+    {
+        let mut compute_pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+            label: None,
+            timestamp_writes: None
+        });
+
+        compute_pass.set_pipeline(&shader_params.gbuffer_normals_pipeline);
+        compute_pass.set_bind_group(0, &scene_bindgroup, &[]);
+        compute_pass.set_bind_group(1, &settings_bindgroup, &[]);
+        compute_pass.set_bind_group(2, &output_bindgroup, &[]);
+        // NOTE: This is tied to the corresponding value in the shader
+        const WORKGROUP_SIZE_X: u32 = 8;
+        const WORKGROUP_SIZE_Y: u32 = 8;
+        let num_workers_x = (normals_target.width() + WORKGROUP_SIZE_X - 1) / WORKGROUP_SIZE_X;
+        let num_workers_y = (normals_target.height() + WORKGROUP_SIZE_Y - 1) / WORKGROUP_SIZE_Y;
+        compute_pass.dispatch_workgroups(num_workers_x, num_workers_y, 1);
+    }
+
+    queue.submit(Some(encoder.finish()));
 }
 
 ////////
@@ -1401,7 +1284,6 @@ pub fn apply_tonemapping(device: &wgpu::Device, queue: &wgpu::Queue, shader_para
         }
     };
 
-    use wgpu::util::DeviceExt;
     let params_uniform = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some("Camera Buffer"),
         contents: to_u8_slice(&[params]),
@@ -1462,7 +1344,6 @@ pub fn convert_to_ldr_no_tonemap(device: &wgpu::Device, queue: &wgpu::Queue, sha
 
     let params = TonemapShaderParams::default();
 
-    use wgpu::util::DeviceExt;
     let params_uniform = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: None,
         contents: to_u8_slice(&[params]),
@@ -1511,7 +1392,6 @@ fn buffer_resource(buffer: &wgpu::Buffer) -> wgpu::BindingResource
 {
     return wgpu::BindingResource::Buffer(wgpu::BufferBinding { buffer: buffer, offset: 0, size: None });
 }
-
 
 fn array_of_buffer_bindings_resource(buffers: &Vec<wgpu::Buffer>) -> Vec<wgpu::BufferBinding>
 {
@@ -1573,4 +1453,130 @@ fn array_of_sampler_bindings_resource<'a>(samplers: &'a Vec<wgpu::Sampler>) -> V
     }
 
     return bindings;
+}
+
+fn create_pathtracer_scene_bindgroup(device: &wgpu::Device, queue: &wgpu::Queue, shader_params: &PathtraceShaderParams, scene: &SceneDesc) -> wgpu::BindGroup
+{
+    // Convert AoS to SoA.
+    let mut verts_pos = Vec::<&wgpu::Buffer>::with_capacity(scene.meshes.len());
+    let mut verts = Vec::<&wgpu::Buffer>::with_capacity(scene.meshes.len());
+    let mut indices = Vec::<&wgpu::Buffer>::with_capacity(scene.meshes.len());
+    let mut bvh_nodes = Vec::<&wgpu::Buffer>::with_capacity(scene.meshes.len());
+    for mesh in &scene.meshes
+    {
+        verts_pos.push(&mesh.verts_pos);
+        verts.push(&mesh.verts);
+        indices.push(&mesh.indices);
+        bvh_nodes.push(&mesh.bvh_nodes);
+    }
+
+    use crate::wgpu_utils::*;
+    let verts_pos_array = array_of_buffer_bindings_ref_resource(&verts_pos);
+    let verts_array     = array_of_buffer_bindings_ref_resource(&verts);
+    let indices_array   = array_of_buffer_bindings_ref_resource(&indices);
+    let bvh_nodes_array = array_of_buffer_bindings_ref_resource(&bvh_nodes);
+    let texture_views   = array_of_texture_views(&scene.textures);
+    let textures_array  = array_of_texture_bindings_resource(&texture_views);
+    let samplers_array  = array_of_sampler_bindings_resource(&scene.samplers);
+    let env_map_view    = scene.env_map.create_view(&Default::default());
+
+    let scene_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: None,
+        layout: &shader_params.pipeline.get_bind_group_layout(0),
+        entries: &[
+            wgpu::BindGroupEntry { binding: 0,  resource: wgpu::BindingResource::BufferArray(verts_pos_array.as_slice()) },
+            wgpu::BindGroupEntry { binding: 1,  resource: wgpu::BindingResource::BufferArray(verts_array.as_slice())     },
+            wgpu::BindGroupEntry { binding: 2,  resource: wgpu::BindingResource::BufferArray(indices_array.as_slice())   },
+            wgpu::BindGroupEntry { binding: 3,  resource: wgpu::BindingResource::BufferArray(bvh_nodes_array.as_slice()) },
+            wgpu::BindGroupEntry { binding: 4,  resource: buffer_resource(&scene.tlas_nodes) },
+            wgpu::BindGroupEntry { binding: 5,  resource: buffer_resource(&scene.instances) },
+            wgpu::BindGroupEntry { binding: 6,  resource: buffer_resource(&scene.materials) },
+            wgpu::BindGroupEntry { binding: 7,  resource: wgpu::BindingResource::TextureViewArray(textures_array.as_slice()) },
+            wgpu::BindGroupEntry { binding: 8,  resource: wgpu::BindingResource::SamplerArray(samplers_array.as_slice()) },
+            wgpu::BindGroupEntry { binding: 9,  resource: wgpu::BindingResource::TextureView(&env_map_view) },
+            wgpu::BindGroupEntry { binding: 10, resource: wgpu::BindingResource::Sampler(&scene.env_map_sampler) },
+        ]
+    });
+
+    return scene_bind_group;
+}
+
+fn create_pathtracer_settings_bindgroup(device: &wgpu::Device, queue: &wgpu::Queue, shader_params: &PathtraceShaderParams, accum_params: Option<&AccumulationParams>, camera_transform: Mat4) -> wgpu::BindGroup
+{
+    let camera_transform_uniform = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("Camera Buffer"),
+        contents: to_u8_slice(&[camera_transform]),
+        usage: wgpu::BufferUsages::UNIFORM,
+    });
+
+    let accum_counter_uniform;
+    let prev_frame_view;
+    if let Some(accum_params) = accum_params
+    {
+        accum_counter_uniform = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Frame ID Buffer"),
+            contents: to_u8_slice(&[accum_params.accum_counter]),
+            usage: wgpu::BufferUsages::UNIFORM,
+        });
+
+        prev_frame_view = match accum_params.prev_frame
+        {
+            None      => shader_params.dummy_prev_frame_texture.create_view(&Default::default()),
+            Some(tex) => tex.create_view(&Default::default()),
+        };
+    }
+    else
+    {
+        let accum_counter: u32 = 0;
+        accum_counter_uniform = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Frame ID Buffer"),
+            contents: to_u8_slice(&[accum_counter]),
+            usage: wgpu::BufferUsages::UNIFORM,
+        });
+
+        prev_frame_view = shader_params.dummy_prev_frame_texture.create_view(&Default::default());
+    }
+
+    let settings_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: None,
+        layout: &shader_params.pipeline.get_bind_group_layout(1),
+        entries: &[
+            wgpu::BindGroupEntry { binding: 0, resource: buffer_resource(&camera_transform_uniform) },
+            wgpu::BindGroupEntry { binding: 1, resource: buffer_resource(&accum_counter_uniform) },
+            wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::TextureView(&prev_frame_view) }
+        ]
+    });
+
+    return settings_bind_group;
+}
+
+fn create_pathtracer_output_bindgroup(device: &wgpu::Device, queue: &wgpu::Queue, shader_params: &PathtraceShaderParams, main_target: Option<&wgpu::Texture>, albedo: Option<&wgpu::Texture>, normals: Option<&wgpu::Texture>) -> wgpu::BindGroup
+{
+    let render_target_view  = match main_target
+    {
+        Some(tex) => tex.create_view(&Default::default()),
+        None =>      shader_params.dummy_output_texture.create_view(&Default::default()),
+    };
+    let gbuffer_albedo_view = match albedo
+    {
+        Some(tex) => tex.create_view(&Default::default()),
+        None =>      shader_params.dummy_albedo_texture.create_view(&Default::default()),
+    };
+    let gbuffer_normals_view = match normals
+    {
+        Some(tex) => tex.create_view(&Default::default()),
+        None =>      shader_params.dummy_normals_texture.create_view(&Default::default()),
+    };
+
+    let render_target_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: None,
+        layout: &shader_params.pipeline.get_bind_group_layout(2),
+        entries: &[
+            wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(&render_target_view) },
+            wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::TextureView(&gbuffer_albedo_view) },
+            wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::TextureView(&gbuffer_normals_view) },
+        ]
+    });
+
+    return render_target_bind_group;
 }

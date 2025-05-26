@@ -100,6 +100,29 @@ fn main()
 
     let mut output_tex_front = 1;
     let mut output_tex_back  = 0;
+
+    let mut albedo_texture = device.create_texture(&wgpu::TextureDescriptor {
+        label: None,
+        size: wgpu::Extent3d { width: width as u32, height: height as u32, depth_or_array_layers: 1 },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: wgpu::TextureFormat::Rgba8Unorm,
+        usage: wgpu::TextureUsages::STORAGE_BINDING |
+               wgpu::TextureUsages::TEXTURE_BINDING,
+        view_formats: &[]
+    });
+    let mut normals_texture = device.create_texture(&wgpu::TextureDescriptor {
+        label: None,
+        size: wgpu::Extent3d { width: width as u32, height: height as u32, depth_or_array_layers: 1 },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: wgpu::TextureFormat::Rgba8Snorm,
+        usage: wgpu::TextureUsages::STORAGE_BINDING |
+               wgpu::TextureUsages::TEXTURE_BINDING,
+        view_formats: &[]
+    });
     //
 
     // let mut egui_ctx = egui::Context::default();
@@ -136,6 +159,8 @@ fn main()
                     // Resize screen dependent resources
                     resize_texture(&device, &mut output_textures[0], new_size.width, new_size.height);
                     resize_texture(&device, &mut output_textures[1], new_size.width, new_size.height);
+                    resize_texture(&device, &mut albedo_texture, new_size.width, new_size.height);
+                    resize_texture(&device, &mut normals_texture, new_size.width, new_size.height);
                     accum_counter = 0;
 
                     // Resize surface
@@ -165,8 +190,17 @@ fn main()
 
                     let frame = surface.get_current_texture().unwrap();
 
-                    lp::raycast_albedo(&device, &queue, &scene, &frame.texture,
+                    lp::raycast_normals(&device, &queue, &scene, &normals_texture,
                                        &shader_params, camera_transform.into());
+
+                    let tonemap_params = lp::TonemapParams {
+                        operator: lp::TonemapOperator::Aces,
+                        exposure: 0.0
+                    };
+                    //lp::apply_tonemapping(&device, &queue, &tonemap_shader_params,
+                    //                      &albedo_texture, &frame.texture, &tonemap_params);
+                    lp::convert_to_ldr_no_tonemap(&device, &queue, &tonemap_shader_params,
+                                                  &normals_texture, &frame.texture);
 
                     /*
                     if accum_counter < 2000

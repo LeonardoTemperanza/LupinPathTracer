@@ -22,8 +22,8 @@
 
 // Group 2: Render targets
 @group(2) @binding(0) var output_texture: texture_storage_2d<rgba16float, write>;
-@group(2) @binding(1) var output_albedo: texture_storage_2d<bgra8unorm, write>;
-@group(2) @binding(2) var output_normals: texture_storage_2d<bgra8unorm, write>;
+@group(2) @binding(1) var output_albedo: texture_storage_2d<rgba8unorm, write>;
+@group(2) @binding(2) var output_normals: texture_storage_2d<rgba8snorm, write>;
 
 // We need these wrappers, or we get a
 // compilation error, for some reason...
@@ -122,7 +122,8 @@ fn pathtrace_main(@builtin(local_invocation_id) local_id: vec3u, @builtin(global
     var color = vec3f(0.0f);
     for(var sample: u32 = 0; sample < NUM_SAMPLES; sample++)
     {
-        let camera_ray = compute_camera_ray_with_pixel_jitter(global_id, output_dim);
+        let pixel_offset = vec2f(random_f32(), random_f32()) - 0.5f;
+        let camera_ray = compute_camera_ray(global_id, output_dim, pixel_offset);
         color += pathtrace_naive(local_id, camera_ray);
     }
     color /= f32(NUM_SAMPLES);
@@ -150,20 +151,33 @@ fn pathtrace_main(@builtin(local_invocation_id) local_id: vec3u, @builtin(global
 @workgroup_size(8, 8, 1)
 fn gbuffer_albedo_main(@builtin(local_invocation_id) local_id: vec3u, @builtin(global_invocation_id) global_id: vec3u)
 {
-    let output_dim = textureDimensions(output_texture).xy;
+    let output_dim = textureDimensions(output_albedo).xy;
     init_rng(global_id.y * global_id.x + global_id.x, output_dim.y * output_dim.x + output_dim.x);
 
+    const NUM_AA_SAMPLES_PER_DIR: u32 = 2;  // Antialiasing samples.
     var color = vec3f(0.0f);
-    let camera_ray = compute_camera_ray(global_id, output_dim);
-    let hit = ray_scene_intersection(local_id, camera_ray);
-    if hit.dst != F32_MAX
+    for(var sample_y: u32 = 0; sample_y < NUM_AA_SAMPLES_PER_DIR; sample_y++)
     {
-        let mat = materials[hit.mat_idx];
-        const mat_sampler_idx: u32 = 0;  // TODO!
+        for(var sample_x: u32 = 0; sample_x < NUM_AA_SAMPLES_PER_DIR; sample_x++)
+        {
+            let offset_x = f32(sample_x) / f32(NUM_AA_SAMPLES_PER_DIR);
+            let offset_y = f32(sample_y) / f32(NUM_AA_SAMPLES_PER_DIR);
+            let pixel_offset = vec2f(offset_x, offset_y) - 0.5f * 0.9f;
+            let camera_ray = compute_camera_ray(global_id, output_dim, pixel_offset);
 
-        let mat_color = textureSampleLevel(textures[mat.color_tex_idx], samplers[mat_sampler_idx], hit.tex_coords, 0.0f) * mat.color;
-        color = mat_color.rgb;
+            let hit = ray_scene_intersection(local_id, camera_ray);
+            if hit.dst != F32_MAX
+            {
+                let mat = materials[hit.mat_idx];
+                const mat_sampler_idx: u32 = 0;  // TODO!
+
+                let mat_color = textureSampleLevel(textures[mat.color_tex_idx], samplers[mat_sampler_idx], hit.tex_coords, 0.0f) * mat.color;
+                color += mat_color.rgb;
+            }
+        }
     }
+    color /= f32(NUM_AA_SAMPLES_PER_DIR * NUM_AA_SAMPLES_PER_DIR);
+    color = clamp(color, vec3f(0.0f), vec3f(1.0f));
 
     if global_id.x < output_dim.x && global_id.y < output_dim.y {
         textureStore(output_albedo, global_id.xy, vec4f(color, 1.0f));
@@ -174,44 +188,42 @@ fn gbuffer_albedo_main(@builtin(local_invocation_id) local_id: vec3u, @builtin(g
 @workgroup_size(8, 8, 1)
 fn gbuffer_normals_main(@builtin(local_invocation_id) local_id: vec3u, @builtin(global_invocation_id) global_id: vec3u)
 {
-    let output_dim = textureDimensions(output_texture).xy;
+    let output_dim = textureDimensions(output_normals).xy;
     init_rng(global_id.y * global_id.x + global_id.x, output_dim.y * output_dim.x + output_dim.x);
 
+    const NUM_AA_SAMPLES_PER_DIR: u32 = 2;  // Antialiasing samples.
     var color = vec3f(0.0f);
-    let camera_ray = compute_camera_ray(global_id, output_dim);
-    let hit = ray_scene_intersection(local_id, camera_ray);
-    if hit.dst != F32_MAX
+    for(var sample_y: u32 = 0; sample_y < NUM_AA_SAMPLES_PER_DIR; sample_y++)
     {
-        color = hit.normal;
+        for(var sample_x: u32 = 0; sample_x < NUM_AA_SAMPLES_PER_DIR; sample_x++)
+        {
+            let offset_x = f32(sample_x) / f32(NUM_AA_SAMPLES_PER_DIR);
+            let offset_y = f32(sample_y) / f32(NUM_AA_SAMPLES_PER_DIR);
+            let pixel_offset = vec2f(offset_x, offset_y) - 0.5f * 0.9f;
+            let camera_ray = compute_camera_ray(global_id, output_dim, pixel_offset);
+
+            let hit = ray_scene_intersection(local_id, camera_ray);
+            if hit.dst != F32_MAX
+            {
+                color += hit.normal;
+            }
+        }
     }
+    color /= f32(NUM_AA_SAMPLES_PER_DIR * NUM_AA_SAMPLES_PER_DIR);
+    color = clamp(color, vec3f(-1.0f), vec3f(1.0f));
 
     if global_id.x < output_dim.x && global_id.y < output_dim.y {
         textureStore(output_normals, global_id.xy, vec4f(color, 1.0f));
     }
 }
 
-fn compute_camera_ray(global_id: vec3u, output_dim: vec2u) -> Ray
+// Pixel offset is expected to be in the [-0.5, 0.5] range.
+fn compute_camera_ray(global_id: vec3u, output_dim: vec2u, pixel_offset: vec2f) -> Ray
 {
     let frag_coord = vec2f(global_id.xy) + 0.5f;
     let resolution = vec2f(output_dim);
 
-    let uv = frag_coord / resolution;
-    var coord = 2.0f * uv - 1.0f;
-    coord.y *= -resolution.y / resolution.x;
-
-    let look_at = normalize(vec3(coord, 1.0f));
-
-    let res = Ray(vec3f(0.0f, 0.0f, 0.0f), look_at, 1.0f / look_at);
-    return transform_ray(res, camera_transform);
-}
-
-fn compute_camera_ray_with_pixel_jitter(global_id: vec3u, output_dim: vec2u) -> Ray
-{
-    let frag_coord = vec2f(global_id.xy) + 0.5f;
-    let resolution = vec2f(output_dim);
-
-    let rnd_vec = vec2f(random_f32(), random_f32());
-    var nudged_uv = frag_coord + (rnd_vec - 0.5f);  // Move 0.5 to the left and right
+    var nudged_uv = frag_coord + pixel_offset;  // Move 0.5 to the left and right
     nudged_uv = clamp(nudged_uv, vec2(0.0f), resolution.xy) / resolution;
 
     let uv = frag_coord / resolution;
@@ -327,75 +339,6 @@ struct MaterialPoint
     scattering: vec3f,
     scanisotropy: f32,
     trdepth: f32,
-}
-
-// TODO: Just a test to see if I should restructure the code or not.
-// Multiple Importance Sampling.
-fn pathtrace_mis(local_id: vec3u, start_ray: Ray) -> vec3f
-{
-    var ray = start_ray;
-    var weight = vec3f(1.0f);  // Multiplicative terms.
-    var radiance = vec3f(0.0f);
-    var op_bounce: u32 = 0;
-    var next_emission = true;
-    var next_intersection = HitInfo();
-
-    for(var bounce = 0u; bounce <= MAX_BOUNCES; bounce++)
-    {
-        var hit = next_intersection;
-        if next_emission { hit = ray_scene_intersection(local_id, ray); }
-        if hit.dst == F32_MAX  // Missed.
-        {
-            radiance += sample_env_map(ray.dir) * weight;
-            break;
-        }
-
-        // Ray hit something.
-
-        let mat = materials[hit.mat_idx];
-
-        // TODO: Handle volume transmission.
-
-        const in_volume = false;
-        if !in_volume
-        {
-            // Set next ray's origin at point of contact.
-            ray.ori = ray.ori + ray.dir * hit.dst;
-
-            const mat_sampler_idx: u32 = 0;  // TODO!
-            let color = textureSampleLevel(textures[mat.color_tex_idx], samplers[mat_sampler_idx], hit.tex_coords, 0.0f) * mat.color;
-
-            // TODO: No caustics param.
-
-            // Handle coverage.
-            if color.a < 1.0f && random_f32() >= color.a
-            {
-                op_bounce++;
-                if op_bounce > 128 { break; }
-                bounce -= 1;
-                continue;
-            }
-
-            // For deltas and non deltas, we have two very different paths here
-            // The non delta path does:
-            // incoming = sample_lights or sample_bsdfcos
-
-            break;
-        }
-        else
-        {
-            // TODO
-        }
-
-        // Ray hit something.
-    }
-
-    return vec3f(0.0f);
-}
-
-fn mis_heuristic(this_prob: f32, other_prob: f32) -> f32
-{
-    return (this_prob * this_prob) / (this_prob * this_prob + other_prob * other_prob);
 }
 
 fn sample_env_map(dir: vec3f) -> vec3f
