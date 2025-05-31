@@ -1,19 +1,19 @@
 
 // Group 0: Scene Description
 // Mesh
-@group(0) @binding(0)  var<storage, read> verts_pos_array: binding_array<VertsPos>;
-@group(0) @binding(1)  var<storage, read> verts_array: binding_array<Verts>;
-@group(0) @binding(2)  var<storage, read> indices_array: binding_array<Indices>;
-@group(0) @binding(3)  var<storage, read> bvh_nodes_array: binding_array<BvhNodes>;
+@group(0) @binding(0) var<storage, read> verts_pos_array: binding_array<VertsPos>;
+@group(0) @binding(1) var<storage, read> verts_array: binding_array<Verts>;
+@group(0) @binding(2) var<storage, read> indices_array: binding_array<Indices>;
+@group(0) @binding(3) var<storage, read> bvh_nodes_array: binding_array<BvhNodes>;
 // Instances
-@group(0) @binding(4)  var<storage, read> tlas_nodes: array<TlasNode>;
-@group(0) @binding(5)  var<storage, read> instances: array<Instance>;
-@group(0) @binding(6)  var<storage, read> materials: array<Material>;
+@group(0) @binding(4) var<storage, read> tlas_nodes: array<TlasNode>;
+@group(0) @binding(5) var<storage, read> instances: array<Instance>;
+@group(0) @binding(6) var<storage, read> materials: array<Material>;
 // Textures
-@group(0) @binding(7)  var textures: binding_array<texture_2d<f32>>;
-@group(0) @binding(8)  var samplers: binding_array<sampler>;
-@group(0) @binding(9)  var env_map:  texture_2d<f32>;
-@group(0) @binding(10) var env_map_sampler: sampler;
+@group(0) @binding(7) var textures: binding_array<texture_2d<f32>>;
+@group(0) @binding(8) var samplers: binding_array<sampler>;
+// Environments
+@group(0) @binding(9) var<storage, read> environments: array<Environment>;
 
 // Group 1: Pathtrace settings
 @group(1) @binding(0) var<uniform> camera_transform: mat4x4f;
@@ -82,6 +82,12 @@ struct Material
     scattering_tex_idx: u32,
     normal_tex_idx:     u32,
     // 4 bytes padding
+}
+
+struct Environment
+{
+    emission: vec3f,
+    emission_tex_idx: u32,
 }
 
 // NOTE: The odd ordering of the fields
@@ -256,7 +262,7 @@ fn pathtrace_naive(local_id: vec3u, start_ray: Ray) -> vec3f
         let hit = ray_scene_intersection(local_id, ray);
         if hit.dst == F32_MAX  // Missed.
         {
-            radiance += sample_env_map(ray.dir) * weight;
+            radiance += sample_environment(ray.dir) * weight;
             break;
         }
 
@@ -341,10 +347,19 @@ struct MaterialPoint
     trdepth: f32,
 }
 
-fn sample_env_map(dir: vec3f) -> vec3f
+fn sample_environment(dir: vec3f) -> vec3f
 {
     let coords = vec2f((atan2(dir.x, dir.z) + PI) / (2*PI), acos(dir.y) / PI);
-    return textureSampleLevel(env_map, env_map_sampler, coords, 0.0f).rgb;
+
+    var emission = vec3f(0.0f);
+    for(var i = 0u; i < arrayLength(&environments); i++)
+    {
+        let env = environments[i];
+        const sampler_idx = 0u;  // TODO
+        emission += env.emission.rgb * textureSampleLevel(textures[env.emission_tex_idx], samplers[sampler_idx], coords, 0.0f).rgb;
+    }
+
+    return emission;
 }
 
 struct BsdfSample
@@ -1000,6 +1015,7 @@ fn ray_mesh_intersection(local_id: vec3u, ray: Ray, mesh_idx: u32) -> RayMeshInt
 //////////////////////////////////////////////
 // Utils and constants
 //////////////////////////////////////////////
+
 
 const F32_MAX: f32 = 0x1.fffffep+127;  // WGSL does not yet have a "max(f32)"
 const PI: f32 = 3.14159265358979323846264338327950288;

@@ -841,9 +841,9 @@ dependencies = [
 
 [[package]]
 name = "half"
-version = "2.4.1"
+version = "2.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6dd08c532ae367adf81c312a4580bc67f1d0fe8bc9c460520283f4c0ff277888"
+checksum = "459196ed295495a68f7d7fe1d84f6c4b7ff0e21fe3017b2f283c6fac3ad803c9"
 dependencies = [
  "cfg-if",
  "crunchy",
@@ -1164,6 +1164,8 @@ dependencies = [
 name = "lupin"
 version = "0.1.0"
 dependencies = [
+ "half",
+ "oidn",
  "wgpu",
 ]
 
@@ -1440,6 +1442,16 @@ name = "objc2-encode"
 version = "3.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d079845b37af429bfe5dfa76e6d087d788031045b25cfc6fd898486fd9847666"
+
+[[package]]
+name = "oidn"
+version = "2.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d8840baa4530f893ab4d0ea828a3bd4c000ffa1c273d55a52d3a2e15d6453de5"
+dependencies = [
+ "num_enum",
+ "pkg-config",
+]
 
 [[package]]
 name = "once_cell"

@@ -48,8 +48,7 @@ pub struct SceneDesc
 
     pub textures: Vec<wgpu::Texture>,
     pub samplers: Vec<wgpu::Sampler>,
-    pub env_map: wgpu::Texture,
-    pub env_map_sampler: wgpu::Sampler,
+    pub environments: wgpu::Buffer,
 }
 
 pub struct Mesh
@@ -121,6 +120,21 @@ impl Material
             padding0: 0
         }
     }
+}
+
+#[derive(Default, Clone, Copy, Debug)]
+#[repr(C)]
+pub struct Environment
+{
+    pub emission: Vec3,
+    pub emission_tex_idx: u32,
+}
+
+#[derive(Default, Clone, Copy, Debug)]
+#[repr(C)]
+pub struct Light
+{
+
 }
 
 // This doesn't include positions, as that
@@ -307,21 +321,15 @@ pub fn build_pathtrace_shader_params(device: &wgpu::Device, with_runtime_checks:
                 ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
                 count: std::num::NonZero::new(MAX_SAMPLERS)
             },
-            wgpu::BindGroupLayoutEntry {  // env map texture
+            wgpu::BindGroupLayoutEntry {  // environments
                 binding: 9,
                 visibility: wgpu::ShaderStages::COMPUTE,
-                ty: wgpu::BindingType::Texture {
-                    sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                    view_dimension: wgpu::TextureViewDimension::D2,
-                    multisampled: false,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Storage { read_only: true },
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
                 },
-                count: None
-            },
-            wgpu::BindGroupLayoutEntry {  // env map sampler
-                binding: 10,
-                visibility: wgpu::ShaderStages::COMPUTE,
-                ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-                count: None
+                count: None,
             },
         ]
     });
@@ -1478,7 +1486,6 @@ fn create_pathtracer_scene_bindgroup(device: &wgpu::Device, queue: &wgpu::Queue,
     let texture_views   = array_of_texture_views(&scene.textures);
     let textures_array  = array_of_texture_bindings_resource(&texture_views);
     let samplers_array  = array_of_sampler_bindings_resource(&scene.samplers);
-    let env_map_view    = scene.env_map.create_view(&Default::default());
 
     let scene_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
         label: None,
@@ -1493,8 +1500,7 @@ fn create_pathtracer_scene_bindgroup(device: &wgpu::Device, queue: &wgpu::Queue,
             wgpu::BindGroupEntry { binding: 6,  resource: buffer_resource(&scene.materials) },
             wgpu::BindGroupEntry { binding: 7,  resource: wgpu::BindingResource::TextureViewArray(textures_array.as_slice()) },
             wgpu::BindGroupEntry { binding: 8,  resource: wgpu::BindingResource::SamplerArray(samplers_array.as_slice()) },
-            wgpu::BindGroupEntry { binding: 9,  resource: wgpu::BindingResource::TextureView(&env_map_view) },
-            wgpu::BindGroupEntry { binding: 10, resource: wgpu::BindingResource::Sampler(&scene.env_map_sampler) },
+            wgpu::BindGroupEntry { binding: 9,  resource: buffer_resource(&scene.environments) },
         ]
     });
 
@@ -1580,3 +1586,229 @@ fn create_pathtracer_output_bindgroup(device: &wgpu::Device, queue: &wgpu::Queue
 
     return render_target_bind_group;
 }
+
+//////////////
+// Lights
+pub fn create_lights() -> Vec<Light>
+{
+    return Default::default();
+}
+
+//////////////
+// Denoising.
+
+/*
+struct DenoiseResources
+{
+
+}
+
+fn create_denoise_resources(device: &wgpu::Device, queue: &wgpu::Queue)
+{
+
+}
+*/
+
+/*
+pub fn transfer_to_cpu_and_denoise_image(device: &wgpu::Device, queue: &wgpu::Queue, target: &wgpu::Texture, to_denoise: &wgpu::Texture, albedo: Option<&wgpu::Texture>, normals: Option<&wgpu::Texture>)
+{
+    // TODO: Check correctness of textures.
+
+    // Transfer images to CPU.
+
+    let cpu_input = copy_texture_to_cpu_sync(device, queue, to_denoise);
+    let mut beauty = Vec::<f32>::with_capacity(cpu_input.len() / 4 * 3);
+    for i in (0..cpu_input.len()).step_by(4) {
+        beauty.push(cpu_input[i+0] as f32 / 255.0); // R
+        beauty.push(cpu_input[i+1] as f32 / 255.0); // G
+        beauty.push(cpu_input[i+2] as f32 / 255.0); // B
+    }
+
+    let mut albedo_buf = Vec::<f32>::new();
+    if let Some(albedo_tex) = albedo
+    {
+        let cpu_albedo = copy_texture_to_cpu_sync(device, queue, albedo_tex);
+        albedo_buf.reserve_exact(cpu_albedo.len() / 4 * 3);
+        for i in (0..cpu_albedo.len()).step_by(4) {
+            albedo_buf.push(cpu_albedo[i+0] as f32 / 255.0); // R
+            albedo_buf.push(cpu_albedo[i+1] as f32 / 255.0); // G
+            albedo_buf.push(cpu_albedo[i+2] as f32 / 255.0); // B
+        }
+    }
+
+    let mut normals_buf = Vec::<f32>::new();
+    if let Some(normals_tex) = normals
+    {
+        let cpu_normals = copy_texture_to_cpu_sync(device, queue, normals_tex);
+        normals_buf.reserve_exact(cpu_normals.len() / 4 * 3);
+        for i in (0..cpu_normals.len()).step_by(4) {
+            normals_buf.push(cpu_normals[i+0] as f32 / 255.0); // R
+            normals_buf.push(cpu_normals[i+1] as f32 / 255.0); // G
+            normals_buf.push(cpu_normals[i+2] as f32 / 255.0); // B
+        }
+    }
+
+    // Denoise.
+
+    let denoised = beauty;
+
+/*
+    let oidn_device = oidn::Device::new();
+    let mut filter = oidn::RayTracing::new(&oidn_device)
+        .image_dimensions(1920, 1080)
+        .clean_aux(true);
+        //.filter();
+        //.expect("Filter config error.");
+
+    if let Some(albedo_tex) = albedo {
+        if let Some(normals_tex) = normals {
+            filter = filter.albedo_normal(
+        } else {
+            filter = filter.albedo
+        }
+    }
+
+    if let Err(e) = oidn_device.get_error() {
+        println!("Error denoising image: {}", e.1);
+    }
+*/
+
+    // Upload image result back to the GPU.
+    upload_rgbf32_texture_to_gpu(device, queue, target, denoised);
+}
+*/
+
+// Returns an array in the rgbf32 format, interleaved and with no extra padding.
+/*
+fn copy_texture_to_cpu_sync(device: &wgpu::Device, queue: &wgpu::Queue, texture: &wgpu::Texture) -> Vec<f32>
+{
+    let width = texture.size().width;
+    let height = texture.size().height;
+    let bytes_per_pixel = 8; // TODO: Only supporting rgbaf16 for now.
+    let unpadded_bytes_per_row = width * bytes_per_pixel;
+    let padded_bytes_per_row = align_to(unpadded_bytes_per_row, wgpu::COPY_BYTES_PER_ROW_ALIGNMENT);
+    let buffer_size = (padded_bytes_per_row * height) as u64;
+
+    let output_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("Readback Buffer"),
+        size: buffer_size,
+        usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+        mapped_at_creation: false,
+    });
+
+    let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+        label: Some("Copy Encoder"),
+    });
+
+    encoder.copy_texture_to_buffer(
+        wgpu::TexelCopyTextureInfo {
+            texture,
+            mip_level: 0,
+            origin: wgpu::Origin3d::ZERO,
+            aspect: wgpu::TextureAspect::All,
+        },
+        wgpu::TexelCopyBufferInfo {
+            buffer: &output_buffer,
+            layout: wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(padded_bytes_per_row),
+                rows_per_image: None,
+            },
+        },
+        wgpu::Extent3d {
+            width,
+            height,
+            depth_or_array_layers: 1,
+        },
+    );
+
+    queue.submit(Some(encoder.finish()));
+
+    // Block until the GPU is done
+    device.poll(wgpu::Maintain::Wait);
+
+    // Map synchronously
+    let buffer_slice = output_buffer.slice(..);
+
+    let mapping_result = std::sync::Arc::new(std::sync::Mutex::new(None));
+    let c_mapping_result = mapping_result.clone();
+
+    buffer_slice.map_async(wgpu::MapMode::Read, move |v| {
+        *c_mapping_result.lock().unwrap() = Some(v);
+    });
+
+    device.poll(wgpu::Maintain::Wait); // Wait until the mapping is done
+
+    let map_status = loop {
+        if let Some(result) = mapping_result.lock().unwrap().take() {
+            break result;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(1));
+        device.poll(wgpu::Maintain::Poll);
+    };
+
+    map_status.expect("Buffer mapping failed");
+
+    let data = buffer_slice.get_mapped_range();
+    let mut result = Vec::with_capacity((unpadded_bytes_per_row * height) as usize);
+
+    for chunk in data.chunks(padded_bytes_per_row as usize) {
+        result.extend_from_slice(&chunk[..unpadded_bytes_per_row as usize]);
+    }
+
+    drop(data);
+    output_buffer.unmap();
+
+    return result;
+
+    fn align_to(value: u32, alignment: u32) -> u32
+    {
+        return (value + alignment - 1) / alignment * alignment;
+    }
+}
+*/
+
+/*
+fn upload_rgbf32_texture_to_gpu(device: &wgpu::Device, queue: &wgpu::Queue, target: &wgpu::Texture, input: Vec<f32>)
+{
+    let width  = target.size().width;
+    let height = target.size().height;
+    assert_eq!(input.len(), (width * height * 3) as usize);
+
+    // Convert RGB to RGBA by adding an alpha channel (typically 1.0)
+    let mut rgba_data = Vec::<f32>::with_capacity((width * height * 4) as usize);
+    for i in 0..(width * height) as usize {
+        rgba_data.push(input[i * 3 + 0]);
+        rgba_data.push(input[i * 3 + 1]);
+        rgba_data.push(input[i * 3 + 2]);
+        rgba_data.push(1.0); // Alpha
+    }
+
+    let bytes: &[u8] = to_u8_slice(&rgba_data);
+
+    let bytes_per_row = width * 4 * std::mem::size_of::<f32>() as u32;
+    let layout = wgpu::TexelCopyBufferLayout {
+        offset: 0,
+        bytes_per_row: Some(bytes_per_row),
+        rows_per_image: Some(width),
+    };
+
+    let extent = wgpu::Extent3d {
+        width,
+        height,
+        depth_or_array_layers: 1,
+    };
+
+    queue.write_texture(
+        wgpu::TexelCopyTextureInfo {
+            texture: target,
+            mip_level: 0,
+            origin: wgpu::Origin3d::ZERO,
+            aspect: wgpu::TextureAspect::All,
+        },
+        bytes,
+        layout,
+        extent,
+    );
+}
+*/

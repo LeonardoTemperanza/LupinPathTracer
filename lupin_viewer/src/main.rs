@@ -82,7 +82,9 @@ fn main()
             dimension: wgpu::TextureDimension::D2,
             format: wgpu::TextureFormat::Rgba16Float,
             usage: wgpu::TextureUsages::STORAGE_BINDING |
-                   wgpu::TextureUsages::TEXTURE_BINDING,
+                   wgpu::TextureUsages::TEXTURE_BINDING |
+                   wgpu::TextureUsages::COPY_SRC |
+                   wgpu::TextureUsages::COPY_DST,
             view_formats: &[]
         }),
         device.create_texture(&wgpu::TextureDescriptor {
@@ -93,7 +95,9 @@ fn main()
             dimension: wgpu::TextureDimension::D2,
             format: wgpu::TextureFormat::Rgba16Float,
             usage: wgpu::TextureUsages::STORAGE_BINDING |
-                   wgpu::TextureUsages::TEXTURE_BINDING,
+                   wgpu::TextureUsages::TEXTURE_BINDING |
+                   wgpu::TextureUsages::COPY_SRC |
+                   wgpu::TextureUsages::COPY_DST,
             view_formats: &[]
         })
     ];
@@ -140,6 +144,7 @@ fn main()
 
     let mut accum_counter: u32 = 0;
     let mut prev_cam_transform = Mat4::IDENTITY;
+    let mut performed_denoise = false;
 
     window.set_visible(true);
 
@@ -183,13 +188,16 @@ fn main()
                     update_camera(&mut cam_pos, &mut cam_rot, &input, delta_time);
 
                     let camera_transform = xform_to_matrix(cam_pos, cam_rot, Vec3 { x: 1.0, y: 1.0, z: 1.0 });
-                    if camera_transform.m != prev_cam_transform.m {
+                    if camera_transform.m != prev_cam_transform.m
+                    {
                         accum_counter = 0;
+                        performed_denoise = false;
                     }
                     prev_cam_transform = camera_transform;
 
                     let frame = surface.get_current_texture().unwrap();
 
+/*
                     lp::raycast_normals(&device, &queue, &scene, &normals_texture,
                                        &shader_params, camera_transform.into());
 
@@ -201,9 +209,10 @@ fn main()
                     //                      &albedo_texture, &frame.texture, &tonemap_params);
                     lp::convert_to_ldr_no_tonemap(&device, &queue, &tonemap_shader_params,
                                                   &normals_texture, &frame.texture);
+*/
 
-                    /*
-                    if accum_counter < 2000
+                    const MAX_ACCUMS: u32 = 100;
+                    if accum_counter < MAX_ACCUMS
                     {
                         let accum_params = lp::AccumulationParams {
                             prev_frame: Some(&output_textures[output_tex_back]),
@@ -211,6 +220,12 @@ fn main()
                         };
                         lp::pathtrace_scene(&device, &queue, &scene, &output_textures[output_tex_front],
                                             &shader_params, &accum_params, camera_transform.into());
+                    }
+                    else if !performed_denoise
+                    {
+                        //lp::transfer_to_cpu_and_denoise_image(&device, &queue, &output_textures[output_tex_front],
+                        //                                      &output_textures[output_tex_back], None, None);
+                        performed_denoise = true;
                     }
 
                     let tonemap_params = lp::TonemapParams {
@@ -224,14 +239,11 @@ fn main()
                     //lp::convert_to_ldr_no_tonemap(&device, &queue, &tonemap_shader_params,
                     //                              &hdr_texture, &frame.texture);
 
-                    */
-
                     frame.present();
 
                     begin_input_events(&mut input);
 
                     // Swap output textures
-                    const MAX_ACCUMS: u32 = 2000;
                     if accum_counter < MAX_ACCUMS
                     {
                         let tmp = output_tex_back;

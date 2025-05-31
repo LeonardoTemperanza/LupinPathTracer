@@ -48,247 +48,229 @@ pub fn build_scene(device: &wgpu::Device, queue: &wgpu::Queue) -> lp::SceneDesc
         lp::Instance { inv_transform: lp::mat4_inverse(xform_to_matrix(Vec3 { x: 6.0, y: 0.0, z: -2.0 }.into(), Quat::default(), Vec3::ones()).into()), mesh_idx: 0, mat_idx: 11, padding0: 0.0, padding1: 0.0 },
         lp::Instance { inv_transform: lp::mat4_inverse(xform_to_matrix(Vec3 { x: 8.0, y: 0.0, z: 0.0 }.into(), Quat::default(), Vec3::ones()).into()), mesh_idx: 0, mat_idx: 8, padding0: 0.0, padding1: 0.0 },
         lp::Instance { inv_transform: lp::mat4_inverse(xform_to_matrix(Vec3 { x: 10.0, y: 0.0, z: 0.0 }.into(), Quat::default(), Vec3::ones()).into()), mesh_idx: 0, mat_idx: 9, padding0: 0.0, padding1: 0.0 },
+        lp::Instance { inv_transform: lp::mat4_inverse(xform_to_matrix(Vec3 { x: 12.0, y: 0.0, z: 0.0 }.into(), Quat::default(), Vec3::ones()).into()), mesh_idx: 0, mat_idx: 12, padding0: 0.0, padding1: 0.0 },
         // Floor
-        lp::Instance { inv_transform: lp::mat4_inverse(xform_to_matrix(Vec3 { x: 0.0, y: -0.01, z: 0.0 }.into(), Quat::default(), Vec3::ones() * 10.0).into()), mesh_idx: 1, mat_idx: 5, padding0: 0.0, padding1: 0.0 },
+        lp::Instance { inv_transform: lp::mat4_inverse(xform_to_matrix(Vec3 { x: 0.0, y: -0.01, z: 0.0 }.into(), Quat::default(), Vec3::ones() * 20.0).into()), mesh_idx: 1, mat_idx: 5, padding0: 0.0, padding1: 0.0 },
     ];
 
     let instances_buf = lp::upload_storage_buffer(&device, &queue, unsafe { to_u8_slice(&instances) });
 
-    let materials = [
-        // Bunny matte
-        // 0
-        lp::Material::new(
-            lp::MaterialType::Matte,            // Mat type
-            lp::Vec4::new(1.0, 1.0, 1.0, 1.0),  // Color
-            lp::Vec4::new(0.0, 0.0, 0.0, 0.0),  // Emission
-            lp::Vec4::new(0.0, 0.0, 0.0, 0.0),  // Scattering
-            0.01,                                // Roughness
-            0.0,                                // Metallic
-            1.33,                               // ior
-            0.0,                                // anisotropy
-            0.0,                                // depth
-            1,                                  // Color tex
-            0,                                  // Emission tex
-            0,                                  // Roughness tex
-            0,                                  // Scattering tex
-            0,                                  // Normal tex
-        ),
+    let mut materials = Vec::<lp::Material>::new();
 
-        // 1
-        lp::Material::new(
-            lp::MaterialType::Glossy,           // Mat type
-            lp::Vec4::new(0.9, 0.2, 0.2, 1.0),  // Color
-            lp::Vec4::new(0.0, 0.0, 0.0, 0.0),  // Emission
-            lp::Vec4::new(0.0, 0.0, 0.0, 0.0),  // Scattering
-            0.00001,                                // Roughness
-            0.0,                                // Metallic
-            1.33,                               // ior
-            0.0,                                // anisotropy
-            0.0,                                // depth
-            0,                                  // Color tex
-            0,                                  // Emission tex
-            0,                                  // Roughness tex
-            0,                                  // Scattering tex
-            0,                                  // Normal tex
-        ),
+    let bunny_matte = push_asset(&mut materials, lp::Material::new(
+        lp::MaterialType::Matte,            // Mat type
+        lp::Vec4::new(1.0, 1.0, 1.0, 1.0),  // Color
+        lp::Vec4::new(0.0, 0.0, 0.0, 0.0),  // Emission
+        lp::Vec4::new(0.0, 0.0, 0.0, 0.0),  // Scattering
+        0.01,                                // Roughness
+        0.0,                                // Metallic
+        1.33,                               // ior
+        0.0,                                // anisotropy
+        0.0,                                // depth
+        1,                                  // Color tex
+        0,                                  // Emission tex
+        0,                                  // Roughness tex
+        0,                                  // Scattering tex
+        0,                                  // Normal tex
+    ));
 
-        // 2
-        lp::Material::new(
-            lp::MaterialType::Reflective,       // Mat type
-            lp::Vec4::new(0.9, 0.2, 0.2, 1.0),  // Color
-            lp::Vec4::new(0.0, 0.0, 0.0, 0.0),  // Emission
-            lp::Vec4::new(0.0, 0.0, 0.0, 0.0),  // Scattering
-            0.0,                                // Roughness
-            0.0,                                // Metallic
-            1.5,                                // ior
-            0.0,                                // anisotropy
-            0.0,                                // depth
-            0,                                  // Color tex
-            0,                                  // Emission tex
-            0,                                  // Roughness tex
-            0,                                  // Scattering tex
-            0,                                  // Normal tex
-        ),
+    let glossy = push_asset(&mut materials, lp::Material::new(
+        lp::MaterialType::Glossy,           // Mat type
+        lp::Vec4::new(0.9, 0.2, 0.2, 1.0),  // Color
+        lp::Vec4::new(0.0, 0.0, 0.0, 0.0),  // Emission
+        lp::Vec4::new(0.0, 0.0, 0.0, 0.0),  // Scattering
+        0.00001,                                // Roughness
+        0.0,                                // Metallic
+        1.33,                               // ior
+        0.0,                                // anisotropy
+        0.0,                                // depth
+        0,                                  // Color tex
+        0,                                  // Emission tex
+        0,                                  // Roughness tex
+        0,                                  // Scattering tex
+        0,                                  // Normal tex
+    ));
 
-        // 3
-        lp::Material::new(
-            lp::MaterialType::Transparent,      // Mat type
-            lp::Vec4::new(0.1, 0.1, 1.0, 1.0),  // Color
-            lp::Vec4::new(0.0, 0.0, 0.0, 0.0),  // Emission
-            lp::Vec4::new(0.0, 0.0, 0.0, 0.0),  // Scattering
-            0.0,                                // Roughness
-            0.0,                                // Metallic
-            1.33,                               // ior
-            0.0,                                // anisotropy
-            0.0,                                // depth
-            0,                                  // Color tex
-            0,                                  // Emission tex
-            0,                                  // Roughness tex
-            0,                                  // Scattering tex
-            0,                                  // Normal tex
-        ),
+    let reflective = push_asset(&mut materials, lp::Material::new(
+        lp::MaterialType::Reflective,       // Mat type
+        lp::Vec4::new(0.9, 0.2, 0.2, 1.0),  // Color
+        lp::Vec4::new(0.0, 0.0, 0.0, 0.0),  // Emission
+        lp::Vec4::new(0.0, 0.0, 0.0, 0.0),  // Scattering
+        0.0,                                // Roughness
+        0.0,                                // Metallic
+        1.5,                                // ior
+        0.0,                                // anisotropy
+        0.0,                                // depth
+        0,                                  // Color tex
+        0,                                  // Emission tex
+        0,                                  // Roughness tex
+        0,                                  // Scattering tex
+        0,                                  // Normal tex
+    ));
 
-        // 4
-        lp::Material::new(
-            lp::MaterialType::Refractive,       // Mat type
-            lp::Vec4::new(0.1, 0.1, 1.0, 1.0),  // Color
-            lp::Vec4::new(0.0, 0.0, 0.0, 0.0),  // Emission
-            lp::Vec4::new(0.0, 0.0, 0.0, 0.0),  // Scattering
-            0.0,                                // Roughness
-            0.0,                                // Metallic
-            1.33,                               // ior
-            0.0,                                // anisotropy
-            0.0,                                // depth
-            0,                                  // Color tex
-            0,                                  // Emission tex
-            0,                                  // Roughness tex
-            0,                                  // Scattering tex
-            0,                                  // Normal tex
-        ),
+    let transparent = push_asset(&mut materials, lp::Material::new(
+        lp::MaterialType::Transparent,      // Mat type
+        lp::Vec4::new(0.1, 0.1, 1.0, 1.0),  // Color
+        lp::Vec4::new(0.0, 0.0, 0.0, 0.0),  // Emission
+        lp::Vec4::new(0.0, 0.0, 0.0, 0.0),  // Scattering
+        0.0,                                // Roughness
+        0.0,                                // Metallic
+        1.33,                               // ior
+        0.0,                                // anisotropy
+        0.0,                                // depth
+        0,                                  // Color tex
+        0,                                  // Emission tex
+        0,                                  // Roughness tex
+        0,                                  // Scattering tex
+        0,                                  // Normal tex
+    ));
 
-        // White matte
-        // 5
-        lp::Material::new(
-            lp::MaterialType::Matte,            // Mat type
-            lp::Vec4::new(1.0, 1.0, 1.0, 1.0),  // Color
-            lp::Vec4::new(0.0, 0.0, 0.0, 0.0),  // Emission
-            lp::Vec4::new(0.0, 0.0, 0.0, 0.0),  // Scattering
-            0.01,                                // Roughness
-            0.0,                                // Metallic
-            1.5,                                // ior
-            0.0,                                // anisotropy
-            0.0,                                // depth
-            0,                                  // Color tex
-            0,                                  // Emission tex
-            0,                                  // Roughness tex
-            0,                                  // Scattering tex
-            0,                                  // Normal tex
-        ),
+    let refractive = push_asset(&mut materials, lp::Material::new(
+        lp::MaterialType::Refractive,       // Mat type
+        lp::Vec4::new(0.1, 0.1, 1.0, 1.0),  // Color
+        lp::Vec4::new(0.0, 0.0, 0.0, 0.0),  // Emission
+        lp::Vec4::new(0.0, 0.0, 0.0, 0.0),  // Scattering
+        0.0,                                // Roughness
+        0.0,                                // Metallic
+        1.33,                               // ior
+        0.0,                                // anisotropy
+        0.0,                                // depth
+        0,                                  // Color tex
+        0,                                  // Emission tex
+        0,                                  // Roughness tex
+        0,                                  // Scattering tex
+        0,                                  // Normal tex
+    ));
 
-        // Rough reflective
-        // 6
-        lp::Material::new(
-            lp::MaterialType::Reflective,       // Mat type
-            lp::Vec4::new(0.9, 0.2, 0.2, 1.0),  // Color
-            lp::Vec4::new(0.0, 0.0, 0.0, 0.0),  // Emission
-            lp::Vec4::new(0.0, 0.0, 0.0, 0.0),  // Scattering
-            0.2,                                // Roughness
-            0.0,                                // Metallic
-            1.5,                                // ior
-            0.0,                                // anisotropy
-            0.0,                                // depth
-            0,                                  // Color tex
-            0,                                  // Emission tex
-            0,                                  // Roughness tex
-            0,                                  // Scattering tex
-            0,                                  // Normal tex
-        ),
+    let white_matte = push_asset(&mut materials, lp::Material::new(
+        lp::MaterialType::Matte,            // Mat type
+        lp::Vec4::new(1.0, 1.0, 1.0, 1.0),  // Color
+        lp::Vec4::new(0.0, 0.0, 0.0, 0.0),  // Emission
+        lp::Vec4::new(0.0, 0.0, 0.0, 0.0),  // Scattering
+        0.01,                                // Roughness
+        0.0,                                // Metallic
+        1.5,                                // ior
+        0.0,                                // anisotropy
+        0.0,                                // depth
+        0,                                  // Color tex
+        0,                                  // Emission tex
+        0,                                  // Roughness tex
+        0,                                  // Scattering tex
+        0,                                  // Normal tex
+    ));
 
-        // Rough glossy
-        // 7
-        lp::Material::new(
-            lp::MaterialType::Glossy,           // Mat type
-            lp::Vec4::new(0.9, 0.2, 0.2, 1.0),  // Color
-            lp::Vec4::new(0.0, 0.0, 0.0, 0.0),  // Emission
-            lp::Vec4::new(0.0, 0.0, 0.0, 0.0),  // Scattering
-            0.05,                               // Roughness
-            0.0,                                // Metallic
-            1.33,                               // ior
-            0.0,                                // anisotropy
-            0.0,                                // depth
-            0,                                  // Color tex
-            0,                                  // Emission tex
-            0,                                  // Roughness tex
-            0,                                  // Scattering tex
-            0,                                  // Normal tex
-        ),
+    // Rough reflective
+    // 6
+    let rough_reflective = push_asset(&mut materials, lp::Material::new(
+        lp::MaterialType::Reflective,       // Mat type
+        lp::Vec4::new(0.9, 0.2, 0.2, 1.0),  // Color
+        lp::Vec4::new(0.0, 0.0, 0.0, 0.0),  // Emission
+        lp::Vec4::new(0.0, 0.0, 0.0, 0.0),  // Scattering
+        0.2,                                // Roughness
+        0.0,                                // Metallic
+        1.5,                                // ior
+        0.0,                                // anisotropy
+        0.0,                                // depth
+        0,                                  // Color tex
+        0,                                  // Emission tex
+        0,                                  // Roughness tex
+        0,                                  // Scattering tex
+        0,                                  // Normal tex
+    ));
 
-        // Rough glossy
-        // 8
-        lp::Material::new(
-            lp::MaterialType::Glossy,           // Mat type
-            lp::Vec4::new(0.9, 0.2, 0.2, 1.0),  // Color
-            lp::Vec4::new(0.0, 0.0, 0.0, 0.0),  // Emission
-            lp::Vec4::new(0.0, 0.0, 0.0, 0.0),  // Scattering
-            0.1,                                // Roughness
-            0.0,                                // Metallic
-            1.33,                               // ior
-            0.0,                                // anisotropy
-            0.0,                                // depth
-            0,                                  // Color tex
-            0,                                  // Emission tex
-            0,                                  // Roughness tex
-            0,                                  // Scattering tex
-            0,                                  // Normal tex
-        ),
+    let rough_glossy = push_asset(&mut materials, lp::Material::new(
+        lp::MaterialType::Glossy,           // Mat type
+        lp::Vec4::new(0.9, 0.2, 0.2, 1.0),  // Color
+        lp::Vec4::new(0.0, 0.0, 0.0, 0.0),  // Emission
+        lp::Vec4::new(0.0, 0.0, 0.0, 0.0),  // Scattering
+        0.1,                               // Roughness
+        0.0,                                // Metallic
+        1.33,                               // ior
+        0.0,                                // anisotropy
+        0.0,                                // depth
+        0,                                  // Color tex
+        0,                                  // Emission tex
+        0,                                  // Roughness tex
+        0,                                  // Scattering tex
+        0,                                  // Normal tex
+    ));
 
-        // Gltf 1
-        // 9
-        lp::Material::new(
-            lp::MaterialType::GltfPbr,           // Mat type
-            lp::Vec4::new(0.9, 0.2, 0.2, 1.0),  // Color
-            lp::Vec4::new(0.0, 0.0, 0.0, 0.0),  // Emission
-            lp::Vec4::new(0.0, 0.0, 0.0, 0.0),  // Scattering
-            0.1,                                // Roughness
-            0.0,                                // Metallic
-            1.33,                               // ior
-            0.0,                                // anisotropy
-            0.0,                                // depth
-            0,                                  // Color tex
-            0,                                  // Emission tex
-            0,                                  // Roughness tex
-            0,                                  // Scattering tex
-            0,                                  // Normal tex
-        ),
+    let glft = push_asset(&mut materials, lp::Material::new(
+        lp::MaterialType::GltfPbr,           // Mat type
+        lp::Vec4::new(0.9, 0.2, 0.2, 1.0),  // Color
+        lp::Vec4::new(0.0, 0.0, 0.0, 0.0),  // Emission
+        lp::Vec4::new(0.0, 0.0, 0.0, 0.0),  // Scattering
+        0.1,                                // Roughness
+        0.0,                                // Metallic
+        1.33,                               // ior
+        0.0,                                // anisotropy
+        0.0,                                // depth
+        0,                                  // Color tex
+        0,                                  // Emission tex
+        0,                                  // Roughness tex
+        0,                                  // Scattering tex
+        0,                                  // Normal tex
+    ));
 
-        // Rough transparent
-        // 10
-        lp::Material::new(
-            lp::MaterialType::Transparent,      // Mat type
-            lp::Vec4::new(0.1, 0.1, 1.0, 1.0),  // Color
-            lp::Vec4::new(0.0, 0.0, 0.0, 0.0),  // Emission
-            lp::Vec4::new(0.0, 0.0, 0.0, 0.0),  // Scattering
-            0.008,                               // Roughness
-            0.0,                                // Metallic
-            1.33,                               // ior
-            0.0,                                // anisotropy
-            0.0,                                // depth
-            0,                                  // Color tex
-            0,                                  // Emission tex
-            0,                                  // Roughness tex
-            0,                                  // Scattering tex
-            0,                                  // Normal tex
-        ),
+    let rough_transparent = push_asset(&mut materials, lp::Material::new(
+        lp::MaterialType::Transparent,      // Mat type
+        lp::Vec4::new(0.1, 0.1, 1.0, 1.0),  // Color
+        lp::Vec4::new(0.0, 0.0, 0.0, 0.0),  // Emission
+        lp::Vec4::new(0.0, 0.0, 0.0, 0.0),  // Scattering
+        0.008,                               // Roughness
+        0.0,                                // Metallic
+        1.33,                               // ior
+        0.0,                                // anisotropy
+        0.0,                                // depth
+        0,                                  // Color tex
+        0,                                  // Emission tex
+        0,                                  // Roughness tex
+        0,                                  // Scattering tex
+        0,                                  // Normal tex
+    ));
 
-        // Rough refractive
-        // 11
-        lp::Material::new(
-            lp::MaterialType::Refractive,       // Mat type
-            lp::Vec4::new(0.1, 0.1, 1.0, 1.0),  // Color
-            lp::Vec4::new(0.0, 0.0, 0.0, 0.0),  // Emission
-            lp::Vec4::new(0.0, 0.0, 0.0, 0.0),  // Scattering
-            0.05,                                // Roughness
-            0.0,                                // Metallic
-            1.33,                               // ior
-            0.0,                                // anisotropy
-            0.0,                                // depth
-            0,                                  // Color tex
-            0,                                  // Emission tex
-            0,                                  // Roughness tex
-            0,                                  // Scattering tex
-            0,                                  // Normal tex
-        ),
+    let rough_reflective = push_asset(&mut materials, lp::Material::new(
+        lp::MaterialType::Refractive,       // Mat type
+        lp::Vec4::new(0.1, 0.1, 1.0, 1.0),  // Color
+        lp::Vec4::new(0.0, 0.0, 0.0, 0.0),  // Emission
+        lp::Vec4::new(0.0, 0.0, 0.0, 0.0),  // Scattering
+        0.05,                                // Roughness
+        0.0,                                // Metallic
+        1.33,                               // ior
+        0.0,                                // anisotropy
+        0.0,                                // depth
+        0,                                  // Color tex
+        0,                                  // Emission tex
+        0,                                  // Roughness tex
+        0,                                  // Scattering tex
+        0,                                  // Normal tex
+    ));
 
-    ];
+    let emissive = push_asset(&mut materials, lp::Material::new(
+        lp::MaterialType::Matte,       // Mat type
+        lp::Vec4::new(1.0, 1.0, 1.0, 1.0),  // Color
+        lp::Vec4::new(5.0, 5.0, 5.0, 0.0),  // Emission
+        lp::Vec4::new(0.0, 0.0, 0.0, 0.0),  // Scattering
+        0.05,                               // Roughness
+        0.0,                                // Metallic
+        1.33,                               // ior
+        0.0,                                // anisotropy
+        0.0,                                // depth
+        0,                                  // Color tex
+        0,                                  // Emission tex
+        0,                                  // Roughness tex
+        0,                                  // Scattering tex
+        0,                                  // Normal tex
+    ));
 
     let materials_buf = lp::upload_storage_buffer(&device, &queue, unsafe { to_u8_slice(&materials) });
 
     let tlas_buf = lp::build_tlas(&device, &queue, instances.as_slice(), &aabbs);
 
-    let textures = vec![
-        lp::create_white_texture(device, queue),
-        load_texture(device, queue, "bunny_color.png", false),
-    ];
+    let mut textures = Vec::<wgpu::Texture>::new();
+    let white_tex = push_asset(&mut textures, lp::create_white_texture(device, queue));
+    let bunny_color = push_asset(&mut textures, load_texture(device, queue, "bunny_color.png", false));
+    let env_map = push_asset(&mut textures, load_texture(device, queue, "poly_haven_studio_1k.hdr", true));
 
     let linear_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
         label: None,
@@ -300,6 +282,13 @@ pub fn build_scene(device: &wgpu::Device, queue: &wgpu::Queue) -> lp::SceneDesc
         mipmap_filter: wgpu::FilterMode::Linear,
         ..Default::default()
     });
+
+    let environment = lp::Environment {
+        emission: lp::Vec3 { x: 1.0, y: 1.0, z: 1.0 },
+        emission_tex_idx: env_map,
+    };
+
+    let env_buf = lp::upload_storage_buffer(device, queue, unsafe { to_u8_slice(&[environment]) });
 
     let env_map_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
         label: None,
@@ -320,8 +309,7 @@ pub fn build_scene(device: &wgpu::Device, queue: &wgpu::Queue) -> lp::SceneDesc
 
         textures: textures,
         samplers: vec![linear_sampler],
-        env_map: load_texture(device, queue, "poly_haven_studio_1k.hdr", true),
-        env_map_sampler: env_map_sampler,
+        environments: env_buf,
     };
 }
 
@@ -463,4 +451,10 @@ fn rgba32f_to_rgba16f(image: &image::DynamicImage) -> Vec<f16>
     rgba32f.pixels()
         .flat_map(|p| p.0.iter().map(|&f| f16::from_f32(f)))
         .collect()
+}
+
+fn push_asset<T>(vec: &mut Vec<T>, el: T) -> u32
+{
+    vec.push(el);
+    return (vec.len() - 1) as u32;
 }
