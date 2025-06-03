@@ -14,6 +14,9 @@
 @group(0) @binding(8) var samplers: binding_array<sampler>;
 // Environments
 @group(0) @binding(9) var<storage, read> environments: array<Environment>;
+// Lights
+@group(0) @binding(10) var<storage, read> lights: array<Light>;
+@group(0) @binding(11) var<storage, read> lights_cdfs: binding_array<LightCdfs>;
 
 // Group 1: Pathtrace settings
 @group(1) @binding(0) var<uniform> camera_transform: mat4x4f;
@@ -27,10 +30,11 @@
 
 // We need these wrappers, or we get a
 // compilation error, for some reason...
-struct VertsPos { data: array<vec3f>   }
-struct Verts    { data: array<Vertex>  }
-struct Indices  { data: array<u32>     }
-struct BvhNodes { data: array<BvhNode> }
+struct VertsPos  { data: array<vec3f>   }
+struct Verts     { data: array<Vertex>  }
+struct Indices   { data: array<u32>     }
+struct BvhNodes  { data: array<BvhNode> }
+struct LightCdfs { data: array<f32>     }
 
 //////////////////////////////////////////////
 // Scene description
@@ -90,6 +94,13 @@ struct Environment
     emission_tex_idx: u32,
 }
 
+struct Light
+{
+    is_instance: u32,
+    instance_idx: u32,
+    env_idx: u32,
+}
+
 // NOTE: The odd ordering of the fields
 // ensures that the struct is 32 bytes wide,
 // given that vec3f has 16-byte alignment.
@@ -124,7 +135,7 @@ fn pathtrace_main(@builtin(local_invocation_id) local_id: vec3u, @builtin(global
     let output_dim = textureDimensions(output_texture).xy;
     init_rng(global_id.y * global_id.x + global_id.x, output_dim.y * output_dim.x + output_dim.x);
 
-    const NUM_SAMPLES: u32 = 1;
+    const NUM_SAMPLES: u32 = 10;
     var color = vec3f(0.0f);
     for(var sample: u32 = 0; sample < NUM_SAMPLES; sample++)
     {
@@ -262,7 +273,7 @@ fn pathtrace_naive(local_id: vec3u, start_ray: Ray) -> vec3f
         let hit = ray_scene_intersection(local_id, ray);
         if hit.dst == F32_MAX  // Missed.
         {
-            radiance += sample_environment(ray.dir) * weight;
+            radiance += sample_environments(ray.dir) * weight;
             break;
         }
 
@@ -347,19 +358,21 @@ struct MaterialPoint
     trdepth: f32,
 }
 
-fn sample_environment(dir: vec3f) -> vec3f
+fn sample_environments(dir: vec3f) -> vec3f
+{
+    var emission = vec3f(0.0f);
+    for(var i = 0u; i < arrayLength(&environments); i++) {
+        emission += sample_environment(dir, i);
+    }
+    return emission;
+}
+
+fn sample_environment(dir: vec3f, env_idx: u32) -> vec3f
 {
     let coords = vec2f((atan2(dir.x, dir.z) + PI) / (2*PI), acos(dir.y) / PI);
-
-    var emission = vec3f(0.0f);
-    for(var i = 0u; i < arrayLength(&environments); i++)
-    {
-        let env = environments[i];
-        const sampler_idx = 0u;  // TODO
-        emission += env.emission.rgb * textureSampleLevel(textures[env.emission_tex_idx], samplers[sampler_idx], coords, 0.0f).rgb;
-    }
-
-    return emission;
+    let env = environments[env_idx];
+    const sampler_idx = 0u;  // TODO
+    return env.emission.rgb * textureSampleLevel(textures[env.emission_tex_idx], samplers[sampler_idx], coords, 0.0f).rgb;
 }
 
 struct BsdfSample
@@ -640,6 +653,52 @@ fn microfacet_shadowing(roughness: f32, normal: vec3f, halfway: vec3f, outgoing:
            microfacet_shadowing1(roughness, normal, halfway, incoming, ggx);
 }
 
+fn sample_lights(position: vec3f, rel: f32) -> vec3f
+{
+    let light_id = random_u32() % arrayLength(&lights);
+    let light = lights[light_id];
+    if light.is_instance != 0
+    {
+        let instance = instances[light.instance_idx];
+        let mesh_idx = instance.mesh_idx;
+        let tri_idx = sample_idx_in_light_cdf(light_id);
+        let v0 = verts_pos_array[mesh_idx].data[indices_array[mesh_idx].data[tri_idx*3 + 0]];
+        let v1 = verts_pos_array[mesh_idx].data[indices_array[mesh_idx].data[tri_idx*3 + 1]];
+        let v2 = verts_pos_array[mesh_idx].data[indices_array[mesh_idx].data[tri_idx*3 + 2]];
+        let rnd_p = random_in_tri(v0, v1, v2);
+        return normalize(rnd_p - position);
+    }
+    else
+    {
+        let env = environments[light.env_idx];
+        let pixel_idx = sample_idx_in_light_cdf(light_id);
+
+    }
+
+    return vec3f();  // TODO TODO TODO
+}
+
+fn sample_idx_in_light_cdf(light_idx: u32) -> u32
+{
+    let rnd = random_f32();
+    var res = 0u;
+    for(var i = 0u; i < arrayLength(&lights_cdfs[light_idx].data); i++)
+    {
+        if rnd < lights_cdfs[light_idx].data[i]
+        {
+            res = i;
+            break;
+        }
+    }
+
+    return res;
+}
+
+fn sample_lights_pdf(position: vec3f, dir: vec3f) -> f32
+{
+    return 0.0f;  // TODO TODO TODO
+}
+
 //////////////////////////////////////////////
 // Random number generation
 //////////////////////////////////////////////
@@ -731,6 +790,19 @@ fn random_direction_cos(normal: vec3f) -> vec3f
     let u = normalize(cross(axis, w));
     let v = cross(w, u);
     return normalize(x * u + y * v + z * w);
+}
+
+fn random_tri_uv() -> vec2f
+{
+    let rnd = vec2f(random_f32(), random_f32());
+    return vec2f(1.0f - sqrt(rnd.x), rnd.y * sqrt(rnd.x));
+}
+
+fn random_in_tri(v0: vec3f, v1: vec3f, v2: vec3f) -> vec3f
+{
+    let rnd = vec2f(random_f32(), random_f32());
+    let uv = vec2f(1.0f - sqrt(rnd.x), rnd.y * sqrt(rnd.x));
+    return v0 * (1.0f - uv.x - uv.y) + v1 * uv.x + v2 * uv.y;
 }
 
 //////////////////////////////////////////////
@@ -1016,7 +1088,6 @@ fn ray_mesh_intersection(local_id: vec3u, ray: Ray, mesh_idx: u32) -> RayMeshInt
 // Utils and constants
 //////////////////////////////////////////////
 
-
 const F32_MAX: f32 = 0x1.fffffep+127;  // WGSL does not yet have a "max(f32)"
 const PI: f32 = 3.14159265358979323846264338327950288;
 
@@ -1054,8 +1125,13 @@ fn same_hemisphere(normal: vec3f, outgoing: vec3f, incoming: vec3f) -> bool
     return dot(normal, outgoing) * dot(normal, incoming) >= 0;
 }
 
+
+
+
+
 /////////////////////////////////////////////////////////////////////////////////////
 // SAMPLING FUNCTIONS (temporary)
+
 
 
 

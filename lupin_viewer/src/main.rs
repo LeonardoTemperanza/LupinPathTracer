@@ -211,7 +211,7 @@ fn main()
                                                   &normals_texture, &frame.texture);
 */
 
-                    const MAX_ACCUMS: u32 = 100;
+                    const MAX_ACCUMS: u32 = 1000;
                     if accum_counter < MAX_ACCUMS
                     {
                         let accum_params = lp::AccumulationParams {
@@ -223,6 +223,7 @@ fn main()
                     }
                     else if !performed_denoise
                     {
+                        println!("Done!");
                         //lp::transfer_to_cpu_and_denoise_image(&device, &queue, &output_textures[output_tex_front],
                         //                                      &output_textures[output_tex_back], None, None);
                         performed_denoise = true;

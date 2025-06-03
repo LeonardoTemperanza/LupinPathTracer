@@ -134,7 +134,9 @@ pub struct Environment
 #[repr(C)]
 pub struct Light
 {
-
+    is_instance: u32,
+    instance_idx: u32,
+    env_idx: u32,
 }
 
 // This doesn't include positions, as that
@@ -1339,7 +1341,6 @@ pub fn convert_to_ldr_no_tonemap(device: &wgpu::Device, queue: &wgpu::Queue, sha
     let render_target_view = render_target.create_view(&Default::default());
     let hdr_texture_view = hdr_texture.create_view(&Default::default());
 
-    // NOTE: Coupled to the struct in the shader of the same name.
     #[derive(Default)]
     #[repr(C)]
     struct TonemapShaderParams
@@ -1589,9 +1590,35 @@ fn create_pathtracer_output_bindgroup(device: &wgpu::Device, queue: &wgpu::Queue
 
 //////////////
 // Lights
-pub fn create_lights() -> Vec<Light>
+// Returns the ligths buffer, and an array of CDF buffers.
+pub fn build_lights(device: &wgpu::Device, queue: &wgpu::Queue, instances: &[Instance], environments: &[Environment]) -> (wgpu::Buffer, Vec<wgpu::Buffer>)
 {
-    return Default::default();
+    let mut lights = Vec::<Light>::new();
+    let mut lights_cdfs = Vec::<wgpu::Buffer>::new();
+
+    for instance in instances
+    {
+        /*let new_light = Light {
+
+        };
+
+        lights.push(new_light);
+        */
+
+        let mut new_cdf = Vec::<f32>::new();
+
+        let new_cdf_buf = upload_storage_buffer(device, queue, to_u8_slice(&lights));
+
+    }
+
+    for env in environments
+    {
+
+    }
+
+    let lights_buf = upload_storage_buffer(device, queue, to_u8_slice(&lights));
+
+    return (lights_buf, lights_cdfs);
 }
 
 //////////////
@@ -1603,7 +1630,7 @@ struct DenoiseResources
 
 }
 
-fn create_denoise_resources(device: &wgpu::Device, queue: &wgpu::Queue)
+fn create_denoise_resources(device: &wgpu::Device, queue: &wgpu::Queue) -> DenoiseResources
 {
 
 }
