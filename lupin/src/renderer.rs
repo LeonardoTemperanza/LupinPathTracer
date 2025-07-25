@@ -2,6 +2,8 @@
 use crate::base::*;
 use crate::wgpu_utils::*;
 
+use rand::Rng;
+
 use wgpu::util::DeviceExt;  // For some extra device traits.
 
 pub static DEFAULT_PATHTRACER_SRC: &str = include_str!("shaders/pathtracer.wgsl");
@@ -49,6 +51,16 @@ pub struct SceneDesc
     pub textures: Vec<wgpu::Texture>,
     pub samplers: Vec<wgpu::Sampler>,
     pub environments: wgpu::Buffer,
+
+    // Auxiliary data structures.
+    pub lights: Lights,
+}
+
+pub struct Lights
+{
+    pub lights: wgpu::Buffer,
+    pub alias_tables: Vec::<wgpu::Buffer>,
+    pub env_alias_tables: Vec::<wgpu::Buffer>,
 }
 
 pub struct Mesh
@@ -134,9 +146,16 @@ pub struct Environment
 #[repr(C)]
 pub struct Light
 {
-    is_instance: u32,
-    instance_idx: u32,
-    env_idx: u32,
+    pub instance_idx: u32,
+}
+
+#[derive(Default, Clone, Copy, Debug)]
+#[repr(C)]
+pub struct AliasBin
+{
+    pub prob: f32,
+    pub alias_threshold: f32,  // [0, 1]; should select the alias if rnd_f32 > alias
+    pub alias: u32,
 }
 
 // This doesn't include positions, as that
@@ -180,9 +199,10 @@ pub struct TlasNode
 // Constants
 pub const BVH_MAX_DEPTH: i32 = 25;
 pub const MAX_MESHES:    u32 = 15000;
+pub const MAX_ENVS:      u32 = 10;
 pub const MAX_TEXTURES:  u32 = 15000;
 pub const MAX_SAMPLERS:  u32 = 32;
-pub const NUM_STORAGE_BUFFERS_PER_MESH: u32 = 4;
+pub const NUM_STORAGE_BUFFERS_PER_MESH: u32 = 5;
 
 // This will need to be used when creating the device
 pub fn get_required_device_spec()->wgpu::DeviceDescriptor<'static>
@@ -197,7 +217,7 @@ pub fn get_required_device_spec()->wgpu::DeviceDescriptor<'static>
                            wgpu::Features::SAMPLED_TEXTURE_AND_STORAGE_BUFFER_ARRAY_NON_UNIFORM_INDEXING |
                            wgpu::Features::PARTIALLY_BOUND_BINDING_ARRAY,
         required_limits: wgpu::Limits {
-            max_storage_buffers_per_shader_stage: MAX_MESHES * NUM_STORAGE_BUFFERS_PER_MESH + 64,
+            max_storage_buffers_per_shader_stage: MAX_MESHES * NUM_STORAGE_BUFFERS_PER_MESH + MAX_ENVS + 64,
             max_sampled_textures_per_shader_stage: MAX_TEXTURES + 64,
             max_samplers_per_shader_stage: MAX_SAMPLERS + 8,
             ..Default::default()
@@ -208,7 +228,7 @@ pub fn get_required_device_spec()->wgpu::DeviceDescriptor<'static>
 
 // Shader params
 
-pub struct PathtraceShaderParams
+pub struct PathtraceResources
 {
     pub pipeline: wgpu::ComputePipeline,
     pub debug_pipeline: wgpu::ComputePipeline,
@@ -220,7 +240,7 @@ pub struct PathtraceShaderParams
     pub dummy_output_texture: wgpu::Texture,
 }
 
-pub fn build_pathtrace_shader_params(device: &wgpu::Device, with_runtime_checks: bool) -> PathtraceShaderParams
+pub fn build_pathtrace_resources(device: &wgpu::Device, with_runtime_checks: bool) -> PathtraceResources
 {
     let shader_desc = wgpu::ShaderModuleDescriptor {
         label: Some("Lupin Pathtracer Shader"),
@@ -234,181 +254,9 @@ pub fn build_pathtrace_shader_params(device: &wgpu::Device, with_runtime_checks:
         shader = unsafe { device.create_shader_module_trusted(shader_desc, wgpu::ShaderRuntimeChecks::unchecked()) };
     }
 
-    let scene_bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor{
-        label: Some("Lupin Pathtracer Bindgroup Layout"),
-        entries: &[
-            wgpu::BindGroupLayoutEntry {  // verts_pos
-                binding: 0,
-                visibility: wgpu::ShaderStages::COMPUTE,
-                ty: wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Storage { read_only: true },
-                    has_dynamic_offset: false,
-                    min_binding_size: None,
-                },
-                count: std::num::NonZero::new(MAX_MESHES)
-            },
-            wgpu::BindGroupLayoutEntry {  // verts
-                binding: 1,
-                visibility: wgpu::ShaderStages::COMPUTE,
-                ty: wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Storage { read_only: true },
-                    has_dynamic_offset: false,
-                    min_binding_size: None,
-                },
-                count: std::num::NonZero::new(MAX_MESHES)
-            },
-            wgpu::BindGroupLayoutEntry {  // indices
-                binding: 2,
-                visibility: wgpu::ShaderStages::COMPUTE,
-                ty: wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Storage { read_only: true },
-                    has_dynamic_offset: false,
-                    min_binding_size: None,
-                },
-                count: std::num::NonZero::new(MAX_MESHES)
-            },
-            wgpu::BindGroupLayoutEntry {  // bvh_nodes
-                binding: 3,
-                visibility: wgpu::ShaderStages::COMPUTE,
-                ty: wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Storage { read_only: true },
-                    has_dynamic_offset: false,
-                    min_binding_size: None,
-                },
-                count: std::num::NonZero::new(MAX_MESHES)
-            },
-            wgpu::BindGroupLayoutEntry {  // tlas_nodes
-                binding: 4,
-                visibility: wgpu::ShaderStages::COMPUTE,
-                ty: wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Storage { read_only: true },
-                    has_dynamic_offset: false,
-                    min_binding_size: None,
-                },
-                count: None,
-            },
-            wgpu::BindGroupLayoutEntry {  // instances
-                binding: 5,
-                visibility: wgpu::ShaderStages::COMPUTE,
-                ty: wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Storage { read_only: true },
-                    has_dynamic_offset: false,
-                    min_binding_size: None,
-                },
-                count: None,
-            },
-            wgpu::BindGroupLayoutEntry {  // materials
-                binding: 6,
-                visibility: wgpu::ShaderStages::COMPUTE,
-                ty: wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Storage { read_only: true },
-                    has_dynamic_offset: false,
-                    min_binding_size: None,
-                },
-                count: None,
-            },
-            wgpu::BindGroupLayoutEntry {  // textures
-                binding: 7,
-                visibility: wgpu::ShaderStages::COMPUTE,
-                ty: wgpu::BindingType::Texture {
-                    sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                    view_dimension: wgpu::TextureViewDimension::D2,
-                    multisampled: false,
-                },
-                count: std::num::NonZero::new(MAX_TEXTURES)
-            },
-            wgpu::BindGroupLayoutEntry {  // samplers
-                binding: 8,
-                visibility: wgpu::ShaderStages::COMPUTE,
-                ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-                count: std::num::NonZero::new(MAX_SAMPLERS)
-            },
-            wgpu::BindGroupLayoutEntry {  // environments
-                binding: 9,
-                visibility: wgpu::ShaderStages::COMPUTE,
-                ty: wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Storage { read_only: true },
-                    has_dynamic_offset: false,
-                    min_binding_size: None,
-                },
-                count: None,
-            },
-        ]
-    });
-
-    assert!(NUM_STORAGE_BUFFERS_PER_MESH == 4);
-
-    let settings_bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor{
-        label: None,
-        entries: &[
-            wgpu::BindGroupLayoutEntry {  // camera transform
-                binding: 0,
-                visibility: wgpu::ShaderStages::COMPUTE,
-                ty: wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Uniform,
-                    has_dynamic_offset: false,
-                    min_binding_size: None,
-                },
-                count: None
-            },
-            wgpu::BindGroupLayoutEntry {  // accum_counter
-                binding: 1,
-                visibility: wgpu::ShaderStages::COMPUTE,
-                ty: wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Uniform,
-                    has_dynamic_offset: false,
-                    min_binding_size: None,
-                },
-                count: None
-            },
-            wgpu::BindGroupLayoutEntry {  // prev frame
-                binding: 2,
-                visibility: wgpu::ShaderStages::COMPUTE,
-                ty: wgpu::BindingType::Texture {
-                    sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                    view_dimension: wgpu::TextureViewDimension::D2,
-                    multisampled: false,
-                },
-                count: None
-            },
-        ]
-    });
-
-    let render_target_bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor{
-        label: None,
-        entries: &[
-            wgpu::BindGroupLayoutEntry {
-                binding: 0,
-                visibility: wgpu::ShaderStages::COMPUTE,
-                ty: wgpu::BindingType::StorageTexture {
-                    access: wgpu::StorageTextureAccess::WriteOnly,
-                    format: wgpu::TextureFormat::Rgba16Float,
-                    view_dimension: wgpu::TextureViewDimension::D2
-                },
-                count: None
-            },
-            wgpu::BindGroupLayoutEntry {
-                binding: 1,
-                visibility: wgpu::ShaderStages::COMPUTE,
-                ty: wgpu::BindingType::StorageTexture {
-                    access: wgpu::StorageTextureAccess::WriteOnly,
-                    format: wgpu::TextureFormat::Rgba8Unorm,
-                    view_dimension: wgpu::TextureViewDimension::D2
-                },
-                count: None
-            },
-            wgpu::BindGroupLayoutEntry {
-                binding: 2,
-                visibility: wgpu::ShaderStages::COMPUTE,
-                ty: wgpu::BindingType::StorageTexture {
-                    access: wgpu::StorageTextureAccess::WriteOnly,
-                    format: wgpu::TextureFormat::Rgba8Snorm,
-                    view_dimension: wgpu::TextureViewDimension::D2
-                },
-                count: None
-            },
-        ]
-    });
+    let scene_bind_group_layout = create_pathtracer_scene_bindgroup_layout(device);
+    let settings_bind_group_layout = create_pathtracer_settings_bindgroup_layout(device);
+    let render_target_bind_group_layout = create_pathtracer_output_bindgroup_layout(device);
 
     let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label: Some("Lupin Pathtracer Pipeline Layout"),
@@ -510,7 +358,7 @@ pub fn build_pathtrace_shader_params(device: &wgpu::Device, with_runtime_checks:
         view_formats: &[],
     });
 
-    return PathtraceShaderParams {
+    return PathtraceResources {
         pipeline,
         debug_pipeline,
         gbuffer_albedo_pipeline,
@@ -528,7 +376,7 @@ pub struct AccumulationParams<'a>
     pub accum_counter: u32,
 }
 
-pub fn pathtrace_scene(device: &wgpu::Device, queue: &wgpu::Queue, scene: &SceneDesc, render_target: &wgpu::Texture, shader_params: &PathtraceShaderParams, accum_params: &AccumulationParams, camera_transform: Mat4)
+pub fn pathtrace_scene(device: &wgpu::Device, queue: &wgpu::Queue, scene: &SceneDesc, render_target: &wgpu::Texture, shader_params: &PathtraceResources, accum_params: &AccumulationParams, camera_transform: Mat4)
 {
     // TODO: Check format and usage of render target params and others.
 
@@ -591,19 +439,19 @@ struct DebugInput
 }
 
 /*
-pub fn pathtrace_scene_debug(device: &wgpu::Device, queue: &wgpu::Queue, scene: &SceneDesc, render_target: &wgpu::Texture, shader_params: &PathtraceShaderParams, camera_transform: Mat4)
+pub fn pathtrace_scene_debug(device: &wgpu::Device, queue: &wgpu::Queue, scene: &SceneDesc, render_target: &wgpu::Texture, shader_params: &PathtraceResources, camera_transform: Mat4)
 {
 
 }
 */
 
-pub fn raycast_gbuffers(device: &wgpu::Device, queue: &wgpu::Queue, scene: &SceneDesc, albedo_target: &wgpu::Texture, normals_target: &wgpu::Texture, shader_params: &PathtraceShaderParams, camera_transform: Mat4)
+pub fn raycast_gbuffers(device: &wgpu::Device, queue: &wgpu::Queue, scene: &SceneDesc, albedo_target: &wgpu::Texture, normals_target: &wgpu::Texture, shader_params: &PathtraceResources, camera_transform: Mat4)
 {
     raycast_albedo(device, queue, scene, albedo_target, shader_params, camera_transform);
     raycast_normals(device, queue, scene, normals_target, shader_params, camera_transform);
 }
 
-pub fn raycast_albedo(device: &wgpu::Device, queue: &wgpu::Queue, scene: &SceneDesc, albedo_target: &wgpu::Texture, shader_params: &PathtraceShaderParams, camera_transform: Mat4)
+pub fn raycast_albedo(device: &wgpu::Device, queue: &wgpu::Queue, scene: &SceneDesc, albedo_target: &wgpu::Texture, shader_params: &PathtraceResources, camera_transform: Mat4)
 {
     // TODO: Check format and usage of render target params and others.
 
@@ -634,7 +482,7 @@ pub fn raycast_albedo(device: &wgpu::Device, queue: &wgpu::Queue, scene: &SceneD
     queue.submit(Some(encoder.finish()));
 }
 
-pub fn raycast_normals(device: &wgpu::Device, queue: &wgpu::Queue, scene: &SceneDesc, normals_target: &wgpu::Texture, shader_params: &PathtraceShaderParams, camera_transform: Mat4)
+pub fn raycast_normals(device: &wgpu::Device, queue: &wgpu::Queue, scene: &SceneDesc, normals_target: &wgpu::Texture, shader_params: &PathtraceResources, camera_transform: Mat4)
 {
     let scene_bindgroup = create_pathtracer_scene_bindgroup(device, queue, shader_params, scene);
     let settings_bindgroup = create_pathtracer_settings_bindgroup(device, queue, shader_params, None, camera_transform);
@@ -1110,7 +958,7 @@ fn compute_aabb(_indices: &[u32], tri_bounds: &mut[Aabb], tri_begin: u32, tri_co
 ////////
 // Tonemapping
 
-pub struct TonemapShaderParams
+pub struct TonemapResources
 {
     pub identity_pipeline: wgpu::RenderPipeline,
     pub aces_pipeline: wgpu::RenderPipeline,
@@ -1118,7 +966,7 @@ pub struct TonemapShaderParams
     pub sampler: wgpu::Sampler,
 }
 
-pub fn build_tonemap_shader_params(device: &wgpu::Device) -> TonemapShaderParams
+pub fn build_tonemap_resources(device: &wgpu::Device) -> TonemapResources
 {
     let shader_desc = wgpu::ShaderModuleDescriptor {
         label: Some("Lupin Tonemapping Shader"),
@@ -1223,7 +1071,7 @@ pub fn build_tonemap_shader_params(device: &wgpu::Device) -> TonemapShaderParams
         ..Default::default()
     });
 
-    return TonemapShaderParams {
+    return TonemapResources {
         identity_pipeline,
         aces_pipeline,
         filmic_pipeline,
@@ -1231,22 +1079,22 @@ pub fn build_tonemap_shader_params(device: &wgpu::Device) -> TonemapShaderParams
     };
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Default, Clone, Copy, Debug, PartialEq)]
 pub enum TonemapOperator
 {
-    Aces,
+    #[default] Aces,
     FilmicUC2,
-    FilmicUC2Custom { linear_white: f32, a: f32, b: f32, c: f32, d: f32, e: f32, f: f32 },
+    FilmicCustom { linear_white: f32, a: f32, b: f32, c: f32, d: f32, e: f32, f: f32 },
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Default, Clone, Copy, Debug)]
 pub struct TonemapParams
 {
     pub operator: TonemapOperator,
     pub exposure: f32,
 }
 
-pub fn apply_tonemapping(device: &wgpu::Device, queue: &wgpu::Queue, shader_params: &TonemapShaderParams, hdr_texture: &wgpu::Texture, render_target: &wgpu::Texture, tonemap_params: &TonemapParams)
+pub fn apply_tonemapping(device: &wgpu::Device, queue: &wgpu::Queue, shader_params: &TonemapResources, hdr_texture: &wgpu::Texture, render_target: &wgpu::Texture, tonemap_params: &TonemapParams)
 {
     let render_target_view = render_target.create_view(&Default::default());
     let hdr_texture_view = hdr_texture.create_view(&Default::default());
@@ -1254,7 +1102,7 @@ pub fn apply_tonemapping(device: &wgpu::Device, queue: &wgpu::Queue, shader_para
     // NOTE: Coupled to the struct in the shader of the same name.
     #[derive(Default)]
     #[repr(C)]
-    struct TonemapShaderParams
+    struct TonemapResources
     {
         exposure: f32,
         // For filmic tonemapping
@@ -1262,7 +1110,7 @@ pub fn apply_tonemapping(device: &wgpu::Device, queue: &wgpu::Queue, shader_para
         a: f32, b: f32, c: f32, d: f32, e: f32, f: f32,
     }
 
-    let mut params = TonemapShaderParams::default();
+    let mut params = TonemapResources::default();
     params.exposure = tonemap_params.exposure;
 
     let pipeline = match tonemap_params.operator
@@ -1280,7 +1128,7 @@ pub fn apply_tonemapping(device: &wgpu::Device, queue: &wgpu::Queue, shader_para
 
             &shader_params.filmic_pipeline
         }
-        TonemapOperator::FilmicUC2Custom { linear_white, a, b, c, d, e, f } =>
+        TonemapOperator::FilmicCustom { linear_white, a, b, c, d, e, f } =>
         {
             params.linear_white = linear_white;
             params.a = a;
@@ -1336,14 +1184,14 @@ pub fn apply_tonemapping(device: &wgpu::Device, queue: &wgpu::Queue, shader_para
     queue.submit(Some(encoder.finish()));
 }
 
-pub fn convert_to_ldr_no_tonemap(device: &wgpu::Device, queue: &wgpu::Queue, shader_params: &TonemapShaderParams, hdr_texture: &wgpu::Texture, render_target: &wgpu::Texture)
+pub fn convert_to_ldr_no_tonemap(device: &wgpu::Device, queue: &wgpu::Queue, shader_params: &TonemapResources, hdr_texture: &wgpu::Texture, render_target: &wgpu::Texture)
 {
     let render_target_view = render_target.create_view(&Default::default());
     let hdr_texture_view = hdr_texture.create_view(&Default::default());
 
     #[derive(Default)]
     #[repr(C)]
-    struct TonemapShaderParams
+    struct TonemapResources
     {
         exposure: f32,
         // For filmic tonemapping
@@ -1351,7 +1199,7 @@ pub fn convert_to_ldr_no_tonemap(device: &wgpu::Device, queue: &wgpu::Queue, sha
         a: f32, b: f32, c: f32, d: f32, e: f32, f: f32,
     }
 
-    let params = TonemapShaderParams::default();
+    let params = TonemapResources::default();
 
     let params_uniform = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: None,
@@ -1402,8 +1250,18 @@ fn buffer_resource(buffer: &wgpu::Buffer) -> wgpu::BindingResource
     return wgpu::BindingResource::Buffer(wgpu::BufferBinding { buffer: buffer, offset: 0, size: None });
 }
 
-fn array_of_buffer_bindings_resource(buffers: &Vec<wgpu::Buffer>) -> Vec<wgpu::BufferBinding>
+fn array_of_buffer_bindings_resource<'a>(buffers: &'a Vec<wgpu::Buffer>, empty_buffer: &'a wgpu::Buffer) -> Vec<wgpu::BufferBinding<'a>>
 {
+    // NOTE: Arrays of bindings can't be empty.
+    if buffers.len() <= 0
+    {
+        return vec![wgpu::BufferBinding {
+            buffer: empty_buffer,
+            offset: 0,
+            size: None,
+        }];
+    }
+
     let mut bindings: Vec<wgpu::BufferBinding> = Vec::with_capacity(buffers.len());
     for i in 0..buffers.len()
     {
@@ -1464,7 +1322,7 @@ fn array_of_sampler_bindings_resource<'a>(samplers: &'a Vec<wgpu::Sampler>) -> V
     return bindings;
 }
 
-fn create_pathtracer_scene_bindgroup(device: &wgpu::Device, queue: &wgpu::Queue, shader_params: &PathtraceShaderParams, scene: &SceneDesc) -> wgpu::BindGroup
+fn create_pathtracer_scene_bindgroup(device: &wgpu::Device, queue: &wgpu::Queue, shader_params: &PathtraceResources, scene: &SceneDesc) -> wgpu::BindGroup
 {
     // Convert AoS to SoA.
     let mut verts_pos = Vec::<&wgpu::Buffer>::with_capacity(scene.meshes.len());
@@ -1480,6 +1338,7 @@ fn create_pathtracer_scene_bindgroup(device: &wgpu::Device, queue: &wgpu::Queue,
     }
 
     use crate::wgpu_utils::*;
+    let empty_buf = create_empty_storage_buffer(device);
     let verts_pos_array = array_of_buffer_bindings_ref_resource(&verts_pos);
     let verts_array     = array_of_buffer_bindings_ref_resource(&verts);
     let indices_array   = array_of_buffer_bindings_ref_resource(&indices);
@@ -1487,9 +1346,11 @@ fn create_pathtracer_scene_bindgroup(device: &wgpu::Device, queue: &wgpu::Queue,
     let texture_views   = array_of_texture_views(&scene.textures);
     let textures_array  = array_of_texture_bindings_resource(&texture_views);
     let samplers_array  = array_of_sampler_bindings_resource(&scene.samplers);
+    let alias_table_array = array_of_buffer_bindings_resource(&scene.lights.alias_tables, &empty_buf);
+    let env_alias_table_array = array_of_buffer_bindings_resource(&scene.lights.env_alias_tables, &empty_buf);
 
     let scene_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-        label: None,
+        label: Some("Scene bind group"),
         layout: &shader_params.pipeline.get_bind_group_layout(0),
         entries: &[
             wgpu::BindGroupEntry { binding: 0,  resource: wgpu::BindingResource::BufferArray(verts_pos_array.as_slice()) },
@@ -1502,13 +1363,153 @@ fn create_pathtracer_scene_bindgroup(device: &wgpu::Device, queue: &wgpu::Queue,
             wgpu::BindGroupEntry { binding: 7,  resource: wgpu::BindingResource::TextureViewArray(textures_array.as_slice()) },
             wgpu::BindGroupEntry { binding: 8,  resource: wgpu::BindingResource::SamplerArray(samplers_array.as_slice()) },
             wgpu::BindGroupEntry { binding: 9,  resource: buffer_resource(&scene.environments) },
+            wgpu::BindGroupEntry { binding: 10, resource: buffer_resource(&scene.environments) },  // TODO TODO
+            wgpu::BindGroupEntry { binding: 11, resource: wgpu::BindingResource::BufferArray(alias_table_array.as_slice()) },
+            wgpu::BindGroupEntry { binding: 12, resource: wgpu::BindingResource::BufferArray(env_alias_table_array.as_slice()) },
         ]
     });
 
     return scene_bind_group;
 }
 
-fn create_pathtracer_settings_bindgroup(device: &wgpu::Device, queue: &wgpu::Queue, shader_params: &PathtraceShaderParams, accum_params: Option<&AccumulationParams>, camera_transform: Mat4) -> wgpu::BindGroup
+fn create_pathtracer_scene_bindgroup_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout
+{
+    assert!(NUM_STORAGE_BUFFERS_PER_MESH == 5);
+
+    return device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor{
+        label: Some("Lupin Pathtracer Bindgroup Layout"),
+        entries: &[
+            wgpu::BindGroupLayoutEntry {  // verts_pos
+                binding: 0,
+                visibility: wgpu::ShaderStages::COMPUTE,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Storage { read_only: true },
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: std::num::NonZero::new(MAX_MESHES)
+            },
+            wgpu::BindGroupLayoutEntry {  // verts
+                binding: 1,
+                visibility: wgpu::ShaderStages::COMPUTE,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Storage { read_only: true },
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: std::num::NonZero::new(MAX_MESHES)
+            },
+            wgpu::BindGroupLayoutEntry {  // indices
+                binding: 2,
+                visibility: wgpu::ShaderStages::COMPUTE,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Storage { read_only: true },
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: std::num::NonZero::new(MAX_MESHES)
+            },
+            wgpu::BindGroupLayoutEntry {  // bvh_nodes
+                binding: 3,
+                visibility: wgpu::ShaderStages::COMPUTE,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Storage { read_only: true },
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: std::num::NonZero::new(MAX_MESHES)
+            },
+            wgpu::BindGroupLayoutEntry {  // tlas_nodes
+                binding: 4,
+                visibility: wgpu::ShaderStages::COMPUTE,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Storage { read_only: true },
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            },
+            wgpu::BindGroupLayoutEntry {  // instances
+                binding: 5,
+                visibility: wgpu::ShaderStages::COMPUTE,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Storage { read_only: true },
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            },
+            wgpu::BindGroupLayoutEntry {  // materials
+                binding: 6,
+                visibility: wgpu::ShaderStages::COMPUTE,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Storage { read_only: true },
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            },
+            wgpu::BindGroupLayoutEntry {  // textures
+                binding: 7,
+                visibility: wgpu::ShaderStages::COMPUTE,
+                ty: wgpu::BindingType::Texture {
+                    sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                    view_dimension: wgpu::TextureViewDimension::D2,
+                    multisampled: false,
+                },
+                count: std::num::NonZero::new(MAX_TEXTURES)
+            },
+            wgpu::BindGroupLayoutEntry {  // samplers
+                binding: 8,
+                visibility: wgpu::ShaderStages::COMPUTE,
+                ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                count: std::num::NonZero::new(MAX_SAMPLERS)
+            },
+            wgpu::BindGroupLayoutEntry {  // environments
+                binding: 9,
+                visibility: wgpu::ShaderStages::COMPUTE,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Storage { read_only: true },
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            },
+            wgpu::BindGroupLayoutEntry {  // lights
+                binding: 10,
+                visibility: wgpu::ShaderStages::COMPUTE,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Storage { read_only: true },
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            },
+            wgpu::BindGroupLayoutEntry {  // alias_tables
+                binding: 11,
+                visibility: wgpu::ShaderStages::COMPUTE,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Storage { read_only: true },
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: std::num::NonZero::new(MAX_MESHES),
+            },
+            wgpu::BindGroupLayoutEntry {  // env_alias_tables
+                binding: 12,
+                visibility: wgpu::ShaderStages::COMPUTE,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Storage { read_only: true },
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: std::num::NonZero::new(MAX_ENVS),
+            },
+        ]
+    });
+}
+
+fn create_pathtracer_settings_bindgroup(device: &wgpu::Device, queue: &wgpu::Queue, shader_params: &PathtraceResources, accum_params: Option<&AccumulationParams>, camera_transform: Mat4) -> wgpu::BindGroup
 {
     let camera_transform_uniform = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some("Camera Buffer"),
@@ -1545,7 +1546,7 @@ fn create_pathtracer_settings_bindgroup(device: &wgpu::Device, queue: &wgpu::Que
     }
 
     let settings_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-        label: None,
+        label: Some("Settings bind group"),
         layout: &shader_params.pipeline.get_bind_group_layout(1),
         entries: &[
             wgpu::BindGroupEntry { binding: 0, resource: buffer_resource(&camera_transform_uniform) },
@@ -1557,7 +1558,46 @@ fn create_pathtracer_settings_bindgroup(device: &wgpu::Device, queue: &wgpu::Que
     return settings_bind_group;
 }
 
-fn create_pathtracer_output_bindgroup(device: &wgpu::Device, queue: &wgpu::Queue, shader_params: &PathtraceShaderParams, main_target: Option<&wgpu::Texture>, albedo: Option<&wgpu::Texture>, normals: Option<&wgpu::Texture>) -> wgpu::BindGroup
+fn create_pathtracer_settings_bindgroup_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout
+{
+    return device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor{
+        label: Some("Pathtracer settings bindgroup"),
+        entries: &[
+            wgpu::BindGroupLayoutEntry {  // camera transform
+                binding: 0,
+                visibility: wgpu::ShaderStages::COMPUTE,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Uniform,
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None
+            },
+            wgpu::BindGroupLayoutEntry {  // accum_counter
+                binding: 1,
+                visibility: wgpu::ShaderStages::COMPUTE,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Uniform,
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None
+            },
+            wgpu::BindGroupLayoutEntry {  // prev frame
+                binding: 2,
+                visibility: wgpu::ShaderStages::COMPUTE,
+                ty: wgpu::BindingType::Texture {
+                    sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                    view_dimension: wgpu::TextureViewDimension::D2,
+                    multisampled: false,
+                },
+                count: None
+            },
+        ]
+    });
+}
+
+fn create_pathtracer_output_bindgroup(device: &wgpu::Device, queue: &wgpu::Queue, shader_params: &PathtraceResources, main_target: Option<&wgpu::Texture>, albedo: Option<&wgpu::Texture>, normals: Option<&wgpu::Texture>) -> wgpu::BindGroup
 {
     let render_target_view  = match main_target
     {
@@ -1576,7 +1616,7 @@ fn create_pathtracer_output_bindgroup(device: &wgpu::Device, queue: &wgpu::Queue
     };
 
     let render_target_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-        label: None,
+        label: Some("Pathtracer output bindgroup"),
         layout: &shader_params.pipeline.get_bind_group_layout(2),
         entries: &[
             wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(&render_target_view) },
@@ -1588,37 +1628,227 @@ fn create_pathtracer_output_bindgroup(device: &wgpu::Device, queue: &wgpu::Queue
     return render_target_bind_group;
 }
 
+fn create_pathtracer_output_bindgroup_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout
+{
+    return device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor{
+        label: None,
+        entries: &[
+            wgpu::BindGroupLayoutEntry {
+                binding: 0,
+                visibility: wgpu::ShaderStages::COMPUTE,
+                ty: wgpu::BindingType::StorageTexture {
+                    access: wgpu::StorageTextureAccess::WriteOnly,
+                    format: wgpu::TextureFormat::Rgba16Float,
+                    view_dimension: wgpu::TextureViewDimension::D2
+                },
+                count: None
+            },
+            wgpu::BindGroupLayoutEntry {
+                binding: 1,
+                visibility: wgpu::ShaderStages::COMPUTE,
+                ty: wgpu::BindingType::StorageTexture {
+                    access: wgpu::StorageTextureAccess::WriteOnly,
+                    format: wgpu::TextureFormat::Rgba8Unorm,
+                    view_dimension: wgpu::TextureViewDimension::D2
+                },
+                count: None
+            },
+            wgpu::BindGroupLayoutEntry {
+                binding: 2,
+                visibility: wgpu::ShaderStages::COMPUTE,
+                ty: wgpu::BindingType::StorageTexture {
+                    access: wgpu::StorageTextureAccess::WriteOnly,
+                    format: wgpu::TextureFormat::Rgba8Snorm,
+                    view_dimension: wgpu::TextureViewDimension::D2
+                },
+                count: None
+            },
+        ]
+    });
+}
+
 //////////////
 // Lights
-// Returns the ligths buffer, and an array of CDF buffers.
-pub fn build_lights(device: &wgpu::Device, queue: &wgpu::Queue, instances: &[Instance], environments: &[Environment]) -> (wgpu::Buffer, Vec<wgpu::Buffer>)
+pub struct EnvMapInfo
 {
-    let mut lights = Vec::<Light>::new();
-    let mut lights_cdfs = Vec::<wgpu::Buffer>::new();
+    pub data: Vec::<Vec4>,
+    pub width: u32,
+    pub height: u32,
+}
+pub fn build_lights(device: &wgpu::Device, queue: &wgpu::Queue, instances: &[Instance], environments: &[Environment], envs_info: &[EnvMapInfo]) -> Lights
+{
+    assert!(environments.len() == envs_info.len(), "Mismatching sizes for environment data!");
+
+    let lights = Vec::<Light>::new();
+    let alias_tables = Vec::<wgpu::Buffer>::new();
+    let mut env_alias_tables = Vec::<wgpu::Buffer>::new();
 
     for instance in instances
     {
-        /*let new_light = Light {
-
-        };
-
-        lights.push(new_light);
-        */
-
-        let mut new_cdf = Vec::<f32>::new();
-
-        let new_cdf_buf = upload_storage_buffer(device, queue, to_u8_slice(&lights));
 
     }
 
-    for env in environments
+    for i in 0..environments.len()
     {
+        let mut weights = Vec::<f32>::new();
 
+        let scale = environments[i].emission;
+        let env_tex = &envs_info[i].data;
+        let env_width = envs_info[i].width;
+        let env_height = envs_info[i].height;
+
+        if scale.is_zero() { continue; }
+
+        for (i, pixel) in env_tex.iter().enumerate()
+        {
+            let y = i / env_width as usize;
+            let angle = (y as f32 + 0.5) * std::f32::consts::PI / env_height as f32;
+            let prob = f32::max(f32::max(pixel.x, pixel.y), pixel.z) * f32::sin(angle);
+            weights.push(prob);
+        }
+
+        let alias_table = build_alias_table(&weights);
+        let alias_table_buf = upload_storage_buffer(device, queue, to_u8_slice(&alias_table));
+        env_alias_tables.push(alias_table_buf);
     }
 
-    let lights_buf = upload_storage_buffer(device, queue, to_u8_slice(&lights));
+    return Lights {
+        lights: upload_storage_buffer(device, queue, to_u8_slice(&lights)),
+        alias_tables,
+        env_alias_tables,
+    };
+}
 
-    return (lights_buf, lights_cdfs);
+// From: https://www.pbr-book.org/4ed/Sampling_Algorithms/The_Alias_Method#AliasTable
+pub fn build_alias_table(weights: &[f32]) -> Vec::<AliasBin>
+{
+    if weights.is_empty() { return vec![]; }
+
+    let mut bins = vec![AliasBin::default(); weights.len()];
+
+    let mut sum: f64 = 0.0;
+    for weight in weights {
+        sum += *weight as f64;
+    }
+
+    assert!(sum > 0.0);
+
+    // Normalize weights.
+    let normalize_factor = 1.0 / sum;  // * is faster than /
+    for (i, weight) in weights.iter().enumerate() {
+        bins[i].prob = (*weight as f64 * normalize_factor) as f32;
+    }
+
+    // Work lists.
+    #[derive(Default, Debug)]
+    struct Outcome
+    {
+        prob_estimate: f32,
+        idx: u32,
+    }
+    let mut under = Vec::<Outcome>::new();
+    let mut over  = Vec::<Outcome>::new();
+    for (i, bin) in bins.iter().enumerate()
+    {
+        let prob_estimate = bin.prob * bins.len() as f32;
+        let new_outcome = Outcome { prob_estimate, idx: i as u32 };
+        if prob_estimate < 1.0 {
+            under.push(new_outcome);
+        } else {
+            over.push(new_outcome);
+        }
+    }
+
+    while !under.is_empty() && !over.is_empty()
+    {
+        let under_item = under.pop().unwrap();
+        let over_item  = over.pop().unwrap();
+
+        // Initialize state for under_item.
+        bins[under_item.idx as usize].alias_threshold = under_item.prob_estimate;
+        bins[under_item.idx as usize].alias = over_item.idx;
+
+        // Push excess probability onto work list.
+        let prob_excess = under_item.prob_estimate + over_item.prob_estimate - 1.0;
+        let new_outcome = Outcome { prob_estimate: prob_excess, idx: over_item.idx };
+        if prob_excess < 1.0 {
+            under.push(new_outcome);
+        } else {
+            over.push(new_outcome);
+        }
+    }
+
+    // Handle remaining work list items.
+    // Due to floating point precision, there may be remaining
+    // items if their normalized probability is very close to 1.
+    while !over.is_empty()
+    {
+        let over_item = over.pop().unwrap();
+        assert!(f32::abs(over_item.prob_estimate - 1.0) < 0.05);
+        bins[over_item.idx as usize].alias_threshold = 1.0;
+        bins[over_item.idx as usize].alias = 0;
+    }
+    while !under.is_empty()
+    {
+        let under_item = under.pop().unwrap();
+        assert!(f32::abs(under_item.prob_estimate - 1.0) < 0.05);
+        bins[under_item.idx as usize].alias_threshold = 1.0;
+        bins[under_item.idx as usize].alias = 0;
+    }
+
+    return bins;
+}
+
+// TODO: Turn this into an actual test.
+fn test_alias_table(alias_table: &Vec::<AliasBin>, env_width: u32)
+{
+    println!("test:");
+    struct TestValue
+    {
+        idx: usize,
+        hits: u32
+    }
+    let mut test_values = Vec::<TestValue>::new();
+    let mut rng = rand::thread_rng();
+    for i in 0..1000000
+    {
+        let slot_idx: usize = rng.gen_range(0..alias_table.len()); // inclusive range
+        let rnd: f32 = rng.gen();
+        if rnd >= alias_table[slot_idx].alias_threshold
+        {
+            add_to_test_value_array(&mut test_values, alias_table[slot_idx].alias as usize)
+        }
+        else
+        {
+            add_to_test_value_array(&mut test_values, slot_idx);
+        }
+    }
+
+    println!("results:");
+    test_values.sort_by(|a, b| b.hits.cmp(&a.hits));
+    for value in test_values
+    {
+        println!("x: {}, y: {}, hits: {}, prob: {}", value.idx % env_width as usize, value.idx / env_width as usize, value.hits, alias_table[value.idx].prob);
+    }
+
+    fn add_to_test_value_array(test_values: &mut Vec::<TestValue>, idx: usize)
+    {
+        let mut found = false;
+        for value in test_values.iter_mut()
+        {
+            if value.idx as usize == idx
+            {
+                value.hits += 1;
+                found = true;
+                break;
+            }
+        }
+
+        if !found
+        {
+            test_values.push(TestValue { idx: idx, hits: 1 });
+        }
+    }
 }
 
 //////////////

@@ -1,14 +1,17 @@
 
 use lupin as lp;
 
-use crate::base::*;
-
 pub fn build_scene(device: &wgpu::Device, queue: &wgpu::Queue) -> lp::SceneDesc
 {
     let meshes_aabbs = vec![
         load_obj_mesh(device, queue, "stanford_bunny.obj"),
         load_obj_mesh(device, queue, "quad.obj"),
+        load_obj_mesh(device, queue, "gazerbo.obj"),
     ];
+
+    let bunny_mesh = 0;
+    let quad_mesh = 1;
+    let gazebo_mesh = 2;
 
     let mut meshes = Vec::<lp::Mesh>::with_capacity(meshes_aabbs.len());
     let mut aabbs = Vec::<lp::Aabb>::with_capacity(meshes_aabbs.len());
@@ -37,23 +40,25 @@ pub fn build_scene(device: &wgpu::Device, queue: &wgpu::Queue) -> lp::SceneDesc
 */
 
     let instances = [
-        lp::Instance { inv_transform: lp::mat4_inverse(xform_to_matrix(Vec3 { x: 0.0, y: 0.0, z: 0.0 }.into(), Quat::default(), Vec3::ones()).into()), mesh_idx: 0, mat_idx: 0, padding0: 0.0, padding1: 0.0 },
-        lp::Instance { inv_transform: lp::mat4_inverse(xform_to_matrix(Vec3 { x: -2.0, y: 0.0, z: 0.0 }.into(), angle_axis(Vec3::RIGHT, 45.0 * 3.1415 / 180.0), Vec3::ones()).into()), mesh_idx: 0, mat_idx: 1, padding0: 0.0, padding1: 0.0 },
-        lp::Instance { inv_transform: lp::mat4_inverse(xform_to_matrix(Vec3 { x: -2.0, y: 0.0, z: -2.0 }.into(), angle_axis(Vec3::RIGHT, 45.0 * 3.1415 / 180.0), Vec3::ones()).into()), mesh_idx: 0, mat_idx: 7, padding0: 0.0, padding1: 0.0 },
-        lp::Instance { inv_transform: lp::mat4_inverse(xform_to_matrix(Vec3 { x: 2.0, y: 0.0, z: 0.0 }.into(), Quat::default(), Vec3 { x: 1.0, y: 1.0, z: 1.0 }).into()), mesh_idx: 0, mat_idx: 2, padding0: 0.0, padding1: 0.0 },
-        lp::Instance { inv_transform: lp::mat4_inverse(xform_to_matrix(Vec3 { x: 2.0, y: 0.0, z: -2.0 }.into(), Quat::default(), Vec3 { x: 1.0, y: 1.0, z: 1.0 }).into()), mesh_idx: 0, mat_idx: 6, padding0: 0.0, padding1: 0.0 },
-        lp::Instance { inv_transform: lp::mat4_inverse(xform_to_matrix(Vec3 { x: 4.0, y: 0.0, z: 0.0 }.into(), Quat::default(), Vec3::ones()).into()), mesh_idx: 0, mat_idx: 3, padding0: 0.0, padding1: 0.0 },
-        lp::Instance { inv_transform: lp::mat4_inverse(xform_to_matrix(Vec3 { x: 4.0, y: 0.0, z: -2.0 }.into(), Quat::default(), Vec3::ones()).into()), mesh_idx: 0, mat_idx: 10, padding0: 0.0, padding1: 0.0 },
-        lp::Instance { inv_transform: lp::mat4_inverse(xform_to_matrix(Vec3 { x: 6.0, y: 0.0, z: 0.0 }.into(), Quat::default(), Vec3::ones()).into()), mesh_idx: 0, mat_idx: 4, padding0: 0.0, padding1: 0.0 },
-        lp::Instance { inv_transform: lp::mat4_inverse(xform_to_matrix(Vec3 { x: 6.0, y: 0.0, z: -2.0 }.into(), Quat::default(), Vec3::ones()).into()), mesh_idx: 0, mat_idx: 11, padding0: 0.0, padding1: 0.0 },
-        lp::Instance { inv_transform: lp::mat4_inverse(xform_to_matrix(Vec3 { x: 8.0, y: 0.0, z: 0.0 }.into(), Quat::default(), Vec3::ones()).into()), mesh_idx: 0, mat_idx: 8, padding0: 0.0, padding1: 0.0 },
-        lp::Instance { inv_transform: lp::mat4_inverse(xform_to_matrix(Vec3 { x: 10.0, y: 0.0, z: 0.0 }.into(), Quat::default(), Vec3::ones()).into()), mesh_idx: 0, mat_idx: 9, padding0: 0.0, padding1: 0.0 },
-        lp::Instance { inv_transform: lp::mat4_inverse(xform_to_matrix(Vec3 { x: 12.0, y: 0.0, z: 0.0 }.into(), Quat::default(), Vec3::ones()).into()), mesh_idx: 0, mat_idx: 12, padding0: 0.0, padding1: 0.0 },
+        lp::Instance { inv_transform: lp::mat4_inverse(lp::xform_to_matrix(lp::Vec3 { x: 0.0, y: 0.0, z: 0.0 }.into(), lp::Quat::default(), lp::Vec3::ones()).into()), mesh_idx: 0, mat_idx: 0, padding0: 0.0, padding1: 0.0 },
+        lp::Instance { inv_transform: lp::mat4_inverse(lp::xform_to_matrix(lp::Vec3 { x: -2.0, y: 0.0, z: 0.0 }.into(), lp::angle_axis(lp::Vec3::RIGHT, 45.0 * 3.1415 / 180.0), lp::Vec3::ones()).into()), mesh_idx: 0, mat_idx: 1, padding0: 0.0, padding1: 0.0 },
+        lp::Instance { inv_transform: lp::mat4_inverse(lp::xform_to_matrix(lp::Vec3 { x: -2.0, y: 0.0, z: -2.0 }.into(), lp::angle_axis(lp::Vec3::RIGHT, 45.0 * 3.1415 / 180.0), lp::Vec3::ones()).into()), mesh_idx: 0, mat_idx: 7, padding0: 0.0, padding1: 0.0 },
+        lp::Instance { inv_transform: lp::mat4_inverse(lp::xform_to_matrix(lp::Vec3 { x: 2.0, y: 0.0, z: 0.0 }.into(), lp::Quat::default(), lp::Vec3 { x: 1.0, y: 1.0, z: 1.0 }).into()), mesh_idx: 0, mat_idx: 2, padding0: 0.0, padding1: 0.0 },
+        lp::Instance { inv_transform: lp::mat4_inverse(lp::xform_to_matrix(lp::Vec3 { x: 2.0, y: 0.0, z: -2.0 }.into(), lp::Quat::default(), lp::Vec3 { x: 1.0, y: 1.0, z: 1.0 }).into()), mesh_idx: 0, mat_idx: 6, padding0: 0.0, padding1: 0.0 },
+        lp::Instance { inv_transform: lp::mat4_inverse(lp::xform_to_matrix(lp::Vec3 { x: 4.0, y: 0.0, z: 0.0 }.into(), lp::Quat::default(), lp::Vec3::ones()).into()), mesh_idx: 0, mat_idx: 3, padding0: 0.0, padding1: 0.0 },
+        lp::Instance { inv_transform: lp::mat4_inverse(lp::xform_to_matrix(lp::Vec3 { x: 4.0, y: 0.0, z: -2.0 }.into(), lp::Quat::default(), lp::Vec3::ones()).into()), mesh_idx: 0, mat_idx: 10, padding0: 0.0, padding1: 0.0 },
+        lp::Instance { inv_transform: lp::mat4_inverse(lp::xform_to_matrix(lp::Vec3 { x: 6.0, y: 0.0, z: 0.0 }.into(), lp::Quat::default(), lp::Vec3::ones()).into()), mesh_idx: 0, mat_idx: 4, padding0: 0.0, padding1: 0.0 },
+        lp::Instance { inv_transform: lp::mat4_inverse(lp::xform_to_matrix(lp::Vec3 { x: 6.0, y: 0.0, z: -2.0 }.into(), lp::Quat::default(), lp::Vec3::ones()).into()), mesh_idx: 0, mat_idx: 11, padding0: 0.0, padding1: 0.0 },
+        lp::Instance { inv_transform: lp::mat4_inverse(lp::xform_to_matrix(lp::Vec3 { x: 8.0, y: 0.0, z: 0.0 }.into(), lp::Quat::default(), lp::Vec3::ones()).into()), mesh_idx: 0, mat_idx: 8, padding0: 0.0, padding1: 0.0 },
+        lp::Instance { inv_transform: lp::mat4_inverse(lp::xform_to_matrix(lp::Vec3 { x: 10.0, y: 0.0, z: 0.0 }.into(), lp::Quat::default(), lp::Vec3::ones()).into()), mesh_idx: 0, mat_idx: 9, padding0: 0.0, padding1: 0.0 },
+        lp::Instance { inv_transform: lp::mat4_inverse(lp::xform_to_matrix(lp::Vec3 { x: 12.0, y: 0.0, z: 0.0 }.into(), lp::Quat::default(), lp::Vec3::ones()).into()), mesh_idx: 0, mat_idx: 12, padding0: 0.0, padding1: 0.0 },
         // Floor
-        lp::Instance { inv_transform: lp::mat4_inverse(xform_to_matrix(Vec3 { x: 0.0, y: -0.01, z: 0.0 }.into(), Quat::default(), Vec3::ones() * 20.0).into()), mesh_idx: 1, mat_idx: 5, padding0: 0.0, padding1: 0.0 },
+        lp::Instance { inv_transform: lp::mat4_inverse(lp::xform_to_matrix(lp::Vec3 { x: 0.0, y: -0.01, z: 0.0 }.into(), lp::Quat::default(), lp::Vec3::ones() * 20.0).into()), mesh_idx: 1, mat_idx: 5, padding0: 0.0, padding1: 0.0 },
+        // Gazebo
+        lp::Instance { inv_transform: lp::mat4_inverse(lp::xform_to_matrix(lp::Vec3 { x: 30.0, y: 0.0, z: 0.0 }.into(), lp::Quat::default(), lp::Vec3::ones()).into()), mesh_idx: gazebo_mesh, mat_idx: 5, padding0: 0.0, padding1: 0.0 },
     ];
 
-    let instances_buf = lp::upload_storage_buffer(&device, &queue, unsafe { to_u8_slice(&instances) });
+    let instances_buf = lp::upload_storage_buffer(&device, &queue, lp::to_u8_slice(&instances));
 
     let mut materials = Vec::<lp::Material>::new();
 
@@ -62,12 +67,12 @@ pub fn build_scene(device: &wgpu::Device, queue: &wgpu::Queue) -> lp::SceneDesc
         lp::Vec4::new(1.0, 1.0, 1.0, 1.0),  // Color
         lp::Vec4::new(0.0, 0.0, 0.0, 0.0),  // Emission
         lp::Vec4::new(0.0, 0.0, 0.0, 0.0),  // Scattering
-        0.01,                                // Roughness
+        0.01,                               // Roughness
         0.0,                                // Metallic
         1.33,                               // ior
         0.0,                                // anisotropy
         0.0,                                // depth
-        1,                                  // Color tex
+        0,//1                               // Color tex
         0,                                  // Emission tex
         0,                                  // Roughness tex
         0,                                  // Scattering tex
@@ -142,9 +147,9 @@ pub fn build_scene(device: &wgpu::Device, queue: &wgpu::Queue) -> lp::SceneDesc
         0,                                  // Normal tex
     ));
 
-    let white_matte = push_asset(&mut materials, lp::Material::new(
+    let brown_matte = push_asset(&mut materials, lp::Material::new(
         lp::MaterialType::Matte,            // Mat type
-        lp::Vec4::new(1.0, 1.0, 1.0, 1.0),  // Color
+        lp::Vec4::new(2.0, 2.0, 2.0, 1.0),  // Color
         lp::Vec4::new(0.0, 0.0, 0.0, 0.0),  // Emission
         lp::Vec4::new(0.0, 0.0, 0.0, 0.0),  // Scattering
         0.01,                                // Roughness
@@ -263,14 +268,16 @@ pub fn build_scene(device: &wgpu::Device, queue: &wgpu::Queue) -> lp::SceneDesc
         0,                                  // Normal tex
     ));
 
-    let materials_buf = lp::upload_storage_buffer(&device, &queue, unsafe { to_u8_slice(&materials) });
+    let materials_buf = lp::upload_storage_buffer(&device, &queue, lp::to_u8_slice(&materials));
 
     let tlas_buf = lp::build_tlas(&device, &queue, instances.as_slice(), &aabbs);
 
     let mut textures = Vec::<wgpu::Texture>::new();
     let white_tex = push_asset(&mut textures, lp::create_white_texture(device, queue));
     let bunny_color = push_asset(&mut textures, load_texture(device, queue, "bunny_color.png", false));
-    let env_map = push_asset(&mut textures, load_texture(device, queue, "poly_haven_studio_1k.hdr", true));
+    //let (env_map_cpu, env_map_gpu) = load_hdr_texture_and_keep_cpu_copy(device, queue, "poly_haven_studio_1k.hdr");
+    let (env_map_cpu, env_map_gpu) = load_hdr_texture_and_keep_cpu_copy(device, queue, "sky.hdr");
+    let env_map = push_asset(&mut textures, env_map_gpu);
 
     let linear_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
         label: None,
@@ -288,7 +295,7 @@ pub fn build_scene(device: &wgpu::Device, queue: &wgpu::Queue) -> lp::SceneDesc
         emission_tex_idx: env_map,
     };
 
-    let env_buf = lp::upload_storage_buffer(device, queue, unsafe { to_u8_slice(&[environment]) });
+    let env_buf = lp::upload_storage_buffer(device, queue, lp::to_u8_slice(&[environment]));
 
     let env_map_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
         label: None,
@@ -310,14 +317,17 @@ pub fn build_scene(device: &wgpu::Device, queue: &wgpu::Queue) -> lp::SceneDesc
         textures: textures,
         samplers: vec![linear_sampler],
         environments: env_buf,
+
+        // Lights
+        lights: lp::build_lights(device, queue, &instances, &[environment], &[env_map_cpu]),
     };
 }
 
 pub fn load_obj_mesh(device: &wgpu::Device, queue: &wgpu::Queue, path: &str) -> (lp::Mesh, lp::Aabb)
 {
     let scene = tobj::load_obj(path, &tobj::GPU_LOAD_OPTIONS);
-
     assert!(scene.is_ok());
+
     let (mut models, _materials) = scene.expect("Failed to load OBJ file");
 
     let mesh = &mut models[0].mesh;
@@ -325,35 +335,35 @@ pub fn load_obj_mesh(device: &wgpu::Device, queue: &wgpu::Queue, path: &str) -> 
     // Construct the buffer to send to GPU. Include an extra float
     // for 16-byte alignment of vectors.
 
-    let mut aabb = Aabb::neutral();
+    let mut aabb = lp::Aabb::neutral();
     let mut verts_pos = Vec::<f32>::with_capacity(mesh.positions.len() + mesh.positions.len() / 3);
     for i in (0..mesh.positions.len()).step_by(3)
     {
-        let pos = Vec3 { x: mesh.positions[i + 0], y: mesh.positions[i + 1], z: mesh.positions[i + 2] };
+        let pos = lp::Vec3 { x: mesh.positions[i + 0], y: mesh.positions[i + 1], z: mesh.positions[i + 2] };
         verts_pos.push(mesh.positions[i + 0]);
         verts_pos.push(mesh.positions[i + 1]);
         verts_pos.push(mesh.positions[i + 2]);
         verts_pos.push(0.0);
-        grow_aabb_to_include_vert(&mut aabb, pos);
+        lp::grow_aabb_to_include_vert(&mut aabb, pos);
     }
 
     let bvh_buf = lp::build_bvh(&device, &queue, verts_pos.as_slice(), &mut mesh.indices);
 
-    let verts_pos_buf = lp::upload_storage_buffer(&device, &queue, unsafe { to_u8_slice(&verts_pos) });
-    let indices_buf   = lp::upload_storage_buffer(&device, &queue, unsafe { to_u8_slice(&mesh.indices) });
+    let verts_pos_buf = lp::upload_storage_buffer(&device, &queue, lp::to_u8_slice(&verts_pos));
+    let indices_buf   = lp::upload_storage_buffer(&device, &queue, lp::to_u8_slice(&mesh.indices));
     let mut verts = Vec::<lp::Vertex>::with_capacity(mesh.positions.len() / 3);
     for vert_idx in 0..(mesh.positions.len() / 3)
     {
-        let mut normal = Vec3::default();
+        let mut normal = lp::Vec3::default();
         if mesh.normals.len() > 0
         {
             normal.x = mesh.normals[vert_idx*3+0];
             normal.y = mesh.normals[vert_idx*3+1];
             normal.z = mesh.normals[vert_idx*3+2];
-            normal = normalize_vec3(normal);
+            normal = lp::normalize_vec3(normal);
         };
 
-        let mut tex_coords = Vec2::default();
+        let mut tex_coords = lp::Vec2::default();
         if mesh.texcoords.len() > 0
         {
             tex_coords.x = mesh.texcoords[vert_idx*2+0];
@@ -366,7 +376,7 @@ pub fn load_obj_mesh(device: &wgpu::Device, queue: &wgpu::Queue, path: &str) -> 
         verts.push(vert);
     }
 
-    let verts_buf = lp::upload_storage_buffer(&device, &queue, unsafe { to_u8_slice(&verts) });
+    let verts_buf = lp::upload_storage_buffer(&device, &queue, lp::to_u8_slice(&verts));
 
     return (lp::Mesh {
         verts_pos: verts_pos_buf,
@@ -402,7 +412,8 @@ pub fn load_texture(device: &wgpu::Device, queue: &wgpu::Queue, path: &str, hdr:
 
     if hdr
     {
-        let rgba = rgba32f_to_rgba16f(&img);
+        let rgba_f32 = img.to_rgba32f();
+        let rgba = rgba32f_to_rgba16f(&rgba_f32);
 
         queue.write_texture(
             wgpu::TexelCopyTextureInfo {
@@ -411,7 +422,7 @@ pub fn load_texture(device: &wgpu::Device, queue: &wgpu::Queue, path: &str, hdr:
                 origin: wgpu::Origin3d::ZERO,
                 aspect: wgpu::TextureAspect::All
             },
-            unsafe { to_u8_slice(&rgba) },
+            lp::to_u8_slice(&rgba),
             wgpu::TexelCopyBufferLayout {
                 offset: 0,
                 bytes_per_row: Some(8 * dimensions.0),
@@ -430,7 +441,7 @@ pub fn load_texture(device: &wgpu::Device, queue: &wgpu::Queue, path: &str, hdr:
                 origin: wgpu::Origin3d::ZERO,
                 aspect: wgpu::TextureAspect::All
             },
-            unsafe { to_u8_slice(&rgba.into_raw()) },
+            lp::to_u8_slice(&rgba.into_raw()),
             wgpu::TexelCopyBufferLayout {
                 offset: 0,
                 bytes_per_row: Some(4 * dimensions.0),
@@ -443,14 +454,73 @@ pub fn load_texture(device: &wgpu::Device, queue: &wgpu::Queue, path: &str, hdr:
     return texture;
 }
 
+pub fn load_hdr_texture_and_keep_cpu_copy(device: &wgpu::Device, queue: &wgpu::Queue, path: &str) -> (lp::EnvMapInfo, wgpu::Texture)
+{
+    use image::GenericImageView;
+
+    let img = image::open(path).expect("Failed to load image");
+    let dimensions = img.dimensions();
+
+    let size = wgpu::Extent3d {
+        width: dimensions.0,
+        height: dimensions.1,
+        depth_or_array_layers: 1
+    };
+
+    let texture = device.create_texture(&wgpu::TextureDescriptor {
+        label: None,
+        size: size,
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: wgpu::TextureFormat::Rgba16Float,
+        usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+        view_formats: &[]
+    });
+
+    let rgba_f32 = img.to_rgba32f();
+    let rgba = rgba32f_to_rgba16f(&rgba_f32);
+
+    queue.write_texture(
+        wgpu::TexelCopyTextureInfo {
+            texture: &texture,
+            mip_level: 0,
+            origin: wgpu::Origin3d::ZERO,
+            aspect: wgpu::TextureAspect::All
+        },
+        lp::to_u8_slice(&rgba),
+        wgpu::TexelCopyBufferLayout {
+            offset: 0,
+            bytes_per_row: Some(8 * dimensions.0),
+            rows_per_image: Some(dimensions.1)
+        },
+        size
+    );
+
+    let vec4_data: Vec<lp::Vec4> = rgba_f32
+        .chunks_exact(4)
+        .map(|chunk| lp::Vec4 {
+            x: chunk[0],
+            y: chunk[1],
+            z: chunk[2],
+            w: chunk[3],
+        })
+        .collect();
+
+    return (lp::EnvMapInfo {
+        data: vec4_data,
+        width: rgba_f32.width(),
+        height: rgba_f32.height(),
+    }, texture);
+}
+
 use half::*;
 
-fn rgba32f_to_rgba16f(image: &image::DynamicImage) -> Vec<f16>
+fn rgba32f_to_rgba16f(image_rgba32f: &image::ImageBuffer<image::Rgba<f32>, Vec<f32>>) -> Vec<f16>
 {
-    let rgba32f = image.to_rgba32f();
-    rgba32f.pixels()
-        .flat_map(|p| p.0.iter().map(|&f| f16::from_f32(f)))
-        .collect()
+    return image_rgba32f.pixels()
+                        .flat_map(|p| p.0.iter().map(|&f| f16::from_f32(f)))
+                        .collect();
 }
 
 fn push_asset<T>(vec: &mut Vec<T>, el: T) -> u32

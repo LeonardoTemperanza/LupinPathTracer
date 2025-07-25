@@ -1,0 +1,10 @@
+[package]
+name = "lupin_loader"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+lupin = { path = "../lupin" }
+
+# Serialization
+tobj  = "4.0.2"

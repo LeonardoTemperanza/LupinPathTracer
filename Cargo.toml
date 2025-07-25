@@ -2,6 +2,7 @@
 [workspace]
 members = [
     "lupin",
+    "lupin_loader",
     "lupin_viewer",
     "lupin_tests",
     "lupin_benchmarks",

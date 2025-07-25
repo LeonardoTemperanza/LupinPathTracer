@@ -70,6 +70,11 @@ impl Vec3
     {
         return Self { x, y, z };
     }
+
+    pub fn is_zero(&self) -> bool
+    {
+        return self.x == 0.0 && self.y == 0.0 && self.z == 0.0;
+    }
 }
 
 #[derive(Debug, Default, Clone, Copy)]
@@ -87,6 +92,11 @@ impl Vec4
     pub fn new(x: f32, y: f32, z: f32, w: f32) -> Self
     {
         return Self { x, y, z, w };
+    }
+
+    pub fn is_zero(&self) -> bool
+    {
+        return self.x == 0.0 && self.y == 0.0 && self.z == 0.0 && self.w == 0.0;
     }
 }
 
@@ -144,6 +154,11 @@ impl Vec3
             y: self.y.max(other.y),
             z: self.z.max(other.z),
         };
+    }
+
+    pub fn ones() -> Self
+    {
+        return Self { x: 1.0, y: 1.0, z: 1.0 };
     }
 }
 
@@ -300,7 +315,7 @@ impl Default for Mat4
 
 impl Mat4
 {
-    pub const IDENTITY: Mat4 = Mat4
+    pub const IDENTITY: Self = Self
     {
         m:
         [
@@ -310,6 +325,16 @@ impl Mat4
             [ 0.0, 0.0, 0.0, 1.0 ]
         ]
     };
+
+    pub fn zeros() -> Self
+    {
+        return Mat4{ m: [
+            [ 0.0, 0.0, 0.0, 0.0 ],
+            [ 0.0, 0.0, 0.0, 0.0 ],
+            [ 0.0, 0.0, 0.0, 0.0 ],
+            [ 0.0, 0.0, 0.0, 0.0 ]
+        ]};
+    }
 }
 
 impl std::ops::Mul<Mat4> for Mat4
@@ -529,6 +554,7 @@ impl std::fmt::Display for Quat
     }
 }
 
+/*
 #[derive(Debug, Clone, Copy)]
 #[repr(C)]
 pub struct Transform
@@ -550,6 +576,7 @@ impl Default for Transform
         };
     }
 }
+*/
 
 pub fn rotate_vec3_with_quat(q: Quat, v: Vec3)->Vec3
 {
@@ -785,11 +812,6 @@ pub fn position_matrix(pos: Vec3)->Mat4
     res.m[3][1] = pos.y;
     res.m[3][2] = pos.z;
     return res;
-}
-
-pub fn transform_to_matrix(transform: Transform)->Mat4
-{
-    return position_matrix(transform.pos) * rotation_matrix(transform.rot) * scale_matrix(transform.scale);
 }
 
 pub fn xform_to_matrix(pos: Vec3, rot: Quat, scale: Vec3) -> Mat4

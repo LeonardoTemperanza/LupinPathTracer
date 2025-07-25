@@ -2,7 +2,6 @@
 // System for quickly polling inputs per frame.
 
 use winit::event::*;
-use crate::base::*;
 
 pub enum Key
 {

@@ -4,14 +4,14 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+wgpu  = "24.0.1"
 lupin = { path = "../lupin" }
 
 # GUI
-winit = "0.29.7"
-wgpu  = "24.0.1"
-#egui  = "0.27.2"
-#egui-wgpu  = "0.27.2"
-#egui-winit = "0.27.2"
+winit = "0.30.7"
+egui  = "0.31.1"
+egui-wgpu  = "0.31.1"
+egui-winit = "0.31.1"
 
 # Serialization
 tobj  = "4.0.2"

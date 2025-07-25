@@ -16,11 +16,12 @@
 @group(0) @binding(9) var<storage, read> environments: array<Environment>;
 // Lights
 @group(0) @binding(10) var<storage, read> lights: array<Light>;
-@group(0) @binding(11) var<storage, read> lights_cdfs: binding_array<LightCdfs>;
+@group(0) @binding(11) var<storage, read> alias_tables: binding_array<AliasTable>;
+@group(0) @binding(12) var<storage, read> env_alias_tables: binding_array<AliasTable>;
 
 // Group 1: Pathtrace settings
 @group(1) @binding(0) var<uniform> camera_transform: mat4x4f;
-@group(1) @binding(1) var<uniform> accum_counter: u32;  // If this is 0, nothing is taken from the previous frame
+@group(1) @binding(1) var<uniform> accum_counter: u32;  // If this is 0, nothing is taken from the previous frame.
 @group(1) @binding(2) var prev_frame: texture_2d<f32>;
 
 // Group 2: Render targets
@@ -28,13 +29,13 @@
 @group(2) @binding(1) var output_albedo: texture_storage_2d<rgba8unorm, write>;
 @group(2) @binding(2) var output_normals: texture_storage_2d<rgba8snorm, write>;
 
-// We need these wrappers, or we get a
+// We need these wrappers, or we get a weird
 // compilation error, for some reason...
-struct VertsPos  { data: array<vec3f>   }
-struct Verts     { data: array<Vertex>  }
-struct Indices   { data: array<u32>     }
-struct BvhNodes  { data: array<BvhNode> }
-struct LightCdfs { data: array<f32>     }
+struct VertsPos   { data: array<vec3f>    }
+struct Verts      { data: array<Vertex>   }
+struct Indices    { data: array<u32>      }
+struct BvhNodes   { data: array<BvhNode>  }
+struct AliasTable { data: array<AliasBin> }
 
 //////////////////////////////////////////////
 // Scene description
@@ -96,21 +97,26 @@ struct Environment
 
 struct Light
 {
-    is_instance: u32,
     instance_idx: u32,
-    env_idx: u32,
+}
+
+struct AliasBin
+{
+    prob: f32,
+    alias_threshold: f32,
+    alias_idx: u32,
 }
 
 // NOTE: The odd ordering of the fields
 // ensures that the struct is 32 bytes wide,
-// given that vec3f has 16-byte alignment.
+// as vec3f has 16-byte alignment.
 struct BvhNode
 {
-    aabb_min:  vec3f,
+    aabb_min: vec3f,
     // If tri_count is 0, this is first_child
     // otherwise this is tri_begin
     tri_begin_or_first_child: u32,
-    aabb_max:  vec3f,
+    aabb_max: vec3f,
     tri_count: u32,
 
     // Second child is at index first_child + 1
@@ -128,26 +134,30 @@ struct TlasNode
 // Entrypoints
 //////////////////////////////////////////////
 
+// For "printf-like" debugging.
+var<private> debug_color: vec3f = vec3f(0.0f, 0.0f, 0.1f);
+var<private> debug_enable: bool = false;
+
 @compute
 @workgroup_size(8, 8, 1)
 fn pathtrace_main(@builtin(local_invocation_id) local_id: vec3u, @builtin(global_invocation_id) global_id: vec3u)
 {
     let output_dim = textureDimensions(output_texture).xy;
-    init_rng(global_id.y * global_id.x + global_id.x, output_dim.y * output_dim.x + output_dim.x);
+    init_rng(global_id.y * output_dim.x + global_id.x);
 
-    const NUM_SAMPLES: u32 = 10;
+    const NUM_SAMPLES: u32 = 1;
     var color = vec3f(0.0f);
     for(var sample: u32 = 0; sample < NUM_SAMPLES; sample++)
     {
-        let pixel_offset = vec2f(random_f32(), random_f32()) - 0.5f;
+        let pixel_offset = random_vec2f() - 0.5f;
         let camera_ray = compute_camera_ray(global_id, output_dim, pixel_offset);
-        color += pathtrace_naive(local_id, camera_ray);
+        color += pathtrace(local_id, camera_ray);
     }
     color /= f32(NUM_SAMPLES);
     color = max(color, vec3f(0.0f));
 
     // Progressive rendering.
-    if accum_counter != 0
+    if accum_counter != 0 // && false
     {
         let frag_coord = vec2f(global_id.xy) + 0.5f;
         let resolution = vec2f(output_dim);
@@ -159,6 +169,8 @@ fn pathtrace_main(@builtin(local_invocation_id) local_id: vec3u, @builtin(global
         color = max(color, vec3f(0.0f));
     }
 
+    if debug_enable { color = debug_color; }
+
     if global_id.x < output_dim.x && global_id.y < output_dim.y {
         textureStore(output_texture, global_id.xy, vec4f(color, 1.0f));
     }
@@ -169,7 +181,7 @@ fn pathtrace_main(@builtin(local_invocation_id) local_id: vec3u, @builtin(global
 fn gbuffer_albedo_main(@builtin(local_invocation_id) local_id: vec3u, @builtin(global_invocation_id) global_id: vec3u)
 {
     let output_dim = textureDimensions(output_albedo).xy;
-    init_rng(global_id.y * global_id.x + global_id.x, output_dim.y * output_dim.x + output_dim.x);
+    init_rng(global_id.y * output_dim.x + global_id.x);
 
     const NUM_AA_SAMPLES_PER_DIR: u32 = 2;  // Antialiasing samples.
     var color = vec3f(0.0f);
@@ -206,7 +218,7 @@ fn gbuffer_albedo_main(@builtin(local_invocation_id) local_id: vec3u, @builtin(g
 fn gbuffer_normals_main(@builtin(local_invocation_id) local_id: vec3u, @builtin(global_invocation_id) global_id: vec3u)
 {
     let output_dim = textureDimensions(output_normals).xy;
-    init_rng(global_id.y * global_id.x + global_id.x, output_dim.y * output_dim.x + output_dim.x);
+    init_rng(global_id.y * output_dim.x + global_id.x);
 
     const NUM_AA_SAMPLES_PER_DIR: u32 = 2;  // Antialiasing samples.
     var color = vec3f(0.0f);
@@ -311,9 +323,11 @@ fn pathtrace_naive(local_id: vec3u, start_ray: Ray) -> vec3f
         // Compute next direction.
         let outgoing = -ray.dir;
         var incoming = vec3f();
-        if roughness != 0.0f
+        if !is_mat_delta(mat)
         {
-            incoming = sample_bsdfcos(material, normal, outgoing, random_f32(), random_vec2f());
+            let rnd0 = random_f32();
+            let rnd1 = random_vec2f();
+            incoming = sample_bsdfcos(material, normal, outgoing, rnd0, rnd1);
             if all(incoming == vec3f(0.0f)) { break; }
 
             weight *= eval_bsdfcos(material, normal, outgoing, incoming) / sample_bsdfcos_pdf(material, normal, outgoing, incoming);
@@ -324,6 +338,106 @@ fn pathtrace_naive(local_id: vec3u, start_ray: Ray) -> vec3f
             if all(incoming == vec3f(0.0f)) { break; }
 
             weight *= eval_delta(material, normal, outgoing, incoming) / sample_delta_pdf(material, normal, outgoing, incoming);
+        }
+
+        ray.dir = incoming;
+        ray.inv_dir = 1.0f / ray.dir;
+
+        // Check weight.
+        if all(weight == vec3f(0.0f)) || !is_vec3f_finite(weight) { break; }
+
+        // Russian roulette.
+        if bounce > 3
+        {
+            let survive_prob = min(0.99f, max(weight.x, max(weight.y, weight.z)));
+            if random_f32() >= survive_prob { break; }
+            weight *= 1.0f / survive_prob;
+        }
+    }
+
+    return radiance;
+}
+
+fn pathtrace(local_id: vec3u, start_ray: Ray) -> vec3f
+{
+    var ray = start_ray;
+    var weight = vec3f(1.0f);  // Multiplicative terms.
+    var radiance = vec3f(0.0f);
+    var op_bounce: u32 = 0;
+    for(var bounce = 0u; bounce <= MAX_BOUNCES; bounce++)
+    {
+        let hit = ray_scene_intersection(local_id, ray);
+        if hit.dst == F32_MAX  // Missed.
+        {
+            radiance += sample_environments(ray.dir) * weight;
+            break;
+        }
+
+        // Ray hit something.
+
+        //let up_normal = select(hit.normal, -hit.normal, dot(hit.normal, -ray.dir) <= 0.0f);
+        //write_debug_color_once(hit.normal * 0.5f + 0.5f);
+
+        let mat = materials[hit.mat_idx];
+        const mat_sampler_idx: u32 = 0;  // TODO!
+
+        let color = textureSampleLevel(textures[mat.color_tex_idx], samplers[mat_sampler_idx], hit.tex_coords, 0.0f) * mat.color;
+
+        // Set next ray's origin at point of contact.
+        ray.ori = ray.ori + ray.dir * hit.dst;
+
+        // TODO: No caustics param.
+
+        // Handle coverage.
+        if color.a < 1.0f && random_f32() >= color.a
+        {
+            op_bounce++;
+            if op_bounce > 128 { break; }
+            bounce -= 1;
+            continue;
+        }
+
+        let emission = textureSampleLevel(textures[mat.emission_tex_idx], samplers[mat_sampler_idx], hit.tex_coords, 0.0f).rgb * mat.emission.rgb;
+        let roughness = textureSampleLevel(textures[mat.roughness_tex_idx], samplers[mat_sampler_idx], hit.tex_coords, 0.0f).r * mat.roughness;
+        let density = select(vec3f(0.0f), -log(clamp(color.rgb, vec3f(0.0001f), vec3f(1.0f))) / mat.tr_depth, mat.mat_type == MAT_TYPE_REFRACTIVE || mat.mat_type == MAT_TYPE_VOLUMETRIC || mat.mat_type == MAT_TYPE_SUBSURFACE);
+        let normal = hit.normal;
+
+        let material = MaterialPoint(mat.mat_type, emission, color.rgb, roughness, mat.metallic, mat.ior, density, mat.scattering.rgb, mat.sc_anisotropy, mat.tr_depth);
+
+        // Accumulate emission.
+        radiance += weight * emission;
+
+        // Compute next direction.
+        let outgoing = -ray.dir;
+        var incoming = vec3f();
+        if !is_mat_delta(mat)
+        {
+            const light_prob = 0.5f;
+            const bsdf_prob = 1.0f - light_prob;
+            if random_f32() < bsdf_prob
+            {
+                let rnd0 = random_f32();
+                let rnd1 = random_vec2f();
+                incoming = sample_bsdfcos(material, normal, outgoing, rnd0, rnd1);
+            }
+            else
+            {
+                incoming = sample_lights(ray.ori, normal, outgoing);
+            }
+
+            if all(incoming == vec3f(0.0f)) { break; }
+
+            let prob = bsdf_prob  * sample_bsdfcos_pdf(material, normal, outgoing, incoming) +
+                       light_prob * sample_lights_pdf(ray.ori, incoming);
+            weight *= eval_bsdfcos(material, normal, outgoing, incoming) / prob;
+        }
+        else
+        {
+            incoming = sample_delta(material, normal, outgoing, random_f32());
+            if all(incoming == vec3f(0.0f)) { break; }
+
+            weight *= eval_delta(material, normal, outgoing, incoming) /
+                      sample_delta_pdf(material, normal, outgoing, incoming);
         }
 
         ray.dir = incoming;
@@ -369,12 +483,21 @@ fn sample_environments(dir: vec3f) -> vec3f
 
 fn sample_environment(dir: vec3f, env_idx: u32) -> vec3f
 {
-    let coords = vec2f((atan2(dir.x, dir.z) + PI) / (2*PI), acos(dir.y) / PI);
+    let uv = dir_to_env_uv(dir);
     let env = environments[env_idx];
     const sampler_idx = 0u;  // TODO
-    return env.emission.rgb * textureSampleLevel(textures[env.emission_tex_idx], samplers[sampler_idx], coords, 0.0f).rgb;
+    return env.emission.rgb * textureSampleLevel(textures[env.emission_tex_idx], samplers[sampler_idx], uv, 0.0f).rgb;
 }
 
+fn is_mat_delta(mat: Material) -> bool
+{
+    return (mat.mat_type == MAT_TYPE_REFLECTIVE  && mat.roughness == 0) ||
+           (mat.mat_type == MAT_TYPE_REFRACTIVE  && mat.roughness == 0) ||
+           (mat.mat_type == MAT_TYPE_TRANSPARENT && mat.roughness == 0) ||
+           (mat.mat_type == MAT_TYPE_VOLUMETRIC);
+}
+
+/*
 struct BsdfSample
 {
     incoming: vec3f,  // Keep in mind this also points outwards.
@@ -386,7 +509,8 @@ fn sample_bsdf(mat_type: u32, color: vec3f, normal: vec3f, roughness: f32, ior: 
 {
     var res = BsdfSample();
 
-    let up_normal = select(-normal, normal, dot(normal, outgoing) > 0.0f);
+    //let up_normal = select(-normal, normal, dot(normal, outgoing) > 0.0f);
+    let up_normal = normal;
 
     switch(mat_type)
     {
@@ -401,8 +525,6 @@ fn sample_bsdf(mat_type: u32, color: vec3f, normal: vec3f, roughness: f32, ior: 
         }
         case MAT_TYPE_GLOSSY:
         {
-            // Could maybe simplify this part by calling recursively with argument MATTE.
-
             let fresnel = fresnel_dielectric(ior, up_normal, outgoing);
             if random_f32() < fresnel
             {
@@ -528,6 +650,7 @@ fn sample_bsdf(mat_type: u32, color: vec3f, normal: vec3f, roughness: f32, ior: 
 
     return res;
 }
+*/
 
 fn reflectivity_to_eta(reflectivity: vec3f) -> vec3f
 {
@@ -653,61 +776,29 @@ fn microfacet_shadowing(roughness: f32, normal: vec3f, halfway: vec3f, outgoing:
            microfacet_shadowing1(roughness, normal, halfway, incoming, ggx);
 }
 
-fn sample_lights(position: vec3f, rel: f32) -> vec3f
-{
-    let light_id = random_u32() % arrayLength(&lights);
-    let light = lights[light_id];
-    if light.is_instance != 0
-    {
-        let instance = instances[light.instance_idx];
-        let mesh_idx = instance.mesh_idx;
-        let tri_idx = sample_idx_in_light_cdf(light_id);
-        let v0 = verts_pos_array[mesh_idx].data[indices_array[mesh_idx].data[tri_idx*3 + 0]];
-        let v1 = verts_pos_array[mesh_idx].data[indices_array[mesh_idx].data[tri_idx*3 + 1]];
-        let v2 = verts_pos_array[mesh_idx].data[indices_array[mesh_idx].data[tri_idx*3 + 2]];
-        let rnd_p = random_in_tri(v0, v1, v2);
-        return normalize(rnd_p - position);
-    }
-    else
-    {
-        let env = environments[light.env_idx];
-        let pixel_idx = sample_idx_in_light_cdf(light_id);
-
-    }
-
-    return vec3f();  // TODO TODO TODO
-}
-
-fn sample_idx_in_light_cdf(light_idx: u32) -> u32
-{
-    let rnd = random_f32();
-    var res = 0u;
-    for(var i = 0u; i < arrayLength(&lights_cdfs[light_idx].data); i++)
-    {
-        if rnd < lights_cdfs[light_idx].data[i]
-        {
-            res = i;
-            break;
-        }
-    }
-
-    return res;
-}
-
-fn sample_lights_pdf(position: vec3f, dir: vec3f) -> f32
-{
-    return 0.0f;  // TODO TODO TODO
-}
-
 //////////////////////////////////////////////
 // Random number generation
 //////////////////////////////////////////////
 
 var<private> RNG_STATE: u32 = 0u;
 
-fn init_rng(global_id: u32, last_id: u32)
+fn init_rng(global_id: u32)
 {
-    RNG_STATE = global_id + (last_id + 1u) * accum_counter;
+    let seed = 0u;
+    RNG_STATE = hash_u32(global_id * 19349663u ^ accum_counter * 83492791u ^ seed * 73856093u);
+}
+
+fn hash_u32(seed: u32) -> u32
+{
+    var x = seed;
+    x ^= x >> 17;
+    x *= 0xed5ad4bb;
+    x ^= x >> 11;
+    x *= 0xac4c1b51;
+    x ^= x >> 15;
+    x *= 0x31848bab;
+    x ^= x >> 14;
+    return x;
 }
 
 // PCG Random number generator.
@@ -720,7 +811,7 @@ fn random_u32() -> u32
     return result;
 }
 
-// From 0 (inclusive) to 1 (inclusive)
+// From 0 (inclusive) to 1 (exclusive)
 fn random_f32() -> f32
 {
     RNG_STATE = RNG_STATE * 747796405u + 2891336453u;
@@ -729,9 +820,18 @@ fn random_f32() -> f32
     return f32(result) / 4294967295.0f;
 }
 
+// NOTE: max_exclusive must be > 0!
+fn random_u32_range_unsafe(max_exclusive: u32) -> u32
+{
+    return min(u32(random_f32() * f32(max_exclusive)), u32(max_exclusive - 1));
+}
+
 fn random_vec2f() -> vec2f
 {
-    return vec2f(random_f32(), random_f32());
+    // Separate statements to enforce evaluation order.
+    let rnd0 = random_f32();
+    let rnd1 = random_f32();
+    return vec2f(rnd0, rnd1);
 }
 
 fn random_f32_normal_dist() -> f32
@@ -772,6 +872,7 @@ fn random_in_hemisphere(normal: vec3f) -> vec3f
 // TODO: Can we make this faster?
 fn random_direction_cos(normal: vec3f) -> vec3f
 {
+    // Separate statements to enforce evaluation order.
     let r1 = random_f32();
     let r2 = random_f32();
 
@@ -794,13 +895,13 @@ fn random_direction_cos(normal: vec3f) -> vec3f
 
 fn random_tri_uv() -> vec2f
 {
-    let rnd = vec2f(random_f32(), random_f32());
+    let rnd = random_vec2f();
     return vec2f(1.0f - sqrt(rnd.x), rnd.y * sqrt(rnd.x));
 }
 
 fn random_in_tri(v0: vec3f, v1: vec3f, v2: vec3f) -> vec3f
 {
-    let rnd = vec2f(random_f32(), random_f32());
+    let rnd = random_vec2f();
     let uv = vec2f(1.0f - sqrt(rnd.x), rnd.y * sqrt(rnd.x));
     return v0 * (1.0f - uv.x - uv.y) + v1 * uv.x + v2 * uv.y;
 }
@@ -900,7 +1001,7 @@ fn ray_scene_intersection(local_id: vec3u, ray: Ray)->HitInfo
         if node.left_right == 0u  // Leaf node
         {
             let instance = instances[node.instance_idx];
-            let ray_trans = transform_ray(ray, instances[node.instance_idx].inv_transform);
+            let ray_trans = transform_ray_without_normalizing_direction(ray, instances[node.instance_idx].inv_transform);
             let result = ray_mesh_intersection(local_id, ray_trans, instance.mesh_idx);
             if result.hit.x < min_hit.x
             {
@@ -972,9 +1073,11 @@ fn ray_scene_intersection(local_id: vec3u, ray: Ray)->HitInfo
         let v = min_hit.z;
         let w = 1.0 - u - v;
 
-        hit_info.dst = min_hit.x;
         let local_normal = normalize(vert0.normal*w + vert1.normal*u + vert2.normal*v);
-        hit_info.normal = (transpose(inv_trans) * vec4f(local_normal, 1.0f)).xyz;
+        let normal_mat = transpose(mat3x3f(inv_trans[0].xyz, inv_trans[1].xyz, inv_trans[2].xyz));
+
+        hit_info.dst = min_hit.x;
+        hit_info.normal = normalize(normal_mat * local_normal).xyz;
         hit_info.tex_coords = vert0.tex_coords*w + vert1.tex_coords*u + vert2.tex_coords*v;
         hit_info.mat_idx = mat_idx;
     }
@@ -1101,9 +1204,7 @@ fn transform_point(p: vec3f, transform: mat4x4f)->vec3f
 fn transform_dir(dir: vec3f, transform: mat4x4f)->vec3f
 {
     let dir_vec4 = vec4f(dir, 0.0f);
-    // TODO: Normalize here causes bugs??
-    //return normalize((transform * dir_vec4).xyz);
-    return (transform * dir_vec4).xyz;
+    return normalize((transform * dir_vec4).xyz);
 }
 
 fn transform_ray(ray: Ray, transform: mat4x4f) -> Ray
@@ -1111,6 +1212,17 @@ fn transform_ray(ray: Ray, transform: mat4x4f) -> Ray
     var res = ray;
     res.ori = transform_point(res.ori, transform);
     res.dir = transform_dir(res.dir, transform);
+    res.inv_dir = 1.0f / res.dir;
+    return res;
+}
+
+fn transform_ray_without_normalizing_direction(ray: Ray, transform: mat4x4f) -> Ray
+{
+    var res = ray;
+    res.ori = transform_point(res.ori, transform);
+
+    let dir_vec4 = vec4f(res.dir, 0.0f);
+    res.dir = (transform * dir_vec4).xyz;
     res.inv_dir = 1.0f / res.dir;
     return res;
 }
@@ -1169,13 +1281,15 @@ fn sample_bsdfcos(material: MaterialPoint, normal: vec3f, outgoing: vec3f, rnl: 
 
 fn sample_matte(color: vec3f, normal: vec3f,
     outgoing: vec3f, rn: vec2f) -> vec3f {
-  let up_normal = select(normal, -normal, dot(normal, outgoing) <= 0.0f);
+  //let up_normal = select(normal, -normal, dot(normal, outgoing) <= 0.0f);
+  let up_normal = normal;
   return sample_hemisphere_cos(up_normal, rn);
 }
 
 fn sample_glossy(color: vec3f, ior: f32, roughness: f32,
     normal: vec3f, outgoing: vec3f, rnl: f32, rn: vec2f) -> vec3f {
-  let up_normal = select(normal, -normal, dot(normal, outgoing) <= 0.0f);
+  //let up_normal = select(normal, -normal, dot(normal, outgoing) <= 0.0f);
+  let up_normal = normal;
   if (rnl < fresnel_dielectric(ior, up_normal, outgoing)) {
     let halfway  = sample_microfacet(roughness, up_normal, rn, true);
     let incoming = reflect_(outgoing, halfway);
@@ -1188,7 +1302,8 @@ fn sample_glossy(color: vec3f, ior: f32, roughness: f32,
 
 fn sample_reflective(color: vec3f, roughness: f32,
     normal: vec3f, outgoing: vec3f, rn: vec2f) -> vec3f {
-  let up_normal = select(normal, -normal, dot(normal, outgoing) <= 0.0f);
+  //let up_normal = select(normal, -normal, dot(normal, outgoing) <= 0.0f);
+  let up_normal = normal;
   let halfway   = sample_microfacet(roughness, up_normal, rn, true);
   let incoming  = reflect_(outgoing, halfway);
   if (!same_hemisphere(up_normal, outgoing, incoming)) { return vec3f(); }
@@ -1197,7 +1312,8 @@ fn sample_reflective(color: vec3f, roughness: f32,
 
 fn sample_transparent(color: vec3f, ior: f32, roughness: f32,
     normal: vec3f, outgoing: vec3f, rnl: f32, rn: vec2f) -> vec3f {
-  let up_normal = select(normal, -normal, dot(normal, outgoing) <= 0.0f);
+  //let up_normal = select(normal, -normal, dot(normal, outgoing) <= 0.0f);
+  let up_normal = normal;
   let halfway   = sample_microfacet(roughness, up_normal, rn, true);
   if (rnl < fresnel_dielectric(ior, halfway, outgoing)) {
     let incoming = reflect_(outgoing, halfway);
@@ -1214,7 +1330,8 @@ fn sample_transparent(color: vec3f, ior: f32, roughness: f32,
 fn sample_refractive(color: vec3f, ior: f32, roughness: f32,
     normal: vec3f, outgoing: vec3f, rnl: f32, rn: vec2f) -> vec3f {
   let entering  = dot(normal, outgoing) >= 0;
-  let up_normal = select(normal, -normal, dot(normal, outgoing) <= 0.0f);
+  //let up_normal = select(normal, -normal, dot(normal, outgoing) <= 0.0f);
+  let up_normal = normal;
   let halfway   = sample_microfacet(roughness, up_normal, rn, true);
   // let halfway = sample_microfacet(roughness, up_normal, outgoing, rn, true);
   if (rnl < fresnel_dielectric(select(1.0f / ior, ior, entering), halfway, outgoing)) {
@@ -1231,7 +1348,8 @@ fn sample_refractive(color: vec3f, ior: f32, roughness: f32,
 fn sample_gltfpbr(color: vec3f, ior: f32, roughness: f32,
     metallic: f32, normal: vec3f, outgoing: vec3f, rnl: f32,
     rn: vec2f) -> vec3f {
-  let up_normal = select(normal, -normal, dot(normal, outgoing) <= 0.0f);
+  //let up_normal = select(normal, -normal, dot(normal, outgoing) <= 0.0f);
+  let up_normal = normal;
   let reflectivity = mix(
       eta_to_reflectivity(vec3f(ior)), color, metallic);
   let fresnel_schlick = fresnel_schlick_vec3f(reflectivity, up_normal, outgoing);
@@ -1300,7 +1418,8 @@ fn eval_matte(color: vec3f, normal: vec3f,
 fn eval_glossy(color: vec3f, ior: f32, roughness: f32,
     normal: vec3f, outgoing: vec3f, incoming: vec3f) -> vec3f {
   if (dot(normal, incoming) * dot(normal, outgoing) <= 0) { return vec3f(); }
-  let up_normal = select(normal, -normal, dot(normal, outgoing) <= 0);
+  //let up_normal = select(normal, -normal, dot(normal, outgoing) <= 0);
+  let up_normal = normal;
   let F1        = fresnel_dielectric(ior, up_normal, outgoing);
   let halfway   = normalize(incoming + outgoing);
   let F         = fresnel_dielectric(ior, halfway, incoming);
@@ -1316,7 +1435,8 @@ fn eval_glossy(color: vec3f, ior: f32, roughness: f32,
 fn eval_reflective(color: vec3f, roughness: f32,
     normal: vec3f, outgoing: vec3f, incoming: vec3f) -> vec3f {
   if (dot(normal, incoming) * dot(normal, outgoing) <= 0) { return vec3f(); };
-  let up_normal = select(normal, -normal, dot(normal, outgoing) <= 0);
+  //let up_normal = select(normal, -normal, dot(normal, outgoing) <= 0);
+  let up_normal = normal;
   let halfway   = normalize(incoming + outgoing);
   let F         = fresnel_conductor(
               reflectivity_to_eta(color), vec3f(), halfway, incoming);
@@ -1329,7 +1449,8 @@ fn eval_reflective(color: vec3f, roughness: f32,
 
 fn eval_transparent(color: vec3f, ior: f32, roughness: f32,
     normal: vec3f, outgoing: vec3f, incoming: vec3f) -> vec3f {
-  let up_normal = select(normal, -normal, dot(normal, outgoing) <= 0);
+  //let up_normal = select(normal, -normal, dot(normal, outgoing) <= 0);
+  let up_normal = normal;
   if (dot(normal, incoming) * dot(normal, outgoing) >= 0) {
     let halfway = normalize(incoming + outgoing);
     let F       = fresnel_dielectric(ior, halfway, outgoing);
@@ -1355,7 +1476,8 @@ fn eval_transparent(color: vec3f, ior: f32, roughness: f32,
 fn eval_refractive(color: vec3f, ior: f32, roughness: f32,
     normal: vec3f, outgoing: vec3f, incoming: vec3f) -> vec3f {
   let entering  = dot(normal, outgoing) >= 0;
-  let up_normal = select(normal, -normal, dot(normal, outgoing) <= 0);
+  //let up_normal = select(normal, -normal, dot(normal, outgoing) <= 0);
+  let up_normal = normal;
   let rel_ior   = select(1.0f / ior, ior, entering);
   if (dot(normal, incoming) * dot(normal, outgoing) >= 0) {
     let halfway = normalize(incoming + outgoing);
@@ -1390,7 +1512,8 @@ fn eval_gltfpbr(color: vec3f, ior: f32, roughness: f32,
   if (dot(normal, incoming) * dot(normal, outgoing) <= 0) { return vec3f(); }
   let reflectivity = mix(
       eta_to_reflectivity(vec3f(ior)), color, metallic);
-  let up_normal = select(normal, -normal, dot(normal, outgoing) <= 0);
+  //let up_normal = select(normal, -normal, dot(normal, outgoing) <= 0);
+  let up_normal = normal;
   let F1        = fresnel_schlick_vec3f(reflectivity, up_normal, outgoing);
   let halfway   = normalize(incoming + outgoing);
   let F         = fresnel_schlick_vec3f(reflectivity, halfway, incoming);
@@ -1437,14 +1560,16 @@ fn sample_bsdfcos_pdf(material: MaterialPoint,
 fn sample_matte_pdf(color: vec3f, normal: vec3f,
     outgoing: vec3f, incoming: vec3f) -> f32 {
   if (dot(normal, incoming) * dot(normal, outgoing) <= 0.0f) { return 0.0f; }
-  let up_normal = select(normal, -normal, dot(normal, outgoing) <= 0.0f);
+  //let up_normal = select(normal, -normal, dot(normal, outgoing) <= 0.0f);
+  let up_normal = normal;
   return sample_hemisphere_cos_pdf(up_normal, incoming);
 }
 
 fn sample_glossy_pdf(color: vec3f, ior: f32, roughness: f32,
     normal: vec3f, outgoing: vec3f, incoming: vec3f) -> f32 {
   if (dot(normal, incoming) * dot(normal, outgoing) <= 0.0f) { return 0.0f; }
-  let up_normal = select(normal, -normal, dot(normal, outgoing) <= 0.0f);
+  //let up_normal = select(normal, -normal, dot(normal, outgoing) <= 0.0f);
+  let up_normal = normal;
   let halfway   = normalize(outgoing + incoming);
   let F         = fresnel_dielectric(ior, up_normal, outgoing);
   return F * sample_microfacet_pdf(roughness, up_normal, halfway, true) /
@@ -1455,7 +1580,8 @@ fn sample_glossy_pdf(color: vec3f, ior: f32, roughness: f32,
 fn sample_reflective_pdf(color: vec3f, roughness: f32,
     normal: vec3f, outgoing: vec3f, incoming: vec3f) -> f32 {
   if (dot(normal, incoming) * dot(normal, outgoing) <= 0) { return 0.0f; }
-  let up_normal = select(normal, -normal, dot(normal, outgoing) <= 0.0f);
+  //let up_normal = select(normal, -normal, dot(normal, outgoing) <= 0.0f);
+  let up_normal = normal;
   let halfway   = normalize(outgoing + incoming);
   return sample_microfacet_pdf(roughness, up_normal, halfway, true) /
          (4 * abs(dot(outgoing, halfway)));
@@ -1464,7 +1590,8 @@ fn sample_reflective_pdf(color: vec3f, roughness: f32,
 fn sample_transparent_pdf(color: vec3f, ior: f32,
     roughness: f32, normal: vec3f, outgoing: vec3f,
     incoming: vec3f) -> f32 {
-  let up_normal = select(normal, -normal, dot(normal, outgoing) <= 0.0f);
+  //let up_normal = select(normal, -normal, dot(normal, outgoing) <= 0.0f);
+  let up_normal = normal;
   if (dot(normal, incoming) * dot(normal, outgoing) >= 0) {
     let halfway = normalize(incoming + outgoing);
     return fresnel_dielectric(ior, halfway, outgoing) *
@@ -1483,7 +1610,8 @@ fn sample_refractive_pdf(color: vec3f, ior: f32,
     roughness: f32, normal: vec3f, outgoing: vec3f,
     incoming: vec3f) -> f32 {
   let entering  = dot(normal, outgoing) >= 0;
-  let up_normal = select(normal, -normal, dot(normal, outgoing) <= 0.0f);
+  //let up_normal = select(normal, -normal, dot(normal, outgoing) <= 0.0f);
+  let up_normal = normal;
   let rel_ior   = select(1.0f / ior, ior, entering);
   if (dot(normal, incoming) * dot(normal, outgoing) >= 0) {
     let halfway = normalize(incoming + outgoing);
@@ -1507,7 +1635,8 @@ fn sample_gltfpbr_pdf(color: vec3f, ior: f32, roughness: f32,
     metallic: f32, normal: vec3f, outgoing: vec3f,
     incoming: vec3f) -> f32 {
   if (dot(normal, incoming) * dot(normal, outgoing) <= 0) { return 0.0f; }
-  let up_normal = select(normal, -normal, dot(normal, outgoing) <= 0.0f);
+  //let up_normal = select(normal, -normal, dot(normal, outgoing) <= 0.0f);
+  let up_normal = normal;
   let halfway      = normalize(outgoing + incoming);
   let reflectivity = mix(
       eta_to_reflectivity(vec3f(ior)), color, metallic);
@@ -1562,13 +1691,15 @@ fn sample_delta(material: MaterialPoint, normal: vec3f,
 
 fn sample_reflective_delta(
     color: vec3f, normal: vec3f, outgoing: vec3f) -> vec3f {
-  let up_normal = select(normal, -normal, dot(normal, outgoing) <= 0.0f);
+  //let up_normal = select(normal, -normal, dot(normal, outgoing) <= 0.0f);
+  let up_normal = normal;
   return reflect_(outgoing, up_normal);
 }
 
 fn sample_transparent_delta(color: vec3f, ior: f32,
     normal: vec3f, outgoing: vec3f, rnl: f32) -> vec3f {
-  let up_normal = select(normal, -normal, dot(normal, outgoing) <= 0.0f);
+  //let up_normal = select(normal, -normal, dot(normal, outgoing) <= 0.0f);
+  let up_normal = normal;
   if (rnl < fresnel_dielectric(ior, up_normal, outgoing)) {
     return reflect_(outgoing, up_normal);
   } else {
@@ -1580,7 +1711,8 @@ fn sample_refractive_delta(color: vec3f, ior: f32,
     normal: vec3f, outgoing: vec3f, rnl: f32) -> vec3f {
   if (abs(ior - 1) < 1e-3) { return -outgoing; }
   let entering  = dot(normal, outgoing) >= 0;
-  let up_normal = select(normal, -normal, dot(normal, outgoing) <= 0.0f);
+  //let up_normal = select(normal, -normal, dot(normal, outgoing) <= 0.0f);
+  let up_normal = normal;
   let rel_ior   = select(1.0f / ior, ior, entering);
   if (rnl < fresnel_dielectric(rel_ior, up_normal, outgoing)) {
     return reflect_(outgoing, up_normal);
@@ -1618,14 +1750,16 @@ fn eval_delta(material: MaterialPoint, normal: vec3f,
 fn eval_reflective_delta(color: vec3f, normal: vec3f,
     outgoing: vec3f, incoming: vec3f) -> vec3f {
   if (dot(normal, incoming) * dot(normal, outgoing) <= 0.0f) { return vec3f(); }
-  let up_normal = select(normal, -normal, dot(normal, outgoing) <= 0.0f);
+  //let up_normal = select(normal, -normal, dot(normal, outgoing) <= 0.0f);
+  let up_normal = normal;
   return fresnel_conductor(
       reflectivity_to_eta(color), vec3f(), up_normal, outgoing);
 }
 
 fn eval_transparent_delta(color: vec3f, ior: f32,
     normal: vec3f, outgoing: vec3f, incoming: vec3f) -> vec3f {
-  let up_normal = select(normal, -normal, dot(normal, outgoing) <= 0.0f);
+  //let up_normal = select(normal, -normal, dot(normal, outgoing) <= 0.0f);
+  let up_normal = normal;
   if (dot(normal, incoming) * dot(normal, outgoing) >= 0) {
     return vec3f(1.0f) * fresnel_dielectric(ior, up_normal, outgoing);
   } else {
@@ -1639,7 +1773,8 @@ fn eval_refractive_delta(color: vec3f, ior: f32, normal: vec3f,
     return select(vec3f(0.0f), vec3f(1.0f), dot(normal, incoming) * dot(normal, outgoing) <= 0);
   }
   let entering  = dot(normal, outgoing) >= 0;
-  let up_normal = select(normal, -normal, dot(normal, outgoing) <= 0.0f);
+  //let up_normal = select(normal, -normal, dot(normal, outgoing) <= 0.0f);
+  let up_normal = normal;
   let rel_ior   = select(1.0f / ior, ior, entering);
   if (dot(normal, incoming) * dot(normal, outgoing) >= 0) {
     return vec3f(1.0f) * fresnel_dielectric(rel_ior, up_normal, outgoing);
@@ -1687,7 +1822,8 @@ fn sample_reflective_delta_pdf(color: vec3f, normal: vec3f,
 
 fn sample_transparent_delta_pdf(color: vec3f, ior: f32,
     normal: vec3f, outgoing: vec3f, incoming: vec3f) -> f32 {
-  let up_normal = select(normal, -normal, dot(normal, outgoing) <= 0.0f);
+  //let up_normal = select(normal, -normal, dot(normal, outgoing) <= 0.0f);
+  let up_normal = normal;
   if (dot(normal, incoming) * dot(normal, outgoing) >= 0) {
     return fresnel_dielectric(ior, up_normal, outgoing);
   } else {
@@ -1695,13 +1831,13 @@ fn sample_transparent_delta_pdf(color: vec3f, ior: f32,
   }
 }
 
-fn sample_refractive_delta_pdf(color: vec3f, ior: f32,
-    normal: vec3f, outgoing: vec3f, incoming: vec3f) -> f32 {
+fn sample_refractive_delta_pdf(color: vec3f, ior: f32, normal: vec3f, outgoing: vec3f, incoming: vec3f) -> f32 {
   if (abs(ior - 1) < 1e-3) {
     return select(0.0f, 1.0f, dot(normal, incoming) * dot(normal, outgoing) < 0);
   }
   let entering  = dot(normal, outgoing) >= 0;
-  let up_normal = select(normal, -normal, dot(normal, outgoing) <= 0.0f);
+  //let up_normal = select(normal, -normal, dot(normal, outgoing) <= 0.0f);
+  let up_normal = normal;
   let rel_ior   = select(1.0f / ior, ior, entering);
   if (dot(normal, incoming) * dot(normal, outgoing) >= 0) {
     return fresnel_dielectric(rel_ior, up_normal, outgoing);
@@ -1710,38 +1846,189 @@ fn sample_refractive_delta_pdf(color: vec3f, ior: f32,
   }
 }
 
-fn sample_passthrough_pdf(color: vec3f, normal: vec3f,
-    outgoing: vec3f, incoming: vec3f) -> f32 {
-  if (dot(normal, incoming) * dot(normal, outgoing) >= 0) {
-    return 0.0f;
-  } else {
-    return 1.0f;
-  }
+fn sample_passthrough_pdf(color: vec3f, normal: vec3f, outgoing: vec3f, incoming: vec3f) -> f32 {
+    if (dot(normal, incoming) * dot(normal, outgoing) >= 0) {
+        return 0.0f;
+    } else {
+        return 1.0f;
+    }
 }
 
 fn basis_fromz(v: vec3f) -> mat3x3f {
-  // https://graphics.pixar.com/library/OrthonormalB/paper.pdf
-  let z    = normalize(v);
-  let sign = copysignf(1.0f, z.z);
-  let a    = -1.0f / (sign + z.z);
-  let b    = z.x * z.y * a;
-  let x    = vec3f(1.0f + sign * z.x * z.x * a, sign * b, -sign * z.x);
-  let y    = vec3f(b, sign + z.y * z.y * a, -z.y);
-  return mat3x3f(x, y, z);  // TODO: Does this do what i think it does?
+    // https://graphics.pixar.com/library/OrthonormalB/paper.pdf
+    let z    = normalize(v);
+    let sign = copysignf(1.0f, z.z);
+    let a    = -1.0f / (sign + z.z);
+    let b    = z.x * z.y * a;
+    let x    = vec3f(1.0f + sign * z.x * z.x * a, sign * b, -sign * z.x);
+    let y    = vec3f(b, sign + z.y * z.y * a, -z.y);
+    return mat3x3f(x, y, z);  // TODO: Does this do what i think it does?
 }
 
 fn copysignf(mag: f32, sgn: f32) -> f32 { return select(mag, -mag, sgn < 0.0f); }
 
-// let up_normal = select(normal, -normal, dot(normal, outgoing) <= 0.0f);
-
 // Reflected and refracted vector.
 fn reflect_(w: vec3f, n: vec3f) -> vec3f {
-  return -w + 2 * dot(n, w) * n;
+    return -w + 2 * dot(n, w) * n;
 }
 
 fn refract_(w: vec3f, n: vec3f, inv_eta: f32) -> vec3f {
-  let cosine = dot(n, w);
-  let k      = 1 + inv_eta * inv_eta * (cosine * cosine - 1);
-  if (k < 0) { return vec3f(); }  // tir
-  return -w * inv_eta + (inv_eta * cosine - sqrt(k)) * n;
+    let cosine = dot(n, w);
+    let k      = 1 + inv_eta * inv_eta * (cosine * cosine - 1);
+    if (k < 0) { return vec3f(); }  // tir
+    return -w * inv_eta + (inv_eta * cosine - sqrt(k)) * n;
+}
+
+// LIGHT SAMPLING
+
+fn sample_lights(pos: vec3f, normal: vec3f, outgoing: vec3f) -> vec3f
+{
+    //let up_normal = select(normal, -normal, dot(normal, outgoing) <= 0.0f);
+    let up_normal = normal;
+
+    //let num_instance_lights = arrayLength(&lights);
+    let num_envs = arrayLength(&environments);
+    if num_envs <= 0 { return vec3f(); }
+    //if num_instance_lights + num_envs <= 0 { return vec3f(); }
+
+    let light_idx = random_u32_range_unsafe(/*num_instance_lights + */num_envs);
+    /*if light_idx < num_instance_lights
+    {
+
+        if dot(normal, incoming) < 0.0f) { return vec3f(0.0f); }
+        return incoming;
+    }
+    else
+    */
+    {
+        let env_idx = light_idx /*- num_instance_lights*/;
+        let env_tex_idx = environments[env_idx].emission_tex_idx;
+        let env_tex_size = textureDimensions(textures[env_tex_idx]);
+
+        let sample = sample_env_alias_table(env_idx);
+        let coords = vec2u(sample % env_tex_size.x, sample / env_tex_size.x);
+        let uv = (vec2f(coords) + 0.5f) / vec2f(env_tex_size);
+
+        let incoming = env_idx_to_dir(sample, env_idx);
+
+        if (!same_hemisphere(up_normal, outgoing, incoming)) { return vec3f(); }
+        return incoming;
+    }
+}
+
+fn sample_lights_pdf(pos: vec3f, incoming: vec3f) -> f32
+{
+    var pdf = 0.0f;
+
+    let num_lights = arrayLength(&lights);
+    for(var i = 0u; i < num_lights; i++)
+    {
+
+    }
+
+    let num_envs = arrayLength(&environments);
+    for(var i = 0u; i < num_envs; i++)
+    {
+        let env_tex_idx = environments[i].emission_tex_idx;
+        let env_tex_size = textureDimensions(textures[env_tex_idx]);
+
+        let pixel_coords = dir_to_env_coords(incoming, i);
+        let pixel_idx = pixel_coords.y * env_tex_size.x + pixel_coords.x;
+        let prob = env_alias_tables[i].data[pixel_idx].prob;
+
+        let solid_angle = (2.0f * PI / f32(env_tex_size.x)) *
+                          (PI / f32(env_tex_size.y)) *
+                          sin(PI * (f32(pixel_coords.y) + 0.5f) / f32(env_tex_size.y));
+
+        pdf += prob / solid_angle;
+    }
+
+    pdf /= f32(/* num_lights + */ num_envs);
+
+    return pdf;
+}
+
+fn dir_to_env_coords(dir: vec3f, env: u32) -> vec2u
+{
+    let env_tex_idx = environments[env].emission_tex_idx;
+    let env_tex_size = textureDimensions(textures[env_tex_idx]);
+
+    let uv = dir_to_env_uv(dir);
+    return vec2u(clamp(u32(uv.x * f32(env_tex_size.x)), 0u, env_tex_size.x - 1),
+                 clamp(u32(uv.y * f32(env_tex_size.y)), 0u, env_tex_size.y - 1));
+}
+
+// Safely wraps values in the [0, 1] range.
+fn dir_to_env_uv(dir: vec3f) -> vec2f
+{
+    var uv = vec2f(atan2(dir.z, dir.x) / (2.0f * PI), acos(clamp(dir.y, -1.0f, 1.0f)) / PI);
+    if uv.x < 0.0f { uv.x += 1.0f; }
+    if uv.x > 1.0f { uv.x -= 1.0f; }
+    return uv;
+}
+
+fn env_idx_to_dir(idx: u32, env: u32) -> vec3f
+{
+    let env_tex_idx = environments[env].emission_tex_idx;
+    let env_tex_size = textureDimensions(textures[env_tex_idx]);
+
+    let coords = vec2u(idx % env_tex_size.x, idx / env_tex_size.x);
+    let uv = (vec2f(coords) + 0.5f) / vec2f(env_tex_size);
+    return env_uv_to_dir(uv);
+}
+
+fn env_uv_to_dir(uv: vec2f) -> vec3f
+{
+    let dir = vec3f(cos(uv.x * 2.0f * PI) * sin(uv.y * PI),
+                    cos(uv.y * PI),
+                    sin(uv.x * 2.0f * PI) * sin(uv.y * PI));
+    return dir;
+}
+
+fn sample_env_alias_table(env_idx: u32) -> u32
+{
+    let num_env = arrayLength(&environments);
+    if num_env == 0 { return 0u; }
+
+    let alias_table_size = arrayLength(&env_alias_tables[env_idx].data);
+    let rnd_idx = random_u32_range_unsafe(alias_table_size);
+    let bin = env_alias_tables[env_idx].data[rnd_idx];
+    if random_f32() >= bin.alias_threshold {
+        return bin.alias_idx;
+    } else {
+        return rnd_idx;
+    }
+}
+
+fn sample_instance_alias_table(light_idx: u32) -> u32
+{
+    let num_lights = arrayLength(&lights);
+    if num_lights == 0 { return 0u; }
+
+    let alias_table_size = arrayLength(&alias_tables[light_idx].data);
+    let rnd_idx = random_u32_range_unsafe(alias_table_size);
+    let bin = alias_tables[light_idx].data[rnd_idx];
+    if random_f32() >= bin.alias_threshold {
+        return bin.alias_idx;
+    } else {
+        return rnd_idx;
+    }
+}
+
+// Debug utils
+
+// Only first color written is shown.
+fn write_debug_color_once(color: vec3f)
+{
+    if !debug_enable
+    {
+        debug_enable = true;
+        debug_color = color;
+    }
+}
+
+fn overwrite_debug_color(color: vec3f)
+{
+    debug_enable = true;
+    debug_color = color;
 }
