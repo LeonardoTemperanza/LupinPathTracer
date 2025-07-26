@@ -57,32 +57,6 @@ fn main()
 
     let mut app_state = AppState::new(&device, &queue, &window);
 
-/*
-    let mut albedo_texture = device.create_texture(&wgpu::TextureDescriptor {
-        label: None,
-        size: wgpu::Extent3d { width: width as u32, height: height as u32, depth_or_array_layers: 1 },
-        mip_level_count: 1,
-        sample_count: 1,
-        dimension: wgpu::TextureDimension::D2,
-        format: wgpu::TextureFormat::Rgba8Unorm,
-        usage: wgpu::TextureUsages::STORAGE_BINDING |
-               wgpu::TextureUsages::TEXTURE_BINDING,
-        view_formats: &[]
-    });
-    let mut normals_texture = device.create_texture(&wgpu::TextureDescriptor {
-        label: None,
-        size: wgpu::Extent3d { width: width as u32, height: height as u32, depth_or_array_layers: 1 },
-        mip_level_count: 1,
-        sample_count: 1,
-        dimension: wgpu::TextureDimension::D2,
-        format: wgpu::TextureFormat::Rgba8Snorm,
-        usage: wgpu::TextureUsages::STORAGE_BINDING |
-               wgpu::TextureUsages::TEXTURE_BINDING,
-        view_formats: &[]
-    });
-    //
-*/
-
     let egui_ctx = egui::Context::default();
     let viewport_id = egui_ctx.viewport_id();
     let mut egui_state = egui_winit::State::new(egui_ctx.clone(), viewport_id, &window, None, None, None);
@@ -156,35 +130,6 @@ pub enum RenderType
     DebugNumBounces,
 }
 
-pub struct AppState<'a>
-{
-    pub device: &'a wgpu::Device,
-    pub queue: &'a wgpu::Queue,
-    pub window: &'a winit::window::Window,
-
-    // UI
-    pub render_type: RenderType,
-    pub max_accums: u32,
-    pub samples_per_pixel: u32,
-    pub tonemap_params: lp::TonemapParams,
-
-    // Camera
-    pub cam_pos: lp::Vec3,
-    pub cam_rot: lp::Quat,
-
-    // Lupin resources,
-    pub pathtrace_resources: lp::PathtraceResources,
-    pub tonemap_resources: lp::TonemapResources,
-    pub scene: lp::SceneDesc,
-
-    // Saved state for accumulation
-    pub prev_cam_transform: lp::Mat4,
-    pub accum_counter: u32,
-    pub output_textures: [wgpu::Texture; 2],
-    pub output_tex_front: usize,
-    pub output_tex_back: usize,
-}
-
 #[derive(PartialEq, Eq, Clone, Copy, Debug)]
 enum TonemapKind
 {
@@ -201,6 +146,48 @@ fn to_tonemap_kind(op: lp::TonemapOperator) -> TonemapKind
         lp::TonemapOperator::FilmicUC2 => TonemapKind::FilmicUC2,
         lp::TonemapOperator::FilmicCustom {..} => TonemapKind::FilmicCustom,
     }
+}
+
+#[derive(Default, Debug, Copy, Clone)]
+pub struct DebugBVHInfo
+{
+    pub multibounce: bool,
+}
+
+pub struct AppState<'a>
+{
+    pub device: &'a wgpu::Device,
+    pub queue: &'a wgpu::Queue,
+    pub window: &'a winit::window::Window,
+
+    // UI
+    pub render_type: RenderType,
+    pub max_accums: u32,
+    pub max_bounces: u32,
+    pub samples_per_pixel: u32,
+    pub tonemap_params: lp::TonemapParams,
+    pub debug_bvh: DebugBVHInfo,
+    pub should_rebuild_pathtrace_resources: bool,
+
+    // Camera
+    pub cam_pos: lp::Vec3,
+    pub cam_rot: lp::Quat,
+
+    // Lupin resources,
+    pub pathtrace_resources: lp::PathtraceResources,
+    pub tonemap_resources: lp::TonemapResources,
+    pub scene: lp::SceneDesc,
+
+    // Textures
+    pub output_textures: [wgpu::Texture; 2],
+    pub output_rgba8_unorm: wgpu::Texture,
+    pub output_rgba8_snorm: wgpu::Texture,
+
+    // Saved state for accumulation
+    pub prev_cam_transform: lp::Mat4,
+    pub accum_counter: u32,
+    pub output_tex_front: usize,
+    pub output_tex_back: usize,
 }
 
 impl<'a> AppState<'a>
@@ -244,6 +231,28 @@ impl<'a> AppState<'a>
             })
         ];
 
+        let output_rgba8_unorm = device.create_texture(&wgpu::TextureDescriptor {
+            label: None,
+            size: wgpu::Extent3d { width: width as u32, height: height as u32, depth_or_array_layers: 1 },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8Unorm,
+            usage: wgpu::TextureUsages::STORAGE_BINDING |
+                   wgpu::TextureUsages::TEXTURE_BINDING,
+            view_formats: &[]
+        });
+        let output_rgba8_snorm = device.create_texture(&wgpu::TextureDescriptor {
+            label: None,
+            size: wgpu::Extent3d { width: width as u32, height: height as u32, depth_or_array_layers: 1 },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8Snorm,
+            usage: wgpu::TextureUsages::STORAGE_BINDING |
+                   wgpu::TextureUsages::TEXTURE_BINDING,
+            view_formats: &[]
+        });
 
         return Self {
             device: device,
@@ -253,8 +262,10 @@ impl<'a> AppState<'a>
             // UI
             render_type: Default::default(),
             samples_per_pixel: 1,
+            max_bounces: 5,
             max_accums: 200,
             tonemap_params: Default::default(),
+            debug_bvh: Default::default(),
 
             // Camera
             cam_pos: lp::Vec3 { x: 0.0, y: 1.0, z: -3.0 },
@@ -265,10 +276,14 @@ impl<'a> AppState<'a>
             tonemap_resources,
             scene,
 
+            // Textures
+            output_textures,
+            output_rgba8_unorm,
+            output_rgba8_snorm,
+
             // Saved state for accumulation
             prev_cam_transform: lp::Mat4::zeros(),
             accum_counter: 0,
-            output_textures,
             output_tex_front: 1,
             output_tex_back: 0,
         };
@@ -287,6 +302,11 @@ impl<'a> AppState<'a>
         {
             self.update_ui(egui_ctx);
         });
+
+        if self.should_rebuild_pathtrace_resources
+        {
+            
+        }
 
         // Render scene
         self.render_scene(swapchain);
@@ -353,51 +373,72 @@ impl<'a> AppState<'a>
 
     fn render_scene(&mut self, swapchain: &wgpu::Texture)
     {
-        println!("{}, {}", self.cam_pos, self.cam_rot);
-
         let camera_transform = lp::xform_to_matrix(self.cam_pos, self.cam_rot, lp::Vec3 { x: 1.0, y: 1.0, z: 1.0 });
-        if camera_transform.m != self.prev_cam_transform.m
+
+        match self.render_type
         {
-            self.accum_counter = 0;
+            RenderType::Albedo =>
+            {
+                lp::raycast_albedo(&self.device, &self.queue, &self.scene, &self.output_rgba8_unorm,
+                                   &self.pathtrace_resources, camera_transform.into());
+                lp::convert_to_ldr_no_tonemap(&self.device, &self.queue, &self.tonemap_resources,
+                                              &self.output_rgba8_unorm, &swapchain);
+            }
+            RenderType::Normals =>
+            {
+                lp::raycast_normals(&self.device, &self.queue, &self.scene, &self.output_rgba8_snorm,
+                                    &self.pathtrace_resources, camera_transform.into());
+                lp::convert_to_ldr_no_tonemap(&self.device, &self.queue, &self.tonemap_resources,
+                                              &self.output_rgba8_snorm, &swapchain);
+            }
+            RenderType::Pathtrace =>
+            {
+                if camera_transform.m != self.prev_cam_transform.m
+                {
+                    self.accum_counter = 0;
+                }
+                self.prev_cam_transform = camera_transform;
+
+                if self.accum_counter < self.max_accums
+                {
+                    lp::pathtrace_scene(&self.device, &self.queue, &lp::PathtraceDesc {
+                        scene: &self.scene,
+                        render_target: &self.output_textures[self.output_tex_front],
+                        resources: &self.pathtrace_resources,
+                        accum_params: &lp::AccumulationParams {
+                            prev_frame: Some(&self.output_textures[self.output_tex_back]),
+                            accum_counter: self.accum_counter,
+                        },
+                        camera_transform: camera_transform,
+                    });
+                }
+
+                lp::apply_tonemapping(&self.device, &self.queue, &lp::TonemapDesc {
+                    shader_params: &self.tonemap_resources,
+                    hdr_texture: &self.output_textures[self.output_tex_front],
+                    render_target: &swapchain,
+                    tonemap_params: &self.tonemap_params,
+                });
+
+                // Swap output textures
+                if self.accum_counter < self.max_accums
+                {
+                    let tmp = self.output_tex_back;
+                    self.output_tex_back  = self.output_tex_front;
+                    self.output_tex_front = tmp;
+                }
+
+                self.accum_counter = (self.accum_counter + 1).min(self.max_accums);
+            }
+            RenderType::DebugBVH =>
+            {
+
+            }
+            RenderType::DebugNumBounces =>
+            {
+
+            }
         }
-        self.prev_cam_transform = camera_transform;
-
-        /*
-        lp::raycast_normals(&device, &queue, &scene, &normals_texture,
-                           &shader_params, camera_transform.into());
-
-        let tonemap_params = lp::TonemapParams {
-            operator: lp::TonemapOperator::Aces,
-            exposure: 0.0
-        };
-        //lp::apply_tonemapping(&device, &queue, &tonemap_shader_params,
-        //                      &albedo_texture, &frame.texture, &tonemap_params);
-        lp::convert_to_ldr_no_tonemap(&device, &queue, &tonemap_shader_params,
-                                      &normals_texture, &frame.texture);
-        */
-
-        if self.accum_counter < self.max_accums
-        {
-            let accum_params = lp::AccumulationParams {
-                prev_frame: Some(&self.output_textures[self.output_tex_back]),
-                accum_counter: self.accum_counter,
-            };
-            lp::pathtrace_scene(&self.device, &self.queue, &self.scene, &self.output_textures[self.output_tex_front],
-                                &self.pathtrace_resources, &accum_params, camera_transform.into());
-        }
-
-        lp::apply_tonemapping(&self.device, &self.queue, &self.tonemap_resources,
-                              &self.output_textures[self.output_tex_front], &swapchain, &self.tonemap_params);
-
-        // Swap output textures
-        if self.accum_counter < self.max_accums
-        {
-            let tmp = self.output_tex_back;
-            self.output_tex_back  = self.output_tex_front;
-            self.output_tex_front = tmp;
-        }
-
-        self.accum_counter = (self.accum_counter + 1).min(self.max_accums);
     }
 
     fn update_camera(&mut self, input: &Input, delta_time: f32)
@@ -506,15 +547,38 @@ impl<'a> AppState<'a>
             {
                 self.ui_render_type(ui);
 
-                ui.horizontal(|ui| {
-                    ui.add(egui::DragValue::new(&mut self.samples_per_pixel).range(1..=200));
-                    ui.label("Samples per pixel");
-                });
+                match self.render_type
+                {
+                    RenderType::Albedo => {}
+                    RenderType::Normals => {}
+                    RenderType::Pathtrace =>
+                    {
+                        ui.horizontal(|ui| {
+                            ui.add(egui::DragValue::new(&mut self.samples_per_pixel).range(1..=200));
+                            ui.label("Samples per pixel");
+                        });
 
-                ui.horizontal(|ui| {
-                    ui.add(egui::DragValue::new(&mut self.max_accums).range(1..=10000));
-                    ui.label("Max accumulations");
-                });
+                        ui.horizontal(|ui| {
+                            ui.add(egui::DragValue::new(&mut self.max_bounces).range(1..=200));
+                            ui.label("Max bounces");
+                        });
+
+                        ui.horizontal(|ui| {
+                            ui.add(egui::DragValue::new(&mut self.max_accums).range(1..=10000));
+                            ui.label("Max accumulations");
+                        });
+
+                        egui::CollapsingHeader::new("Stats").show(ui, |ui| {
+                            ui.label("Iteration: ");
+                            ui.label("Tile: ");
+                        });
+                    }
+                    RenderType::DebugBVH =>
+                    {
+                        ui.checkbox(&mut self.debug_bvh.multibounce, "Multiple bounces");
+                    }
+                    RenderType::DebugNumBounces => {}
+                }
             }
 
             ui.add_space(12.0);
@@ -545,15 +609,6 @@ impl<'a> AppState<'a>
                 ui.selectable_value(&mut self.render_type, RenderType::DebugBVH, "BVH (Debug)");
                 ui.selectable_value(&mut self.render_type, RenderType::DebugNumBounces, "Number of bounces (Debug)");
             });
-
-        match self.render_type
-        {
-            RenderType::Albedo => {}
-            RenderType::Normals => {}
-            RenderType::Pathtrace => {}
-            RenderType::DebugBVH => {}
-            RenderType::DebugNumBounces => {}
-        }
     }
 
     fn ui_tonemap_operator(&mut self, ui: &mut egui::Ui)

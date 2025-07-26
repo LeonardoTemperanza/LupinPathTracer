@@ -344,7 +344,7 @@ impl std::ops::Mul<Mat4> for Mat4
     #[inline]
     fn mul(self, rhs: Mat4)->Mat4
     {
-        let mut res = Mat4::default();
+        let mut res = Mat4::zeros();
         for i in 0..4
         {
             for j in 0..4
@@ -408,7 +408,7 @@ pub fn mat4_inverse(m: Mat4) -> Mat4
     // Should check for 0 determinant
     let invdet = 1.0 / (s0 * c5 - s1 * c4 + s2 * c3 + s3 * c2 - s4 * c1 + s5 * c0);
 
-    let mut b = Mat4::default();
+    let mut b = Mat4::zeros();
     b.m[0][0] = ( m.m[1][1] * c5 - m.m[1][2] * c4 + m.m[1][3] * c3) * invdet;
     b.m[0][1] = (-m.m[0][1] * c5 + m.m[0][2] * c4 - m.m[0][3] * c3) * invdet;
     b.m[0][2] = ( m.m[3][1] * s5 - m.m[3][2] * s4 + m.m[3][3] * s3) * invdet;
@@ -427,46 +427,6 @@ pub fn mat4_inverse(m: Mat4) -> Mat4
     b.m[3][3] = ( m.m[2][0] * s3 - m.m[2][1] * s1 + m.m[2][2] * s0) * invdet;
     return b;
 }
-
-/*
-pub fn mat4_inverse(m: Mat4) -> Mat4
-{
-    let s0 = m.m[0][0] * m.m[1][1] - m.m[0][1] * m.m[1][0];
-    let s1 = m.m[0][0] * m.m[2][1] - m.m[0][1] * m.m[2][0];
-    let s2 = m.m[0][0] * m.m[3][1] - m.m[0][1] * m.m[3][0];
-    let s3 = m.m[1][0] * m.m[2][1] - m.m[1][1] * m.m[2][0];
-    let s4 = m.m[1][0] * m.m[3][1] - m.m[1][1] * m.m[3][0];
-    let s5 = m.m[2][0] * m.m[3][1] - m.m[2][1] * m.m[3][0];
-    let c5 = m.m[2][2] * m.m[3][3] - m.m[2][3] * m.m[3][2];
-    let c4 = m.m[1][2] * m.m[3][3] - m.m[1][3] * m.m[3][2];
-    let c3 = m.m[1][2] * m.m[2][3] - m.m[1][3] * m.m[2][2];
-    let c2 = m.m[0][2] * m.m[3][3] - m.m[0][3] * m.m[3][2];
-    let c1 = m.m[0][2] * m.m[2][3] - m.m[0][3] * m.m[2][2];
-    let c0 = m.m[0][2] * m.m[1][3] - m.m[0][3] * m.m[1][2];
-
-    // Should check for 0 determinant
-    let invdet = 1.0 / (s0 * c5 - s1 * c4 + s2 * c3 + s3 * c2 - s4 * c1 + s5 * c0);
-
-    let mut b = Mat4::default();
-    b.m[0][0] = ( m.m[1][1] * c5 - m.m[2][1] * c4 + m.m[3][1] * c3) * invdet;
-    b.m[1][0] = (-m.m[1][0] * c5 + m.m[2][0] * c4 - m.m[3][0] * c3) * invdet;
-    b.m[2][0] = ( m.m[1][3] * s5 - m.m[2][3] * s4 + m.m[3][3] * s3) * invdet;
-    b.m[3][0] = (-m.m[1][2] * s5 + m.m[2][2] * s4 - m.m[3][2] * s3) * invdet;
-    b.m[0][1] = (-m.m[0][1] * c5 + m.m[2][1] * c2 - m.m[3][1] * c1) * invdet;
-    b.m[1][1] = ( m.m[0][0] * c5 - m.m[2][0] * c2 + m.m[3][0] * c1) * invdet;
-    b.m[2][1] = (-m.m[0][3] * s5 + m.m[2][3] * s2 - m.m[3][3] * s1) * invdet;
-    b.m[3][1] = ( m.m[0][2] * s5 - m.m[2][2] * s2 + m.m[3][2] * s1) * invdet;
-    b.m[0][2] = ( m.m[0][1] * c4 - m.m[1][1] * c2 + m.m[3][1] * c0) * invdet;
-    b.m[1][2] = (-m.m[0][0] * c4 + m.m[1][0] * c2 - m.m[3][0] * c0) * invdet;
-    b.m[2][2] = ( m.m[0][3] * s4 - m.m[1][3] * s2 + m.m[3][3] * s0) * invdet;
-    b.m[3][2] = (-m.m[0][2] * s4 + m.m[1][2] * s2 - m.m[3][2] * s0) * invdet;
-    b.m[0][3] = (-m.m[0][1] * c3 + m.m[1][1] * c1 - m.m[2][1] * c0) * invdet;
-    b.m[1][3] = ( m.m[0][0] * c3 - m.m[1][0] * c1 + m.m[2][0] * c0) * invdet;
-    b.m[2][3] = (-m.m[0][3] * s3 + m.m[1][3] * s1 - m.m[2][3] * s0) * invdet;
-    b.m[3][3] = ( m.m[0][2] * s3 - m.m[1][2] * s1 + m.m[2][2] * s0) * invdet;
-    return b;
-}
-*/
 
 #[derive(Debug, Clone, Copy)]
 #[repr(C)]
@@ -592,8 +552,7 @@ pub fn rotate_vec3_with_quat(q: Quat, v: Vec3)->Vec3
     let num10 = q.w * num;
     let num11 = q.w * num2;
     let num12 = q.w * num3;
-    return Vec3
-    {
+    return Vec3 {
         x: (1.0 - (num5 + num6)) * v.x + (num7 - num12) * v.y + (num8 + num11) * v.z,
         y: (num7 + num12) * v.x + (1.0 - (num4 + num6)) * v.y + (num9 - num10) * v.z,
         z: (num8 - num11) * v.x + (num9 + num10) * v.y + (1.0 - (num4 + num5)) * v.z
@@ -604,8 +563,7 @@ pub fn rotate_vec3_with_quat(q: Quat, v: Vec3)->Vec3
 #[inline]
 pub fn quat_mul(a: Quat, b: Quat)->Quat
 {
-    return Quat
-    {
+    return Quat {
         w: a.w * b.w - a.x * b.x - a.y * b.y - a.z * b.z,
         x: a.w * b.x + a.x * b.w + a.y * b.z - a.z * b.y,
         y: a.w * b.y + a.y * b.w + a.z * b.x - a.x * b.z,
@@ -728,8 +686,6 @@ pub fn lerp_quat(q1: Quat, q2: Quat, t: f32)->Quat
         q2.w = -q2.w;
     }
 
-    // res = q1 + t(q2 - q1)  -->  res = q1 - t(q1 - q2)
-    // The latter is slightly better on x64
     let mut res = Quat::IDENTITY;
     res.x = q1.x - t*(q1.x - q2.x);
     res.y = q1.y - t*(q1.y - q2.y);
@@ -778,10 +734,8 @@ pub fn rotation_matrix(q: Quat)->Mat4
     let wx = q.w * x;   let wy = q.w * y;   let wz = q.w * z;
 
     // Calculate 3x3 matrix from orthonormal basis
-    let res = Mat4
-    {
-        m:
-        [
+    let res = Mat4 {
+        m: [
             [ 1.0 - (yy + zz), xy + wz, xz - wy, 0.0 ],
             [ xy - wz, 1.0 - (xx + zz), yz + wx, 0.0 ],
             [ xz + wy, yz - wx, 1.0 - (xx + yy), 0.0 ],
@@ -793,7 +747,7 @@ pub fn rotation_matrix(q: Quat)->Mat4
 
 pub fn scale_matrix(scale: Vec3)->Mat4
 {
-    let mut res = Mat4::default();
+    let mut res = Mat4::zeros();
     res.m[0][0] = scale.x;
     res.m[1][1] = scale.y;
     res.m[2][2] = scale.z;
@@ -803,7 +757,7 @@ pub fn scale_matrix(scale: Vec3)->Mat4
 
 pub fn position_matrix(pos: Vec3)->Mat4
 {
-    let mut res = Mat4::default();
+    let mut res = Mat4::zeros();
     res.m[0][0] = 1.0;
     res.m[1][1] = 1.0;
     res.m[2][2] = 1.0;
@@ -822,20 +776,11 @@ pub fn xform_to_matrix(pos: Vec3, rot: Quat, scale: Vec3) -> Mat4
 ////////
 // Miscellaneous
 
-// From https://stackoverflow.com/questions/74322541/how-to-append-to-pathbuf
-pub fn append_to_path(p: std::path::PathBuf, s: &str)->std::path::PathBuf
-{
-    let mut p = p.into_os_string();
-    p.push(s);
-    return p.into();
-}
-
 // Useful for passing buffers to the GPU
 pub fn to_u8_slice<T>(slice: &[T])->&[u8]
 {
     let buf_size = slice.len() * std::mem::size_of::<T>();
-    return unsafe
-    {
+    return unsafe {
         std::slice::from_raw_parts(slice.as_ptr() as *const _ as *const u8, buf_size)
     };
 }
@@ -843,8 +788,7 @@ pub fn to_u8_slice<T>(slice: &[T])->&[u8]
 pub fn to_u64_slice<T>(slice: &[T])->&[u64]
 {
     let buf_size = slice.len() * std::mem::size_of::<T>();
-    return unsafe
-    {
+    return unsafe {
         std::slice::from_raw_parts(slice.as_ptr() as *const _ as *const u64, buf_size / 8)
     };
 }

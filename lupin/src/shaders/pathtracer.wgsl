@@ -151,7 +151,7 @@ fn pathtrace_main(@builtin(local_invocation_id) local_id: vec3u, @builtin(global
     {
         let pixel_offset = random_vec2f() - 0.5f;
         let camera_ray = compute_camera_ray(global_id, output_dim, pixel_offset);
-        color += pathtrace(local_id, camera_ray);
+        color += pathtrace_naive(local_id, camera_ray);
     }
     color /= f32(NUM_SAMPLES);
     color = max(color, vec3f(0.0f));

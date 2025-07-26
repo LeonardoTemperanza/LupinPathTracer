@@ -376,13 +376,28 @@ pub struct AccumulationParams<'a>
     pub accum_counter: u32,
 }
 
-pub fn pathtrace_scene(device: &wgpu::Device, queue: &wgpu::Queue, scene: &SceneDesc, render_target: &wgpu::Texture, shader_params: &PathtraceResources, accum_params: &AccumulationParams, camera_transform: Mat4)
+pub struct PathtraceDesc<'a>
+{
+    pub scene: &'a SceneDesc,
+    pub render_target: &'a wgpu::Texture,
+    pub resources: &'a PathtraceResources,
+    pub accum_params: &'a AccumulationParams<'a>,
+    pub camera_transform: Mat4
+}
+
+pub fn pathtrace_scene(device: &wgpu::Device, queue: &wgpu::Queue, desc: &PathtraceDesc)
 {
     // TODO: Check format and usage of render target params and others.
 
-    let scene_bindgroup = create_pathtracer_scene_bindgroup(device, queue, shader_params, scene);
-    let settings_bindgroup = create_pathtracer_settings_bindgroup(device, queue, shader_params, Some(accum_params), camera_transform);
-    let output_bindgroup = create_pathtracer_output_bindgroup(device, queue, shader_params, Some(render_target), None, None);
+    let scene = desc.scene;
+    let render_target = desc.render_target;
+    let resources = desc.resources;
+    let accum_params = desc.accum_params;
+    let camera_transform = desc.camera_transform;
+
+    let scene_bindgroup = create_pathtracer_scene_bindgroup(device, queue, resources, scene);
+    let settings_bindgroup = create_pathtracer_settings_bindgroup(device, queue, resources, Some(accum_params), camera_transform);
+    let output_bindgroup = create_pathtracer_output_bindgroup(device, queue, resources, Some(render_target), None, None);
 
     let mut encoder = device.create_command_encoder(&Default::default());
     {
@@ -391,7 +406,7 @@ pub fn pathtrace_scene(device: &wgpu::Device, queue: &wgpu::Queue, scene: &Scene
             timestamp_writes: None
         });
 
-        compute_pass.set_pipeline(&shader_params.pipeline);
+        compute_pass.set_pipeline(&resources.pipeline);
         compute_pass.set_bind_group(0, &scene_bindgroup, &[]);
         compute_pass.set_bind_group(1, &settings_bindgroup, &[]);
         compute_pass.set_bind_group(2, &output_bindgroup, &[]);
@@ -1094,8 +1109,21 @@ pub struct TonemapParams
     pub exposure: f32,
 }
 
-pub fn apply_tonemapping(device: &wgpu::Device, queue: &wgpu::Queue, shader_params: &TonemapResources, hdr_texture: &wgpu::Texture, render_target: &wgpu::Texture, tonemap_params: &TonemapParams)
+pub struct TonemapDesc<'a>
 {
+    pub shader_params: &'a TonemapResources,
+    pub hdr_texture: &'a wgpu::Texture,
+    pub render_target: &'a wgpu::Texture,
+    pub tonemap_params: &'a TonemapParams,
+}
+
+pub fn apply_tonemapping(device: &wgpu::Device, queue: &wgpu::Queue, desc: &TonemapDesc)
+{
+    let shader_params = desc.shader_params;
+    let hdr_texture = desc.hdr_texture;
+    let render_target = desc.render_target;
+    let tonemap_params = desc.tonemap_params;
+
     let render_target_view = render_target.create_view(&Default::default());
     let hdr_texture_view = hdr_texture.create_view(&Default::default());
 
