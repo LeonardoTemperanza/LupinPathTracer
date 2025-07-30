@@ -119,15 +119,16 @@ fn main()
     }).unwrap();
 }
 
-#[derive(Default, Debug, PartialEq)]
+#[derive(Default, Debug, PartialEq, Clone, Copy)]
 pub enum RenderType
 {
     #[default]
     Albedo,
     Normals,
     Pathtrace,
-    DebugBVH,
-    DebugNumBounces,
+    TriChecks,
+    AABBChecks,
+    NumBounces,
 }
 
 #[derive(PartialEq, Eq, Clone, Copy, Debug)]
@@ -149,9 +150,11 @@ fn to_tonemap_kind(op: lp::TonemapOperator) -> TonemapKind
 }
 
 #[derive(Default, Debug, Copy, Clone)]
-pub struct DebugBVHInfo
+pub struct DebugVizInfo
 {
     pub multibounce: bool,
+    pub heatmap_min: f32,
+    pub heatmap_max: f32,
 }
 
 pub struct AppState<'a>
@@ -166,8 +169,9 @@ pub struct AppState<'a>
     pub max_bounces: u32,
     pub samples_per_pixel: u32,
     pub tonemap_params: lp::TonemapParams,
-    pub debug_bvh: DebugBVHInfo,
+    pub debug_viz: DebugVizInfo,
     pub should_rebuild_pathtrace_resources: bool,
+    pub render_one_tile_at_a_time: bool,
 
     // Camera
     pub cam_pos: lp::Vec3,
@@ -186,6 +190,7 @@ pub struct AppState<'a>
     // Saved state for accumulation
     pub prev_cam_transform: lp::Mat4,
     pub accum_counter: u32,
+    pub tile_idx: u32,
     pub output_tex_front: usize,
     pub output_tex_back: usize,
 }
@@ -194,7 +199,14 @@ impl<'a> AppState<'a>
 {
     pub fn new(device: &'a wgpu::Device, queue: &'a wgpu::Queue, window: &'a winit::window::Window) -> Self
     {
-        let pathtrace_resources = lp::build_pathtrace_resources(&device, true);
+        const DEFAULT_SAMPLES_PER_PIXEL: u32 = 1;
+        const DEFAULT_MAX_BOUNCES: u32 = 5;
+
+        let pathtrace_resources = lp::build_pathtrace_resources(&device, &lp::BakedPathtraceParams {
+            with_runtime_checks: true,
+            samples_per_pixel: DEFAULT_SAMPLES_PER_PIXEL,
+            max_bounces: DEFAULT_MAX_BOUNCES,
+        });
         let tonemap_resources = lp::build_tonemap_resources(&device);
 
         let width = window.inner_size().width;
@@ -261,11 +273,13 @@ impl<'a> AppState<'a>
 
             // UI
             render_type: Default::default(),
-            samples_per_pixel: 1,
-            max_bounces: 5,
+            samples_per_pixel: DEFAULT_SAMPLES_PER_PIXEL,
+            max_bounces: DEFAULT_MAX_BOUNCES,
             max_accums: 200,
             tonemap_params: Default::default(),
-            debug_bvh: Default::default(),
+            debug_viz: Default::default(),
+            should_rebuild_pathtrace_resources: false,
+            render_one_tile_at_a_time: true,
 
             // Camera
             cam_pos: lp::Vec3 { x: 0.0, y: 1.0, z: -3.0 },
@@ -284,6 +298,7 @@ impl<'a> AppState<'a>
             // Saved state for accumulation
             prev_cam_transform: lp::Mat4::zeros(),
             accum_counter: 0,
+            tile_idx: 0,
             output_tex_front: 1,
             output_tex_back: 0,
         };
@@ -293,6 +308,8 @@ impl<'a> AppState<'a>
     {
         // Update
         self.update_camera(input, delta_time);
+
+        self.render_one_tile_at_a_time = !input.rmouse.pressing;
 
         // Consume the accumulated egui inputs
         let egui_input = egui_state.take_egui_input(&self.window);
@@ -305,7 +322,13 @@ impl<'a> AppState<'a>
 
         if self.should_rebuild_pathtrace_resources
         {
-            
+            self.pathtrace_resources = lp::build_pathtrace_resources(&self.device, &lp::BakedPathtraceParams {
+                with_runtime_checks: true,
+                samples_per_pixel: self.samples_per_pixel,
+                max_bounces: self.max_bounces,
+            });
+            self.reset_accumulation();
+            self.should_rebuild_pathtrace_resources = false;
         }
 
         // Render scene
@@ -395,26 +418,44 @@ impl<'a> AppState<'a>
             {
                 if camera_transform.m != self.prev_cam_transform.m
                 {
-                    self.accum_counter = 0;
+                    self.reset_accumulation();
                 }
                 self.prev_cam_transform = camera_transform;
 
                 if self.accum_counter < self.max_accums
                 {
-                    lp::pathtrace_scene(&self.device, &self.queue, &lp::PathtraceDesc {
-                        scene: &self.scene,
-                        render_target: &self.output_textures[self.output_tex_front],
-                        resources: &self.pathtrace_resources,
-                        accum_params: &lp::AccumulationParams {
-                            prev_frame: Some(&self.output_textures[self.output_tex_back]),
-                            accum_counter: self.accum_counter,
-                        },
-                        camera_transform: camera_transform,
-                    });
+                    if self.render_one_tile_at_a_time
+                    {
+                        lp::pathtrace_scene_tiles(&self.device, &self.queue, &lp::PathtraceDesc {
+                            scene: &self.scene,
+                            render_target: &self.output_textures[self.output_tex_front],
+                            resources: &self.pathtrace_resources,
+                            accum_params: &lp::AccumulationParams {
+                                prev_frame: Some(&self.output_textures[self.output_tex_back]),
+                                accum_counter: self.accum_counter,
+                            },
+                            tile_params: &Default::default(),
+                            camera_transform: camera_transform,
+                        }, &mut self.tile_idx, 3);
+                    }
+                    else
+                    {
+                        lp::pathtrace_scene(&self.device, &self.queue, &lp::PathtraceDesc {
+                            scene: &self.scene,
+                            render_target: &self.output_textures[self.output_tex_front],
+                            resources: &self.pathtrace_resources,
+                            accum_params: &lp::AccumulationParams {
+                                prev_frame: Some(&self.output_textures[self.output_tex_back]),
+                                accum_counter: self.accum_counter,
+                            },
+                            tile_params: &Default::default(),
+                            camera_transform: camera_transform,
+                        });
+                    }
                 }
 
                 lp::apply_tonemapping(&self.device, &self.queue, &lp::TonemapDesc {
-                    shader_params: &self.tonemap_resources,
+                    resources: &self.tonemap_resources,
                     hdr_texture: &self.output_textures[self.output_tex_front],
                     render_target: &swapchain,
                     tonemap_params: &self.tonemap_params,
@@ -423,20 +464,56 @@ impl<'a> AppState<'a>
                 // Swap output textures
                 if self.accum_counter < self.max_accums
                 {
-                    let tmp = self.output_tex_back;
-                    self.output_tex_back  = self.output_tex_front;
-                    self.output_tex_front = tmp;
+                    if self.tile_idx == 0
+                    {
+                        let tmp = self.output_tex_back;
+                        self.output_tex_back  = self.output_tex_front;
+                        self.output_tex_front = tmp;
+                        self.accum_counter = (self.accum_counter + 1).min(self.max_accums);
+                    }
                 }
-
-                self.accum_counter = (self.accum_counter + 1).min(self.max_accums);
             }
-            RenderType::DebugBVH =>
+            RenderType::TriChecks =>
             {
+                let debug_desc = lp::DebugVizDesc {
+                    viz_type: lp::DebugVizType::BVHTriChecks,
+                    heatmap_min: self.debug_viz.heatmap_min,
+                    heatmap_max: self.debug_viz.heatmap_max,
+                    first_hit_only: !self.debug_viz.multibounce,
+                };
 
+                lp::pathtrace_scene_debug(&self.device, &self.queue, &self.scene, &self.output_rgba8_unorm,
+                                          &self.pathtrace_resources, camera_transform.into(), &debug_desc);
+                lp::convert_to_ldr_no_tonemap(&self.device, &self.queue, &self.tonemap_resources,
+                                              &self.output_rgba8_unorm, &swapchain);
             }
-            RenderType::DebugNumBounces =>
+            RenderType::AABBChecks =>
             {
+                let debug_desc = lp::DebugVizDesc {
+                    viz_type: lp::DebugVizType::BVHAABBChecks,
+                    heatmap_min: self.debug_viz.heatmap_min,
+                    heatmap_max: self.debug_viz.heatmap_max,
+                    first_hit_only: !self.debug_viz.multibounce,
+                };
 
+                lp::pathtrace_scene_debug(&self.device, &self.queue, &self.scene, &self.output_rgba8_unorm,
+                                          &self.pathtrace_resources, camera_transform.into(), &debug_desc);
+                lp::convert_to_ldr_no_tonemap(&self.device, &self.queue, &self.tonemap_resources,
+                                              &self.output_rgba8_unorm, &swapchain);
+            }
+            RenderType::NumBounces =>
+            {
+                let debug_desc = lp::DebugVizDesc {
+                    viz_type: lp::DebugVizType::NumBounces,
+                    heatmap_min: self.debug_viz.heatmap_min,
+                    heatmap_max: self.debug_viz.heatmap_max,
+                    first_hit_only: !self.debug_viz.multibounce,
+                };
+
+                lp::pathtrace_scene_debug(&self.device, &self.queue, &self.scene, &self.output_rgba8_unorm,
+                                          &self.pathtrace_resources, camera_transform.into(), &debug_desc);
+                lp::convert_to_ldr_no_tonemap(&self.device, &self.queue, &self.tonemap_resources,
+                                              &self.output_rgba8_unorm, &swapchain);
             }
         }
     }
@@ -524,11 +601,11 @@ impl<'a> AppState<'a>
 
     fn resize_callback(&mut self, new_width: u32, new_height: u32)
     {
-        self.accum_counter = 0;
+        self.reset_accumulation();
         resize_texture(&self.device, &mut self.output_textures[0], new_width, new_height);
         resize_texture(&self.device, &mut self.output_textures[1], new_width, new_height);
-        //resize_texture(&self.device, &mut albedo_texture, new_width, new_height);
-        //resize_texture(&self.device, &mut normals_texture, new_width, new_height);
+        resize_texture(&self.device, &mut self.output_rgba8_unorm, new_width, new_height);
+        resize_texture(&self.device, &mut self.output_rgba8_snorm, new_width, new_height);
     }
 
     fn update_ui(&mut self, egui_ctx: &egui::Context)
@@ -545,7 +622,7 @@ impl<'a> AppState<'a>
             ui.heading("Visualization:");
             ui.add_space(4.0);
             {
-                self.ui_render_type(ui);
+                let changed = self.ui_render_type(ui);
 
                 match self.render_type
                 {
@@ -554,30 +631,55 @@ impl<'a> AppState<'a>
                     RenderType::Pathtrace =>
                     {
                         ui.horizontal(|ui| {
-                            ui.add(egui::DragValue::new(&mut self.samples_per_pixel).range(1..=200));
+                            let response = ui.add(egui::DragValue::new(&mut self.samples_per_pixel).range(1..=200));
+                            if response.changed() { self.should_rebuild_pathtrace_resources = true; }
                             ui.label("Samples per pixel");
                         });
 
                         ui.horizontal(|ui| {
-                            ui.add(egui::DragValue::new(&mut self.max_bounces).range(1..=200));
+                            let response = ui.add(egui::DragValue::new(&mut self.max_bounces).range(1..=200));
+                            if response.changed() { self.should_rebuild_pathtrace_resources = true; }
                             ui.label("Max bounces");
                         });
 
                         ui.horizontal(|ui| {
-                            ui.add(egui::DragValue::new(&mut self.max_accums).range(1..=10000));
+                            let response = ui.add(egui::DragValue::new(&mut self.max_accums).range(1..=10000));
                             ui.label("Max accumulations");
                         });
 
                         egui::CollapsingHeader::new("Stats").show(ui, |ui| {
-                            ui.label("Iteration: ");
-                            ui.label("Tile: ");
+                            ui.label(format!("Iteration: {:?}", self.accum_counter));
+                            ui.label(format!("Tile: {:?}", self.tile_idx));
                         });
                     }
-                    RenderType::DebugBVH =>
+                    RenderType::TriChecks =>
                     {
-                        ui.checkbox(&mut self.debug_bvh.multibounce, "Multiple bounces");
+                        ui.checkbox(&mut self.debug_viz.multibounce, "Multiple bounces");
+
+                        if changed {
+                            (self.debug_viz.heatmap_min, self.debug_viz.heatmap_max) = default_tri_check_heatmap_params();
+                        }
+
+                        self.ui_heatmap_params(ui);
                     }
-                    RenderType::DebugNumBounces => {}
+                    RenderType::AABBChecks =>
+                    {
+                        ui.checkbox(&mut self.debug_viz.multibounce, "Multiple bounces");
+
+                        if changed {
+                            (self.debug_viz.heatmap_min, self.debug_viz.heatmap_max) = default_aabb_check_heatmap_params();
+                        }
+
+                        self.ui_heatmap_params(ui);
+                    }
+                    RenderType::NumBounces =>
+                    {
+                        if changed {
+                            (self.debug_viz.heatmap_min, self.debug_viz.heatmap_max) = default_num_bounces_heatmap_params();
+                        }
+
+                        self.ui_heatmap_params(ui);
+                    }
                 }
             }
 
@@ -598,17 +700,25 @@ impl<'a> AppState<'a>
         });
     }
 
-    fn ui_render_type(&mut self, ui: &mut egui::Ui)
+    fn ui_render_type(&mut self, ui: &mut egui::Ui) -> bool
     {
+        let old_render_type = self.render_type;
         egui::ComboBox::from_label("Visualization")
             .selected_text(format!("{:?}", self.render_type))
             .show_ui(ui, |ui| {
                 ui.selectable_value(&mut self.render_type, RenderType::Albedo, "Albedo");
                 ui.selectable_value(&mut self.render_type, RenderType::Normals, "Normals");
                 ui.selectable_value(&mut self.render_type, RenderType::Pathtrace, "Pathtrace");
-                ui.selectable_value(&mut self.render_type, RenderType::DebugBVH, "BVH (Debug)");
-                ui.selectable_value(&mut self.render_type, RenderType::DebugNumBounces, "Number of bounces (Debug)");
+                ui.selectable_value(&mut self.render_type, RenderType::TriChecks, "Triangle checks (Debug)");
+                ui.selectable_value(&mut self.render_type, RenderType::AABBChecks, "Box checks (Debug)");
+                ui.selectable_value(&mut self.render_type, RenderType::NumBounces, "Number of bounces (Debug)");
             });
+        return self.render_type != old_render_type;
+    }
+
+    fn ui_heatmap_params(&mut self, ui: &mut egui::Ui)
+    {
+        ui_min_max(ui, "Heatmap:", &mut self.debug_viz.heatmap_min, &mut self.debug_viz.heatmap_max, 0.0..=200.0);
     }
 
     fn ui_tonemap_operator(&mut self, ui: &mut egui::Ui)
@@ -699,6 +809,12 @@ impl<'a> AppState<'a>
             },
         }
     }
+
+    fn reset_accumulation(&mut self)
+    {
+        self.accum_counter = 0;
+        self.tile_idx = 0;
+    }
 }
 
 fn resize_texture(device: &wgpu::Device, texture: &mut wgpu::Texture, new_width: u32, new_height: u32)
@@ -716,4 +832,40 @@ fn resize_texture(device: &wgpu::Device, texture: &mut wgpu::Texture, new_width:
 
     texture.destroy();
     *texture = device.create_texture(&desc);
+}
+
+fn default_tri_check_heatmap_params() -> (f32, f32)
+{
+    return (0.0, 10.0);
+}
+
+fn default_aabb_check_heatmap_params() -> (f32, f32)
+{
+    return (0.0, 1000.0);
+}
+
+fn default_num_bounces_heatmap_params() -> (f32, f32)
+{
+    return (0.0, 5.0);
+}
+
+fn ui_min_max(ui: &mut egui::Ui, string: &str, min: &mut f32, max: &mut f32, range: std::ops::RangeInclusive<f32>)
+{
+    let (range_start, range_end) = (*range.start(), *range.end());
+
+    ui.horizontal(|ui| {
+        ui.label(string);
+        ui.label("Min:");
+        ui.add(
+            egui::DragValue::new(min)
+                .clamp_range(range_start..=*max)
+                .speed(0.1),
+        );
+        ui.label("Max:");
+        ui.add(
+            egui::DragValue::new(max)
+                .clamp_range(*min..=range_end)
+                .speed(0.1),
+        );
+    });
 }
