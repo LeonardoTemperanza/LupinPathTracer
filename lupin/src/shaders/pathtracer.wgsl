@@ -1071,7 +1071,7 @@ fn ray_scene_intersection(local_id: vec3u, ray: Ray)->HitInfo
         {
             let instance = instances[node.instance_idx];
             let ray_trans = transform_ray_without_normalizing_direction(ray, instances[node.instance_idx].inv_transform);
-            let result = ray_mesh_intersection(local_id, ray_trans, instance.mesh_idx);
+            let result = ray_mesh_intersection(local_id, ray_trans, min_hit.x, instance.mesh_idx);
             if result.hit.x < min_hit.x
             {
                 min_hit   = result.hit;
@@ -1164,7 +1164,7 @@ struct RayMeshIntersectionResult
     tri_idx: u32
 }
 
-fn ray_mesh_intersection(local_id: vec3u, ray: Ray, mesh_idx: u32) -> RayMeshIntersectionResult
+fn ray_mesh_intersection(local_id: vec3u, ray: Ray, cur_min_hit_dst: f32, mesh_idx: u32) -> RayMeshIntersectionResult
 {
     // Comment/Uncomment to test the performance of shared memory
     // vs local array (registers or global memory)
@@ -1178,7 +1178,7 @@ fn ray_mesh_intersection(local_id: vec3u, ray: Ray, mesh_idx: u32) -> RayMeshInt
     bvh_stack[1 + offset] = 0u;
 
     // t, u, v
-    var min_hit = vec3f(F32_MAX, 0.0f, 0.0f);
+    var min_hit = vec3f(cur_min_hit_dst, 0.0f, 0.0f);
     var tri_idx: u32 = 0;
     while stack_idx > 1
     {
