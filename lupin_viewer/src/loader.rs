@@ -1,30 +1,45 @@
 
 use lupin as lp;
 
-pub fn build_scene(device: &wgpu::Device, queue: &wgpu::Queue) -> lp::SceneDesc
+pub fn build_scene(device: &wgpu::Device, queue: &wgpu::Queue) -> lp::Scene
 {
-    let meshes_aabbs = vec![
-        load_obj_mesh(device, queue, "stanford_bunny.obj"),
-        load_obj_mesh(device, queue, "quad.obj"),
-        load_obj_mesh(device, queue, "gazerbo.obj"),
-        load_obj_mesh(device, queue, "Dragon_80K.obj"),
-    ];
+    let mut verts_pos_array: Vec<Vec<lp::VertexPos>> = Default::default();
+    let mut verts_array: Vec<Vec<lp::Vertex>> = Default::default();
+    let mut indices_array: Vec<Vec<u32>> = Default::default();
+    let mut bvh_nodes_array: Vec<Vec<lp::BvhNode>> = Default::default();
+    let mut mesh_aabbs: Vec<lp::Aabb> = Default::default();
+    let mut materials: Vec<lp::Material> = Default::default();
+    let mut environments: Vec<lp::Environment> = Default::default();
 
-    let bunny_mesh = 0;
-    let quad_mesh = 1;
-    let gazebo_mesh = 2;
-    let dragon_80k_mesh = 3;
+    let mut textures: Vec<wgpu::Texture> = Default::default();
+    let mut samplers: Vec<wgpu::Sampler> = Default::default();
 
-    let mut meshes = Vec::<lp::Mesh>::with_capacity(meshes_aabbs.len());
-    let mut aabbs = Vec::<lp::Aabb>::with_capacity(meshes_aabbs.len());
-    for mesh_aabb in meshes_aabbs
-    {
-        meshes.push(mesh_aabb.0);
-        aabbs.push(mesh_aabb.1);
-    }
+    // Textures
+    let white_tex = push_asset(&mut textures, lp::create_white_texture(device, queue));
+    let bunny_color = push_asset(&mut textures, load_texture(device, queue, "bunny_color.png", false));
+    //let (env_map_cpu, env_map_gpu) = load_hdr_texture_and_keep_cpu_copy(device, queue, "poly_haven_studio_1k.hdr");
+    let (env_map_cpu, env_map_gpu) = load_hdr_texture_and_keep_cpu_copy(device, queue, "sky.hdr");
+    let env_map = push_asset(&mut textures, env_map_gpu);
 
-    let mut materials = Vec::<lp::Material>::new();
+    // Samplers
+    let linear_sampler = push_asset(&mut samplers, device.create_sampler(&wgpu::SamplerDescriptor {
+        label: None,
+        address_mode_u: wgpu::AddressMode::Repeat,
+        address_mode_v: wgpu::AddressMode::Repeat,
+        address_mode_w: wgpu::AddressMode::Repeat,
+        mag_filter: wgpu::FilterMode::Linear,
+        min_filter: wgpu::FilterMode::Linear,
+        mipmap_filter: wgpu::FilterMode::Linear,
+        ..Default::default()
+    }));
 
+    // Meshes
+    let bunny_mesh  = load_obj_mesh("stanford_bunny.obj", &mut verts_pos_array, &mut verts_array, &mut indices_array, &mut bvh_nodes_array, &mut mesh_aabbs);
+    let quad_mesh   = load_obj_mesh("quad.obj",           &mut verts_pos_array, &mut verts_array, &mut indices_array, &mut bvh_nodes_array, &mut mesh_aabbs);
+    let gazebo_mesh = load_obj_mesh("gazerbo.obj",        &mut verts_pos_array, &mut verts_array, &mut indices_array, &mut bvh_nodes_array, &mut mesh_aabbs);
+    let dragon_80k_mesh = load_obj_mesh("Dragon_80K.obj", &mut verts_pos_array, &mut verts_array, &mut indices_array, &mut bvh_nodes_array, &mut mesh_aabbs);
+
+    // Materials
     let bunny_matte = push_asset(&mut materials, lp::Material::new(
         lp::MaterialType::Matte,            // Mat type
         lp::Vec4::new(1.0, 1.0, 1.0, 1.0),  // Color
@@ -217,7 +232,7 @@ pub fn build_scene(device: &wgpu::Device, queue: &wgpu::Queue) -> lp::SceneDesc
     let emissive = push_asset(&mut materials, lp::Material::new(
         lp::MaterialType::Matte,       // Mat type
         lp::Vec4::new(1.0, 1.0, 1.0, 1.0),  // Color
-        lp::Vec4::new(5.0, 5.0, 5.0, 0.0),  // Emission
+        lp::Vec4::new(10.0, 10.0, 10.0, 0.0),  // Emission
         lp::Vec4::new(0.0, 0.0, 0.0, 0.0),  // Scattering
         0.05,                               // Roughness
         0.0,                                // Metallic
@@ -230,8 +245,6 @@ pub fn build_scene(device: &wgpu::Device, queue: &wgpu::Queue) -> lp::SceneDesc
         0,                                  // Scattering tex
         0,                                  // Normal tex
     ));
-
-    let materials_buf = lp::upload_storage_buffer(&device, &queue, lp::to_u8_slice(&materials));
 
     // Stress-test
     /*
@@ -251,19 +264,20 @@ pub fn build_scene(device: &wgpu::Device, queue: &wgpu::Queue) -> lp::SceneDesc
     }
     */
 
-    let instances = [
+    // Instances
+    let mut instances = vec![
         lp::Instance { inv_transform: lp::mat4_inverse(lp::xform_to_matrix(lp::Vec3 { x: 0.0, y: 0.0, z: 0.0 }, lp::Quat::default(), lp::Vec3::ones())), mesh_idx: 0, mat_idx: bunny_matte, padding0: 0.0, padding1: 0.0 },
-        lp::Instance { inv_transform: lp::mat4_inverse(lp::xform_to_matrix(lp::Vec3 { x: -2.0, y: 0.0, z: 0.0 }, lp::angle_axis(lp::Vec3::RIGHT, 45.0 * 3.1415 / 180.0), lp::Vec3::ones())), mesh_idx: 0, mat_idx: 1, padding0: 0.0, padding1: 0.0 },
-        lp::Instance { inv_transform: lp::mat4_inverse(lp::xform_to_matrix(lp::Vec3 { x: -2.0, y: 0.0, z: -2.0 }, lp::angle_axis(lp::Vec3::RIGHT, 45.0 * 3.1415 / 180.0), lp::Vec3::ones())), mesh_idx: 0, mat_idx: 7, padding0: 0.0, padding1: 0.0 },
-        lp::Instance { inv_transform: lp::mat4_inverse(lp::xform_to_matrix(lp::Vec3 { x: 2.0, y: 0.0, z: 0.0 }, lp::Quat::default(), lp::Vec3 { x: 1.0, y: 1.0, z: 1.0 })), mesh_idx: 0, mat_idx: 2, padding0: 0.0, padding1: 0.0 },
-        lp::Instance { inv_transform: lp::mat4_inverse(lp::xform_to_matrix(lp::Vec3 { x: 2.0, y: 0.0, z: -2.0 }, lp::Quat::default(), lp::Vec3 { x: 1.0, y: 1.0, z: 1.0 })), mesh_idx: 0, mat_idx: 6, padding0: 0.0, padding1: 0.0 },
-        lp::Instance { inv_transform: lp::mat4_inverse(lp::xform_to_matrix(lp::Vec3 { x: 4.0, y: 0.0, z: 0.0 }, lp::Quat::default(), lp::Vec3::ones())), mesh_idx: 0, mat_idx: 3, padding0: 0.0, padding1: 0.0 },
-        lp::Instance { inv_transform: lp::mat4_inverse(lp::xform_to_matrix(lp::Vec3 { x: 4.0, y: 0.0, z: -2.0 }, lp::Quat::default(), lp::Vec3::ones())), mesh_idx: 0, mat_idx: 10, padding0: 0.0, padding1: 0.0 },
-        lp::Instance { inv_transform: lp::mat4_inverse(lp::xform_to_matrix(lp::Vec3 { x: 6.0, y: 0.0, z: 0.0 }, lp::Quat::default(), lp::Vec3::ones())), mesh_idx: 0, mat_idx: 4, padding0: 0.0, padding1: 0.0 },
-        lp::Instance { inv_transform: lp::mat4_inverse(lp::xform_to_matrix(lp::Vec3 { x: 6.0, y: 0.0, z: -2.0 }, lp::Quat::default(), lp::Vec3::ones())), mesh_idx: 0, mat_idx: 11, padding0: 0.0, padding1: 0.0 },
-        lp::Instance { inv_transform: lp::mat4_inverse(lp::xform_to_matrix(lp::Vec3 { x: 8.0, y: 0.0, z: 0.0 }, lp::Quat::default(), lp::Vec3::ones())), mesh_idx: 0, mat_idx: 8, padding0: 0.0, padding1: 0.0 },
-        lp::Instance { inv_transform: lp::mat4_inverse(lp::xform_to_matrix(lp::Vec3 { x: 10.0, y: 0.0, z: 0.0 }, lp::Quat::default(), lp::Vec3::ones())), mesh_idx: 0, mat_idx: 9, padding0: 0.0, padding1: 0.0 },
-        lp::Instance { inv_transform: lp::mat4_inverse(lp::xform_to_matrix(lp::Vec3 { x: 12.0, y: 0.0, z: 0.0 }, lp::Quat::default(), lp::Vec3::ones())), mesh_idx: 0, mat_idx: 12, padding0: 0.0, padding1: 0.0 },
+        lp::Instance { inv_transform: lp::mat4_inverse(lp::xform_to_matrix(lp::Vec3 { x: -2.0, y: 0.0, z: 0.0 }, lp::angle_axis(lp::Vec3::RIGHT, 45.0 * 3.1415 / 180.0), lp::Vec3::ones())), mesh_idx: 0, mat_idx: glossy, padding0: 0.0, padding1: 0.0},
+        lp::Instance { inv_transform: lp::mat4_inverse(lp::xform_to_matrix(lp::Vec3 { x: -2.0, y: 0.0, z: -2.0 }, lp::angle_axis(lp::Vec3::RIGHT, 45.0 * 3.1415 / 180.0), lp::Vec3::ones())), mesh_idx: 0, mat_idx: glossy, padding0: 0.0, padding1: 0. },
+        lp::Instance { inv_transform: lp::mat4_inverse(lp::xform_to_matrix(lp::Vec3 { x: 2.0, y: 0.0, z: 0.0 }, lp::Quat::default(), lp::Vec3 { x: 1.0, y: 1.0, z: 1.0 })), mesh_idx: 0, mat_idx: reflective, padding0: 0.0, padding1: 0.0 },
+        lp::Instance { inv_transform: lp::mat4_inverse(lp::xform_to_matrix(lp::Vec3 { x: 2.0, y: 0.0, z: -2.0 }, lp::Quat::default(), lp::Vec3 { x: 1.0, y: 1.0, z: 1.0 })), mesh_idx: 0, mat_idx: transparent, padding0: 0.0, padding1: 0.0 },
+        lp::Instance { inv_transform: lp::mat4_inverse(lp::xform_to_matrix(lp::Vec3 { x: 4.0, y: 0.0, z: 0.0 }, lp::Quat::default(), lp::Vec3::ones())), mesh_idx: 0, mat_idx: refractive, padding0: 0.0, padding1: 0.0 },
+        lp::Instance { inv_transform: lp::mat4_inverse(lp::xform_to_matrix(lp::Vec3 { x: 4.0, y: 0.0, z: -2.0 }, lp::Quat::default(), lp::Vec3::ones())), mesh_idx: 0, mat_idx: rough_glossy, padding0: 0.0, padding1: 0.0 },
+        lp::Instance { inv_transform: lp::mat4_inverse(lp::xform_to_matrix(lp::Vec3 { x: 6.0, y: 0.0, z: 0.0 }, lp::Quat::default(), lp::Vec3::ones())), mesh_idx: 0, mat_idx: rough_reflective, padding0: 0.0, padding1: 0.0 },
+        lp::Instance { inv_transform: lp::mat4_inverse(lp::xform_to_matrix(lp::Vec3 { x: 6.0, y: 0.0, z: -2.0 }, lp::Quat::default(), lp::Vec3::ones())), mesh_idx: 0, mat_idx: rough_transparent, padding0: 0.0, padding1: 0.0 },
+        lp::Instance { inv_transform: lp::mat4_inverse(lp::xform_to_matrix(lp::Vec3 { x: 8.0, y: 0.0, z: 0.0 }, lp::Quat::default(), lp::Vec3::ones())), mesh_idx: 0, mat_idx: emissive, padding0: 0.0, padding1: 0.0 },
+        lp::Instance { inv_transform: lp::mat4_inverse(lp::xform_to_matrix(lp::Vec3 { x: 10.0, y: 0.0, z: 0.0 }, lp::Quat::default(), lp::Vec3::ones())), mesh_idx: 0, mat_idx: emissive, padding0: 0.0, padding1: 0.0 },
+        lp::Instance { inv_transform: lp::mat4_inverse(lp::xform_to_matrix(lp::Vec3 { x: 12.0, y: 0.0, z: 0.0 }, lp::Quat::default(), lp::Vec3::ones())), mesh_idx: 0, mat_idx: emissive, padding0: 0.0, padding1: 0.0 },
         // Floor
         lp::Instance { inv_transform: lp::mat4_inverse(lp::xform_to_matrix(lp::Vec3 { x: 0.0, y: -0.01, z: 0.0 }, lp::Quat::default(), lp::Vec3::ones() * 20.0)), mesh_idx: 1, mat_idx: brown_matte, padding0: 0.0, padding1: 0.0 },
         // Gazebo
@@ -272,34 +286,12 @@ pub fn build_scene(device: &wgpu::Device, queue: &wgpu::Queue) -> lp::SceneDesc
         // lp::Instance { inv_transform: lp::mat4_inverse(lp::xform_to_matrix(lp::Vec3 { x: 0.0, y: 2.5, z: 0.0 }, lp::Quat::default(), lp::Vec3::ones() * 10.0)), mesh_idx: dragon_80k_mesh, mat_idx: transparent, padding0: 0.0, padding1: 0.0 },
     ];
 
-    let instances_buf = lp::upload_storage_buffer(&device, &queue, lp::to_u8_slice(&instances));
+    let tlas_nodes = lp::build_tlas(instances.as_slice(), &mesh_aabbs);
 
-    let tlas_buf = lp::build_tlas(&device, &queue, instances.as_slice(), &aabbs);
-
-    let mut textures = Vec::<wgpu::Texture>::new();
-    let white_tex = push_asset(&mut textures, lp::create_white_texture(device, queue));
-    let bunny_color = push_asset(&mut textures, load_texture(device, queue, "bunny_color.png", false));
-    //let (env_map_cpu, env_map_gpu) = load_hdr_texture_and_keep_cpu_copy(device, queue, "poly_haven_studio_1k.hdr");
-    let (env_map_cpu, env_map_gpu) = load_hdr_texture_and_keep_cpu_copy(device, queue, "sky.hdr");
-    let env_map = push_asset(&mut textures, env_map_gpu);
-
-    let linear_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
-        label: None,
-        address_mode_u: wgpu::AddressMode::Repeat,
-        address_mode_v: wgpu::AddressMode::Repeat,
-        address_mode_w: wgpu::AddressMode::Repeat,
-        mag_filter: wgpu::FilterMode::Linear,
-        min_filter: wgpu::FilterMode::Linear,
-        mipmap_filter: wgpu::FilterMode::Linear,
-        ..Default::default()
-    });
-
-    let environment = lp::Environment {
+    let env = push_asset(&mut environments, lp::Environment {
         emission: lp::Vec3 { x: 1.0, y: 1.0, z: 1.0 },
         emission_tex_idx: env_map,
-    };
-
-    let env_buf = lp::upload_storage_buffer(device, queue, lp::to_u8_slice(&[environment]));
+    });
 
     let env_map_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
         label: None,
@@ -312,82 +304,21 @@ pub fn build_scene(device: &wgpu::Device, queue: &wgpu::Queue) -> lp::SceneDesc
         ..Default::default()
     });
 
-    return lp::SceneDesc {
-        meshes: meshes,
-        tlas_nodes: tlas_buf,
-        instances:  instances_buf,
-        materials:  materials_buf,
-
-        textures: textures,
-        samplers: vec![linear_sampler],
-        environments: env_buf,
-
-        // Lights
-        lights: lp::build_lights(device, queue, &instances, &[environment], &[env_map_cpu]),
+    let scene_cpu = lp::SceneCPU {
+        verts_pos_array,
+        verts_array,
+        indices_array,
+        bvh_nodes_array,
+        mesh_aabbs,
+        tlas_nodes,
+        instances,
+        materials,
+        environments,
     };
-}
 
-pub fn load_obj_mesh(device: &wgpu::Device, queue: &wgpu::Queue, path: &str) -> (lp::Mesh, lp::Aabb)
-{
-    let scene = tobj::load_obj(path, &tobj::GPU_LOAD_OPTIONS);
-    assert!(scene.is_ok());
+    lp::validate_scene(&scene_cpu, textures.len() as u32, samplers.len() as u32);
 
-    let (mut models, _materials) = scene.expect("Failed to load OBJ file");
-
-    let mesh = &mut models[0].mesh;
-
-    // Construct the buffer to send to GPU. Include an extra float
-    // for 16-byte alignment of vectors.
-
-    let mut aabb = lp::Aabb::neutral();
-    let mut verts_pos = Vec::<f32>::with_capacity(mesh.positions.len() + mesh.positions.len() / 3);
-    for i in (0..mesh.positions.len()).step_by(3)
-    {
-        let pos = lp::Vec3 { x: mesh.positions[i + 0], y: mesh.positions[i + 1], z: mesh.positions[i + 2] };
-        verts_pos.push(mesh.positions[i + 0]);
-        verts_pos.push(mesh.positions[i + 1]);
-        verts_pos.push(mesh.positions[i + 2]);
-        verts_pos.push(0.0);
-        lp::grow_aabb_to_include_vert(&mut aabb, pos);
-    }
-
-    let bvh_buf = lp::build_bvh(&device, &queue, verts_pos.as_slice(), &mut mesh.indices);
-
-    let verts_pos_buf = lp::upload_storage_buffer(&device, &queue, lp::to_u8_slice(&verts_pos));
-    let indices_buf   = lp::upload_storage_buffer(&device, &queue, lp::to_u8_slice(&mesh.indices));
-    let mut verts = Vec::<lp::Vertex>::with_capacity(mesh.positions.len() / 3);
-    for vert_idx in 0..(mesh.positions.len() / 3)
-    {
-        let mut normal = lp::Vec3::default();
-        if mesh.normals.len() > 0
-        {
-            normal.x = mesh.normals[vert_idx*3+0];
-            normal.y = mesh.normals[vert_idx*3+1];
-            normal.z = mesh.normals[vert_idx*3+2];
-            normal = lp::normalize_vec3(normal);
-        };
-
-        let mut tex_coords = lp::Vec2::default();
-        if mesh.texcoords.len() > 0
-        {
-            tex_coords.x = mesh.texcoords[vert_idx*2+0];
-            // WGPU Convention is +=right,down and tipically it's +=right,up
-            tex_coords.y = -mesh.texcoords[vert_idx*2+1];
-        };
-
-        let vert = lp::Vertex { normal: normal, padding0: 0.0, tex_coords: tex_coords, padding1: 0.0, padding2: 0.0 };
-
-        verts.push(vert);
-    }
-
-    let verts_buf = lp::upload_storage_buffer(&device, &queue, lp::to_u8_slice(&verts));
-
-    return (lp::Mesh {
-        verts_pos: verts_pos_buf,
-        verts: verts_buf,
-        indices: indices_buf,
-        bvh_nodes: bvh_buf,
-    }, aabb);
+    return lp::upload_scene_to_gpu(device, queue, &scene_cpu, textures, samplers, &[env_map_cpu]);
 }
 
 pub fn load_texture(device: &wgpu::Device, queue: &wgpu::Queue, path: &str, hdr: bool) -> wgpu::Texture
@@ -531,4 +462,63 @@ fn push_asset<T>(vec: &mut Vec<T>, el: T) -> u32
 {
     vec.push(el);
     return (vec.len() - 1) as u32;
+}
+
+fn load_obj_mesh(path: &str, verts_pos: &mut Vec<Vec<lp::VertexPos>>, verts: &mut Vec<Vec<lp::Vertex>>, indices: &mut Vec<Vec<u32>>, bvh_nodes: &mut Vec<Vec<lp::BvhNode>>, aabbs: &mut Vec<lp::Aabb>) -> u32
+{
+    assert!(verts_pos.len() == verts.len() && verts.len() == indices.len() && indices.len() == aabbs.len() && aabbs.len() == bvh_nodes.len());
+
+    let scene = tobj::load_obj(path, &tobj::GPU_LOAD_OPTIONS);
+    assert!(scene.is_ok());
+
+    let (mut models, _materials) = scene.expect("Failed to load OBJ file");
+
+    let mesh = &mut models[0].mesh;
+
+    // Construct the buffer to send to GPU. Include an extra float
+    // for 16-byte alignment of vectors.
+
+    let mut aabb = lp::Aabb::neutral();
+    let mut mesh_verts_pos = Vec::<lp::VertexPos>::with_capacity(mesh.positions.len() / 3);
+    for i in (0..mesh.positions.len()).step_by(3)
+    {
+        let pos = lp::Vec3 { x: mesh.positions[i + 0], y: mesh.positions[i + 1], z: mesh.positions[i + 2] };
+        mesh_verts_pos.push(lp::VertexPos { v: lp::Vec3 { x: pos.x, y: pos.y, z: pos.z }, _padding: 0.0 });
+        lp::grow_aabb_to_include_vert(&mut aabb, pos);
+    }
+
+    let bvh = lp::build_bvh(mesh_verts_pos.as_slice(), &mut mesh.indices);
+
+    let mut mesh_verts = Vec::<lp::Vertex>::with_capacity(mesh.positions.len() / 3);
+    for vert_idx in 0..(mesh.positions.len() / 3)
+    {
+        let mut normal = lp::Vec3::default();
+        if mesh.normals.len() > 0
+        {
+            normal.x = mesh.normals[vert_idx*3+0];
+            normal.y = mesh.normals[vert_idx*3+1];
+            normal.z = mesh.normals[vert_idx*3+2];
+            normal = lp::normalize_vec3(normal);
+        };
+
+        let mut tex_coords = lp::Vec2::default();
+        if mesh.texcoords.len() > 0
+        {
+            tex_coords.x = mesh.texcoords[vert_idx*2+0];
+            // WGPU Convention is +=right,down and tipically it's +=right,up
+            tex_coords.y = 1.0 - mesh.texcoords[vert_idx*2+1];
+        };
+
+        let vert = lp::Vertex { normal: normal, _padding0: 0.0, tex_coords: tex_coords, _padding1: 0.0, _padding2: 0.0 };
+
+        mesh_verts.push(vert);
+    }
+
+    verts_pos.push(mesh_verts_pos);
+    verts.push(mesh_verts);
+    indices.push(mesh.indices.clone());
+    aabbs.push(aabb);
+    bvh_nodes.push(bvh);
+
+    return (verts.len() - 1) as u32;
 }

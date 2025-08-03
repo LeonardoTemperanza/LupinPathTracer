@@ -1,0 +1,727 @@
+
+use crate::base::*;
+use crate::wgpu_utils::*;
+use crate::renderer::*;
+
+use rand::Rng;
+
+pub struct EnvMapInfo
+{
+    pub data: Vec::<Vec4>,
+    pub width: u32,
+    pub height: u32,
+}
+pub fn build_lights(device: &wgpu::Device, queue: &wgpu::Queue, scene: &SceneCPU, envs_info: &[EnvMapInfo]) -> Lights
+{
+    let environments = &scene.environments;
+    let instances = &scene.instances;
+    let verts_pos = &scene.verts_pos_array;
+    let verts = &scene.verts_array;
+    let indices = &scene.indices_array;
+    let materials = &scene.materials;
+    assert!(environments.len() == envs_info.len(), "Mismatching sizes for environment data!");
+
+    let mut lights = Vec::<Light>::new();
+    let mut alias_tables = Vec::<wgpu::Buffer>::new();
+    let mut env_alias_tables = Vec::<wgpu::Buffer>::new();
+    for (i, instance) in instances.iter().enumerate()
+    {
+        let mat = materials[instance.mat_idx as usize];
+        let mesh_verts = &verts_pos[instance.mesh_idx as usize];
+        let mesh_indices = &indices[instance.mesh_idx as usize];
+        if mat.emission.is_zero() { continue; }
+
+        let light = Light { instance_idx: i as u32 };
+        lights.push(light);
+
+        let mut weights = Vec::<f32>::new();
+        for i in (0..mesh_indices.len()).step_by(3)
+        {
+            let v0 = mesh_verts[mesh_indices[i+0] as usize];
+            let v1 = mesh_verts[mesh_indices[i+1] as usize];
+            let v2 = mesh_verts[mesh_indices[i+2] as usize];
+
+            let weight = tri_area(v0.v, v1.v, v2.v);
+            weights.push(weight);
+        }
+
+        let alias_table = build_alias_table(&weights);
+        let alias_table_buf = upload_storage_buffer(device, queue, to_u8_slice(&alias_table));
+        alias_tables.push(alias_table_buf);
+    }
+
+    for i in 0..environments.len()
+    {
+        let mut weights = Vec::<f32>::new();
+
+        let scale = environments[i].emission;
+        let env_tex = &envs_info[i].data;
+        let env_width = envs_info[i].width;
+        let env_height = envs_info[i].height;
+        assert!(env_tex.len() == (env_width * env_height) as usize);
+
+        if scale.is_zero() { continue; }
+
+        for (i, pixel) in env_tex.iter().enumerate()
+        {
+            let y = i / env_width as usize;
+            let angle = (y as f32 + 0.5) * std::f32::consts::PI / env_height as f32;
+            let prob = f32::max(f32::max(pixel.x, pixel.y), pixel.z) * f32::sin(angle);
+            weights.push(prob);
+        }
+
+        let alias_table = build_alias_table(&weights);
+        let alias_table_buf = upload_storage_buffer(device, queue, to_u8_slice(&alias_table));
+        env_alias_tables.push(alias_table_buf);
+    }
+
+    return Lights {
+        lights: upload_storage_buffer(device, queue, to_u8_slice(&lights)),
+        alias_tables,
+        env_alias_tables,
+    };
+
+    fn tri_area(p0: Vec3, p1: Vec3, p2: Vec3) -> f32
+    {
+        return length_vec3(cross_vec3(p1 - p0, p2 - p0)) / 2.0;
+    }
+}
+
+// From: https://www.pbr-book.org/4ed/Sampling_Algorithms/The_Alias_Method#AliasTable
+pub fn build_alias_table(weights: &[f32]) -> Vec::<AliasBin>
+{
+    if weights.is_empty() { return vec![]; }
+
+    let mut bins = vec![AliasBin::default(); weights.len()];
+
+    let mut sum: f64 = 0.0;
+    for weight in weights {
+        sum += *weight as f64;
+    }
+
+    assert!(sum > 0.0);
+
+    // Normalize weights.
+    let normalize_factor = 1.0 / sum;  // * is faster than /
+    for (i, weight) in weights.iter().enumerate() {
+        bins[i].prob = (*weight as f64 * normalize_factor) as f32;
+    }
+
+    // Work lists.
+    #[derive(Default, Debug)]
+    struct Outcome
+    {
+        prob_estimate: f32,
+        idx: u32,
+    }
+    let mut under = Vec::<Outcome>::new();
+    let mut over  = Vec::<Outcome>::new();
+    for (i, bin) in bins.iter().enumerate()
+    {
+        let prob_estimate = bin.prob * bins.len() as f32;
+        let new_outcome = Outcome { prob_estimate, idx: i as u32 };
+        if prob_estimate < 1.0 {
+            under.push(new_outcome);
+        } else {
+            over.push(new_outcome);
+        }
+    }
+
+    while !under.is_empty() && !over.is_empty()
+    {
+        let under_item = under.pop().unwrap();
+        let over_item  = over.pop().unwrap();
+
+        // Initialize state for under_item.
+        bins[under_item.idx as usize].alias_threshold = under_item.prob_estimate;
+        bins[under_item.idx as usize].alias = over_item.idx;
+
+        // Push excess probability onto work list.
+        let prob_excess = under_item.prob_estimate + over_item.prob_estimate - 1.0;
+        let new_outcome = Outcome { prob_estimate: prob_excess, idx: over_item.idx };
+        if prob_excess < 1.0 {
+            under.push(new_outcome);
+        } else {
+            over.push(new_outcome);
+        }
+    }
+
+    // Handle remaining work list items.
+    // Due to floating point precision, there may be remaining
+    // items if their normalized probability is very close to 1.
+    while !over.is_empty()
+    {
+        let over_item = over.pop().unwrap();
+        assert!(f32::abs(over_item.prob_estimate - 1.0) < 0.05);
+        bins[over_item.idx as usize].alias_threshold = 1.0;
+        bins[over_item.idx as usize].alias = 0;
+    }
+    while !under.is_empty()
+    {
+        let under_item = under.pop().unwrap();
+        assert!(f32::abs(under_item.prob_estimate - 1.0) < 0.05);
+        bins[under_item.idx as usize].alias_threshold = 1.0;
+        bins[under_item.idx as usize].alias = 0;
+    }
+
+    return bins;
+}
+
+// TODO: Turn this into an actual test.
+fn test_alias_table(alias_table: &Vec::<AliasBin>, env_width: u32)
+{
+    println!("test:");
+    struct TestValue
+    {
+        idx: usize,
+        hits: u32
+    }
+    let mut test_values = Vec::<TestValue>::new();
+    let mut rng = rand::thread_rng();
+    for i in 0..1000000
+    {
+        let slot_idx: usize = rng.gen_range(0..alias_table.len()); // inclusive range
+        let rnd: f32 = rng.gen();
+        if rnd >= alias_table[slot_idx].alias_threshold
+        {
+            add_to_test_value_array(&mut test_values, alias_table[slot_idx].alias as usize)
+        }
+        else
+        {
+            add_to_test_value_array(&mut test_values, slot_idx);
+        }
+    }
+
+    println!("results:");
+    test_values.sort_by(|a, b| b.hits.cmp(&a.hits));
+    for value in test_values
+    {
+        println!("x: {}, y: {}, hits: {}, prob: {}", value.idx % env_width as usize, value.idx / env_width as usize, value.hits, alias_table[value.idx].prob);
+    }
+
+    fn add_to_test_value_array(test_values: &mut Vec::<TestValue>, idx: usize)
+    {
+        let mut found = false;
+        for value in test_values.iter_mut()
+        {
+            if value.idx as usize == idx
+            {
+                value.hits += 1;
+                found = true;
+                break;
+            }
+        }
+
+        if !found
+        {
+            test_values.push(TestValue { idx: idx, hits: 1 });
+        }
+    }
+}
+
+// NOTE: This modifies the indices array to change the order of triangles (indices)
+pub fn build_bvh(verts: &[VertexPos], indices: &mut[u32]) -> Vec<BvhNode>
+{
+    let num_tris: u32 = indices.len() as u32 / 3;
+
+    // Auxiliary arrays for speed
+    let mut centroids: Vec<Vec3> = Vec::default();
+    centroids.reserve_exact(num_tris as usize);
+    let mut tri_bounds: Vec<Aabb> = Vec::default();
+    tri_bounds.reserve_exact(num_tris as usize);
+
+    // Build auxiliary arrays
+    for tri in 0..num_tris
+    {
+        let (t0, t1, t2) = get_tri(verts, indices, tri as usize);
+
+        let centroid = compute_tri_centroid(t0, t1, t2);
+        let bounds = compute_tri_bounds(t0, t1, t2);
+        centroids.push(centroid);
+        tri_bounds.push(bounds);
+    }
+
+    let (aabb_min, aabb_max) = compute_aabb(indices, tri_bounds.as_mut_slice(), 0, num_tris);
+    let bvh_root = BvhNode
+    {
+        aabb_min,
+        aabb_max,
+        tri_begin_or_first_child: 0,  // Set tri_begin to 0
+        tri_count: num_tris
+    };
+
+    // Using a heuristic for preallocation size slightly speeds up bvh construction
+    let initial_bvh_size: usize = (num_tris as usize).min((2_usize.pow(BVH_MAX_DEPTH as u32 + 1)-1) / 8);
+    let mut bvh: Vec<BvhNode> = Vec::with_capacity(initial_bvh_size);
+    bvh.push(bvh_root);
+
+    bvh_split(&mut bvh, verts, indices, centroids.as_mut_slice(), tri_bounds.as_mut_slice(), 0);
+    //bvh_split_bfs(&mut bvh, verts, indices, centroids.as_mut_slice(), tri_bounds.as_mut_slice(), 0, 1);
+
+    return bvh;
+}
+
+pub fn bvh_split(bvh: &mut Vec<BvhNode>, verts: &[VertexPos],
+                 indices: &mut[u32],
+                 centroids: &mut[Vec3],
+                 tri_bounds: &mut[Aabb],
+                 node: usize)
+{
+    #[derive(Default)]
+    struct StackInfo
+    {
+        node: u32,
+        depth: u32
+    }
+
+    let mut stack: [StackInfo; BVH_MAX_DEPTH as usize] = Default::default();
+    let mut stack_idx: usize = 1;
+    stack[0] = StackInfo { node: node as u32, depth: 1 };
+
+    while stack_idx > 0
+    {
+        stack_idx -= 1;
+        let node  = stack[stack_idx].node as usize;
+        let depth = stack[stack_idx].depth as usize;
+
+        let split = choose_split(bvh.as_slice(), verts, indices, centroids, tri_bounds, node);
+        if !split.performed_split { continue; }
+
+        let cur_tri_begin = bvh[node].tri_begin_or_first_child;
+        let cur_tri_count = bvh[node].tri_count;
+        let cur_tri_end   = cur_tri_begin + cur_tri_count;
+
+        // For each child, sort the indices so that they're contiguous
+        // and the tri set can be referenced with only tri_begin and tri_count
+
+        // Current tri index for left child
+        let mut tri_left_idx = cur_tri_begin;
+
+        for tri in cur_tri_begin..cur_tri_end
+        {
+            let centroid = centroids[tri as usize];
+            if centroid[split.axis] <= split.pos
+            {
+                if tri != tri_left_idx
+                {
+                    // Swap triangle of index tri_left_idx with
+                    // triangle of index tri_idx
+                    swap_tris(indices, centroids, tri_bounds, tri_left_idx, tri);
+                }
+
+                tri_left_idx += 1;
+            }
+        }
+
+        // Set triangle begin and count of children nodes, because they're currently leaves
+        let left_begin  = cur_tri_begin;
+        let left_count  = tri_left_idx as u32 - cur_tri_begin;
+        let right_begin = tri_left_idx as u32;
+        let right_count = (cur_tri_count - left_count) as u32;
+
+        // Only proceed if there is a meaningful subdivision
+        // (also, if tri_count is 0 it will be interpreted
+        // as a non-leaf by the shader, which would be a problem)
+        if left_count == 0 || right_count == 0 { continue; }
+
+        // We've decided to split
+        bvh.push(Default::default());
+        bvh.push(Default::default());
+        let left: usize  = bvh.len() - 2;
+        let right: usize = bvh.len() - 1;
+
+        bvh[left].tri_begin_or_first_child = left_begin;
+        bvh[left].tri_count = left_count;
+        bvh[right].tri_begin_or_first_child = right_begin;
+        bvh[right].tri_count = right_count;
+
+        (bvh[left].aabb_min, bvh[left].aabb_max) = (split.aabb_left_min, split.aabb_left_max);
+        (bvh[right].aabb_min, bvh[right].aabb_max) = (split.aabb_right_min, split.aabb_right_max);
+
+        // The current node is not a leaf node anymore, so set its first child
+        bvh[node].tri_begin_or_first_child = left as u32;  // Set first_child
+        bvh[node].tri_count = 0;
+
+        if depth < (BVH_MAX_DEPTH - 1) as usize
+        {
+            stack[stack_idx + 0] = StackInfo { node: left as u32,  depth: depth as u32 + 1 };
+            stack[stack_idx + 1] = StackInfo { node: right as u32, depth: depth as u32 + 1 };
+            stack_idx += 2;
+        }
+    }
+}
+
+#[derive(Default)]
+pub struct BvhSplit
+{
+    performed_split: bool,
+    axis: isize,
+    pos: f32,
+    cost: f32,
+
+    // Bounding box info
+    aabb_left_min: Vec3,
+    aabb_left_max: Vec3,
+    aabb_right_min: Vec3,
+    aabb_right_max: Vec3,
+
+    num_tris_left: u32,
+    num_tris_right: u32
+}
+
+// Binned BVH building.
+// For more info, see: https://jacco.ompf2.com/2022/04/21/how-to-build-a-bvh-part-3-quick-builds/
+pub struct Bin
+{
+    bounds: Aabb,
+    tri_count: u32
+}
+
+impl Default for Bin
+{
+    fn default()->Bin
+    {
+        return Bin
+        {
+            bounds: Aabb::neutral(),
+            tri_count: 0,
+        }
+    }
+}
+
+// From: https://jacco.ompf2.com/2022/04/21/how-to-build-a-bvh-part-3-quick-builds/
+pub fn choose_split(bvh: &[BvhNode], _verts: &[VertexPos],
+                    _indices: &mut[u32],
+                    centroids: &mut[Vec3],
+                    tri_bounds: &mut[Aabb],
+                    node: usize)->BvhSplit
+{
+    const NUM_BINS: usize = 5;
+
+    let size = bvh[node].aabb_max - bvh[node].aabb_min;
+    let tri_begin: usize = bvh[node].tri_begin_or_first_child as usize;
+    let tri_count: usize = bvh[node].tri_count as usize;
+
+    // Initialize the cost as the cost of the parent
+    // node by itself. Only split if the cost is actually lower
+    // after the split.
+    let mut res: BvhSplit = Default::default();
+    res.cost = node_cost(size, tri_count as u32);
+
+    for axis in 0..3isize
+    {
+        // Compute centroid bounds because it slightly
+        // improves the quality of the resulting tree
+        // with little additional building cost
+        let mut centroid_min = f32::MAX;
+        let mut centroid_max = f32::MIN;
+        for tri in tri_begin..tri_begin+tri_count
+        {
+            let centroid: Vec3 = centroids[tri];
+            centroid_min = centroid_min.min(centroid[axis]);
+            centroid_max = centroid_max.max(centroid[axis]);
+        }
+
+        // Can't split anything here...
+        if centroid_min == centroid_max { continue; }
+
+        const EPS: f32 = 0.001;
+        centroid_min -= EPS;
+        centroid_max += EPS;
+
+        // Construct bins, for faster cost computation
+        let mut bins: [Bin; NUM_BINS] = Default::default();
+
+        // Populate the bins
+        let scale = NUM_BINS as f32 / (centroid_max - centroid_min);  // To avoid repeated division
+        for tri in tri_begin..tri_begin+tri_count
+        {
+            let centroid = centroids[tri];
+            let bounds = tri_bounds[tri];
+            let bin_idx: usize = (((centroid[axis] - centroid_min) * scale).floor() as usize).clamp(0, NUM_BINS-1);
+            grow_aabb_to_include_aabb(&mut bins[bin_idx].bounds, bounds);
+            bins[bin_idx].tri_count += 1;
+        }
+
+        // Gather data for the N-1 planes between the N bins
+        let mut left_aabbs:  [Aabb; NUM_BINS - 1] = Default::default();
+        let mut right_aabbs: [Aabb; NUM_BINS - 1] = Default::default();
+        let mut left_count:  [u32; NUM_BINS - 1] = Default::default();
+        let mut right_count: [u32; NUM_BINS - 1] = Default::default();
+        let mut left_aabb: Aabb = Aabb::neutral();
+        let mut right_aabb: Aabb = Aabb::neutral();
+        let mut left_sum = 0;
+        let mut right_sum = 0;
+        for i in 0..NUM_BINS - 1
+        {
+            left_sum += bins[i].tri_count;
+            left_count[i] = left_sum;
+            grow_aabb_to_include_aabb(&mut left_aabb, bins[i].bounds);
+            left_aabbs[i] = left_aabb;
+
+            right_sum += bins[NUM_BINS - 1 - i].tri_count;
+            right_count[NUM_BINS - 2 - i] = right_sum;
+            grow_aabb_to_include_aabb(&mut right_aabb, bins[NUM_BINS - 1 - i].bounds);
+            right_aabbs[NUM_BINS - 2 - i] = right_aabb;
+        }
+
+        // Calculate the SAH cost for the N-1 planes
+        let scale: f32 = (centroid_max - centroid_min) / NUM_BINS as f32;
+        for i in 0..NUM_BINS - 1
+        {
+            let left_size = left_aabbs[i].max - left_aabbs[i].min;
+            let right_size = right_aabbs[i].max - right_aabbs[i].min;
+            let plane_cost = node_cost(left_size, left_count[i]) + node_cost(right_size, right_count[i]);
+            if plane_cost < res.cost
+            {
+                res.performed_split = true;
+                res.cost = plane_cost;
+                res.axis = axis;
+                res.pos = centroid_min + scale * (i + 1) as f32;
+                res.aabb_left_min = left_aabbs[i].min;
+                res.aabb_right_min = right_aabbs[i].min;
+                res.aabb_left_max = left_aabbs[i].max;
+                res.aabb_right_max = right_aabbs[i].max;
+                res.num_tris_left = left_count[i];
+                res.num_tris_right = right_count[i];
+            }
+        }
+    }
+
+    return res;
+}
+
+pub fn node_cost(size: Vec3, num_tris: u32)->f32
+{
+    // Surface Area Heuristic (SAH)
+    // Computing half area instead of full area because
+    // it's slightly faster and doesn't change the result
+    let half_area: f32 = size.x * (size.y + size.z) + size.y * size.z;
+    return half_area * num_tris as f32;
+}
+
+fn get_tri(verts: &[VertexPos], indices: &[u32], tri_idx: usize)->(Vec3, Vec3, Vec3)
+{
+    let idx0 = (indices[tri_idx*3+0]) as usize;
+    let idx1 = (indices[tri_idx*3+1]) as usize;
+    let idx2 = (indices[tri_idx*3+2]) as usize;
+
+    let t0 = Vec3 {
+        x: verts[idx0].v.x,
+        y: verts[idx0].v.y,
+        z: verts[idx0].v.z,
+    };
+    let t1 = Vec3 {
+        x: verts[idx1].v.x,
+        y: verts[idx1].v.y,
+        z: verts[idx1].v.z,
+    };
+    let t2 = Vec3 {
+        x: verts[idx2].v.x,
+        y: verts[idx2].v.y,
+        z: verts[idx2].v.z,
+    };
+
+    return (t0, t1, t2);
+}
+
+fn swap_tris(indices: &mut[u32], centroids: &mut[Vec3], tri_bounds: &mut[Aabb], tri_a: u32, tri_b: u32)
+{
+    let tri_a = tri_a as usize;
+    let tri_b = tri_b as usize;
+    let idx0 = indices[tri_a*3+0];
+    let idx1 = indices[tri_a*3+1];
+    let idx2 = indices[tri_a*3+2];
+
+    // Swap indices
+    indices[tri_a*3 + 0] = indices[tri_b*3 + 0];
+    indices[tri_a*3 + 1] = indices[tri_b*3 + 1];
+    indices[tri_a*3 + 2] = indices[tri_b*3 + 2];
+    indices[tri_b*3 + 0] = idx0 as u32;
+    indices[tri_b*3 + 1] = idx1 as u32;
+    indices[tri_b*3 + 2] = idx2 as u32;
+
+    // Swap centroids
+    let tmp = centroids[tri_a];
+    centroids[tri_a] = centroids[tri_b];
+    centroids[tri_b] = tmp;
+
+    // Swap tri bounds
+    let tmp = tri_bounds[tri_a];
+    tri_bounds[tri_a] = tri_bounds[tri_b];
+    tri_bounds[tri_b] = tmp;
+}
+
+fn compute_aabb(_indices: &[u32], tri_bounds: &mut[Aabb], tri_begin: u32, tri_count: u32)->(Vec3, Vec3)
+{
+    let mut res = Aabb::default();
+    let tri_end = tri_begin + tri_count;
+    for tri in tri_begin..tri_end
+    {
+        let bounds = tri_bounds[tri as usize];
+        grow_aabb_to_include_aabb(&mut res, bounds);
+    }
+
+    return (res.min, res.max);
+}
+
+
+// The aabbs are in model space, and they're indexed using the instance mesh_idx member.
+pub fn build_tlas(instances: &[Instance], model_aabbs: &[Aabb]) -> Vec<TlasNode>
+{
+    let mut node_indices = Vec::<u32>::with_capacity(instances.len());
+    let mut tlas = Vec::<TlasNode>::with_capacity(instances.len() * 2 - 1);
+
+    tlas.push(TlasNode::default());  // Reserve slot for root node.
+
+    // Assign a leaf node for each instance.
+    for i in 0..instances.len() as u32
+    {
+        let instance = instances[i as usize];
+        let model_aabb = model_aabbs[instance.mesh_idx as usize];
+        let transform = mat4_inverse(instance.inv_transform);
+        let aabb_trans = transform_aabb(model_aabb.min, model_aabb.max, transform);
+
+        let tlas_node = TlasNode {
+            aabb_min: aabb_trans.min,
+            aabb_max: aabb_trans.max,
+            instance_idx: i,
+            left_right: 0,  // Makes it a leaf.
+        };
+        tlas.push(tlas_node);
+        node_indices.push(tlas.len() as u32 - 1);
+    }
+
+    // Use agglomerative clustering.
+    let mut a: u32 = 0;
+    let mut b = tlas_find_best_match(tlas.as_slice(), node_indices.as_slice(), a);
+    while node_indices.len() > 1
+    {
+        let c = tlas_find_best_match(tlas.as_slice(), node_indices.as_slice(), b);
+        if a == c
+        {
+            let node_idx_a = node_indices[a as usize];
+            let node_idx_b = node_indices[b as usize];
+            let node_a = tlas[node_idx_a as usize];
+            let node_b = tlas[node_idx_b as usize];
+
+            let new_node = TlasNode {
+                left_right: node_idx_a + (node_idx_b << 16),
+                aabb_min: node_a.aabb_min.min(node_b.aabb_min),
+                aabb_max: node_a.aabb_max.max(node_b.aabb_max),
+                instance_idx: 0,  // Unused.
+            };
+            tlas.push(new_node);
+
+            node_indices[a as usize] = tlas.len() as u32 - 1;
+            node_indices[b as usize] = node_indices[node_indices.len() - 1];
+            node_indices.pop();
+            if a >= node_indices.len() as u32 { a = node_indices.len() as u32 - 1; }
+
+            b = tlas_find_best_match(tlas.as_slice(), node_indices.as_slice(), a);
+        }
+        else
+        {
+            a = b;
+            b = c;
+        }
+    }
+
+    tlas[0] = tlas[node_indices[a as usize] as usize];
+    return tlas;
+}
+
+pub fn tlas_find_best_match(tlas: &[TlasNode], idx_array: &[u32], node_a: u32) -> u32
+{
+    let a_idx = idx_array[node_a as usize];
+
+    let mut smallest: f32 = f32::MAX;
+    let mut best_b: u32 = u32::MAX;
+    for (i, &b_idx) in idx_array.iter().enumerate()
+    {
+        if node_a == i as u32 { continue; }
+
+        let bmax = tlas[a_idx as usize].aabb_max.max(tlas[b_idx as usize].aabb_max);
+        let bmin = tlas[a_idx as usize].aabb_min.min(tlas[b_idx as usize].aabb_min);
+        let e = bmax - bmin;
+        let area = e.x * e.y + e.y * e.z + e.z * e.x;
+
+        if area < smallest {
+            smallest = area;
+            best_b = i as u32;
+        }
+    }
+
+    return best_b;
+}
+
+/// Also builds auxiliary data structures, e.g. lights.
+pub fn upload_scene_to_gpu(device: &wgpu::Device, queue: &wgpu::Queue, scene: &SceneCPU, textures: Vec<wgpu::Texture>, samplers: Vec<wgpu::Sampler>, envs_info: &[EnvMapInfo]) -> Scene
+{
+    let verts_pos_array = scene.verts_pos_array.iter().map(|x| upload_storage_buffer(device, queue, to_u8_slice(x))).collect();
+    let verts_array = scene.verts_array.iter().map(|x| upload_storage_buffer(device, queue, to_u8_slice(x))).collect();
+    let indices_array = scene.indices_array.iter().map(|x| upload_storage_buffer(device, queue, to_u8_slice(x))).collect();
+    let bvh_nodes_array = scene.bvh_nodes_array.iter().map(|x| upload_storage_buffer(device, queue, to_u8_slice(x))).collect();
+
+    let tlas_nodes = upload_storage_buffer(device, queue, to_u8_slice(&scene.tlas_nodes));
+    let instances = upload_storage_buffer(device, queue, to_u8_slice(&scene.instances));
+    let materials = upload_storage_buffer(device, queue, to_u8_slice(&scene.materials));
+    let environments = upload_storage_buffer(device, queue, to_u8_slice(&scene.environments));
+
+    // Build auxiliary data structures.
+    let lights = build_lights(device, queue, scene, envs_info);
+
+    return Scene {
+        verts_pos_array,
+        verts_array,
+        indices_array,
+        bvh_nodes_array,
+        tlas_nodes,
+        instances,
+        materials,
+        textures,
+        samplers,
+        environments,
+        lights,
+    };
+}
+
+pub fn validate_scene(scene: &SceneCPU, num_textures: u32, num_samplers: u32)
+{
+    assert!(scene.verts_pos_array.len() == scene.verts_array.len());
+    assert!(scene.verts_pos_array.len() == scene.bvh_nodes_array.len());
+    assert!(scene.verts_pos_array.len() == scene.mesh_aabbs.len());
+
+    for (i, indices) in scene.indices_array.iter().enumerate()
+    {
+        for idx in indices
+        {
+            assert!((*idx as usize) < scene.verts_array[i].len());
+        }
+    }
+
+    for tlas_node in &scene.tlas_nodes {
+        assert!((tlas_node.instance_idx as usize) < scene.instances.len());
+    }
+    for instance in &scene.instances
+    {
+        assert!((instance.mesh_idx as usize) < scene.verts_array.len());
+        assert!((instance.mat_idx  as usize) < scene.materials.len());
+    }
+
+    // TODO: Fill in other stuff in material
+    for mat in &scene.materials
+    {
+        assert!(mat.color_tex_idx < num_textures);
+        assert!(mat.emission_tex_idx < num_textures);
+        assert!(mat.roughness_tex_idx < num_textures);
+        assert!(mat.scattering_tex_idx < num_textures);
+        assert!(mat.normal_tex_idx < num_textures);
+    }
+
+    for env in &scene.environments
+    {
+        assert!(env.emission.x >= 0.0 && env.emission.y >= 0.0 && env.emission.z >= 0.0);
+        assert!(env.emission_tex_idx < num_textures);
+    }
+}

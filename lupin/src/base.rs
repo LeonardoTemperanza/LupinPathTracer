@@ -578,9 +578,19 @@ pub fn dot_vec3(v1: Vec3, v2: Vec3)->f32
 }
 
 #[inline]
-pub fn dot2_vec3(v: Vec3)->f32
+pub fn length_vec3(v: Vec3)->f32
 {
-    return v.x*v.x + v.y*v.y + v.z*v.z;
+    return f32::sqrt(dot_vec3(v, v));
+}
+
+#[inline]
+pub fn cross_vec3(v1: Vec3, v2: Vec3)->Vec3
+{
+    return Vec3 {
+        x: v1.y*v2.z - v2.y*v1.z,
+        y: v1.z*v2.x - v2.z*v1.x,
+        z: v1.x*v2.y - v2.x*v1.y,
+    };
 }
 
 #[inline]

@@ -102,13 +102,13 @@ fn main()
                     delta_time = delta_time.min(min_delta_time);
                     time_begin = Instant::now();
 
-                    begin_input_events(&mut input);
-
                     let frame = surface.get_current_texture().unwrap();
 
                     app_state.update_and_render(&egui_ctx, &mut egui_state, &mut egui_renderer, &frame.texture, &input, delta_time);
 
                     frame.present();
+
+                    begin_input_events(&mut input);
 
                     // Continuously request drawing messages to let the main loop continue
                     window.request_redraw();
@@ -170,8 +170,9 @@ pub struct AppState<'a>
     pub samples_per_pixel: u32,
     pub tonemap_params: lp::TonemapParams,
     pub debug_viz: DebugVizInfo,
+    pub show_normals_when_moving: bool,
     pub should_rebuild_pathtrace_resources: bool,
-    pub render_one_tile_at_a_time: bool,
+    pub controlling_camera: bool,
 
     // Camera
     pub cam_pos: lp::Vec3,
@@ -180,7 +181,7 @@ pub struct AppState<'a>
     // Lupin resources,
     pub pathtrace_resources: lp::PathtraceResources,
     pub tonemap_resources: lp::TonemapResources,
-    pub scene: lp::SceneDesc,
+    pub scene: lp::Scene,
 
     // Textures
     pub output_textures: [wgpu::Texture; 2],
@@ -278,8 +279,9 @@ impl<'a> AppState<'a>
             max_accums: 200,
             tonemap_params: Default::default(),
             debug_viz: Default::default(),
+            show_normals_when_moving: true,
             should_rebuild_pathtrace_resources: false,
-            render_one_tile_at_a_time: true,
+            controlling_camera: false,
 
             // Camera
             cam_pos: lp::Vec3 { x: 0.0, y: 1.0, z: -3.0 },
@@ -309,7 +311,10 @@ impl<'a> AppState<'a>
         // Update
         self.update_camera(input, delta_time);
 
-        self.render_one_tile_at_a_time = !input.rmouse.pressing;
+        self.controlling_camera = input.rmouse.pressing;
+        if input.rmouse.pressing {
+            self.reset_accumulation();
+        }
 
         // Consume the accumulated egui inputs
         let egui_input = egui_state.take_egui_input(&self.window);
@@ -397,6 +402,11 @@ impl<'a> AppState<'a>
     fn render_scene(&mut self, swapchain: &wgpu::Texture)
     {
         let camera_transform = lp::xform_to_matrix(self.cam_pos, self.cam_rot, lp::Vec3 { x: 1.0, y: 1.0, z: 1.0 });
+        if camera_transform.m != self.prev_cam_transform.m
+        {
+            self.reset_accumulation();
+        }
+        self.prev_cam_transform = camera_transform;
 
         match self.render_type
         {
@@ -416,15 +426,40 @@ impl<'a> AppState<'a>
             }
             RenderType::Pathtrace =>
             {
-                if camera_transform.m != self.prev_cam_transform.m
-                {
-                    self.reset_accumulation();
-                }
-                self.prev_cam_transform = camera_transform;
-
                 if self.accum_counter < self.max_accums
                 {
-                    if self.render_one_tile_at_a_time
+                    if self.controlling_camera
+                    {
+                        if self.show_normals_when_moving
+                        {
+                            lp::raycast_normals(&self.device, &self.queue, &self.scene, &self.output_rgba8_snorm,
+                                                &self.pathtrace_resources, camera_transform.into());
+                            lp::convert_to_ldr_no_tonemap(&self.device, &self.queue, &self.tonemap_resources,
+                                                          &self.output_rgba8_snorm, &swapchain);
+                        }
+                        else
+                        {
+                            lp::pathtrace_scene(&self.device, &self.queue, &lp::PathtraceDesc {
+                                scene: &self.scene,
+                                render_target: &self.output_textures[self.output_tex_front],
+                                resources: &self.pathtrace_resources,
+                                accum_params: &lp::AccumulationParams {
+                                    prev_frame: Some(&self.output_textures[self.output_tex_back]),
+                                    accum_counter: self.accum_counter,
+                                },
+                                tile_params: &Default::default(),
+                                camera_transform: camera_transform,
+                            });
+
+                            lp::apply_tonemapping(&self.device, &self.queue, &lp::TonemapDesc {
+                                resources: &self.tonemap_resources,
+                                hdr_texture: &self.output_textures[self.output_tex_front],
+                                render_target: &swapchain,
+                                tonemap_params: &self.tonemap_params,
+                            });
+                        }
+                    }
+                    else
                     {
                         lp::pathtrace_scene_tiles(&self.device, &self.queue, &lp::PathtraceDesc {
                             scene: &self.scene,
@@ -437,29 +472,15 @@ impl<'a> AppState<'a>
                             tile_params: &Default::default(),
                             camera_transform: camera_transform,
                         }, &mut self.tile_idx, 3);
-                    }
-                    else
-                    {
-                        lp::pathtrace_scene(&self.device, &self.queue, &lp::PathtraceDesc {
-                            scene: &self.scene,
-                            render_target: &self.output_textures[self.output_tex_front],
-                            resources: &self.pathtrace_resources,
-                            accum_params: &lp::AccumulationParams {
-                                prev_frame: Some(&self.output_textures[self.output_tex_back]),
-                                accum_counter: self.accum_counter,
-                            },
-                            tile_params: &Default::default(),
-                            camera_transform: camera_transform,
+
+                        lp::apply_tonemapping(&self.device, &self.queue, &lp::TonemapDesc {
+                            resources: &self.tonemap_resources,
+                            hdr_texture: &self.output_textures[self.output_tex_front],
+                            render_target: &swapchain,
+                            tonemap_params: &self.tonemap_params,
                         });
                     }
                 }
-
-                lp::apply_tonemapping(&self.device, &self.queue, &lp::TonemapDesc {
-                    resources: &self.tonemap_resources,
-                    hdr_texture: &self.output_textures[self.output_tex_front],
-                    render_target: &swapchain,
-                    tonemap_params: &self.tonemap_params,
-                });
 
                 // Swap output textures
                 if self.accum_counter < self.max_accums
@@ -543,7 +564,7 @@ impl<'a> AppState<'a>
             ANGLE.y = ANGLE.y.clamp(deg_to_rad(-90.0), deg_to_rad(90.0));
             let y_rot = lp::angle_axis(lp::Vec3 { x: -1.0, y: 0.0, z: 0.0 }, ANGLE.y);
             let x_rot = lp::angle_axis(lp::Vec3 { x:  0.0, y: 1.0, z: 0.0 }, ANGLE.x);
-            self.cam_rot = x_rot * y_rot
+            self.cam_rot = x_rot * y_rot;
         }
 
         // Movement
@@ -646,6 +667,8 @@ impl<'a> AppState<'a>
                             let response = ui.add(egui::DragValue::new(&mut self.max_accums).range(1..=10000));
                             ui.label("Max accumulations");
                         });
+
+                        ui.checkbox(&mut self.show_normals_when_moving, "Show normals when moving");
 
                         egui::CollapsingHeader::new("Stats").show(ui, |ui| {
                             ui.label(format!("Iteration: {:?}", self.accum_counter));
@@ -858,13 +881,13 @@ fn ui_min_max(ui: &mut egui::Ui, string: &str, min: &mut f32, max: &mut f32, ran
         ui.label("Min:");
         ui.add(
             egui::DragValue::new(min)
-                .clamp_range(range_start..=*max)
+                .range(range_start..=*max)
                 .speed(0.1),
         );
         ui.label("Max:");
         ui.add(
             egui::DragValue::new(max)
-                .clamp_range(*min..=range_end)
+                .range(*min..=range_end)
                 .speed(0.1),
         );
     });
