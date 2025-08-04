@@ -280,9 +280,10 @@ pub fn build_scene(device: &wgpu::Device, queue: &wgpu::Queue) -> lp::Scene
         // Floor
         lp::Instance { inv_transform: lp::mat4_inverse(lp::xform_to_matrix(lp::Vec3 { x: 0.0, y: -0.01, z: 0.0 }, lp::Quat::default(), lp::Vec3::ones() * 20.0)), mesh_idx: 1, mat_idx: brown_matte, padding0: 0.0, padding1: 0.0 },
         // Studio light
-        lp::Instance { inv_transform: lp::mat4_inverse(lp::xform_to_matrix(lp::Vec3 { x: 0.0, y: 10.0, z: -10.0 }, lp::angle_axis(lp::Vec3::RIGHT, -45.0 * 3.1415 / 180.0), lp::Vec3::ones())), mesh_idx: 1, mat_idx: emissive, padding0: 0.0, padding1: 0.0 },
+        lp::Instance { inv_transform: lp::mat4_inverse(lp::xform_to_matrix(lp::Vec3 { x: 0.0, y: 10.0, z: -10.0 }, lp::angle_axis(lp::Vec3::RIGHT, -80.0 * 3.1415 / 180.0), lp::Vec3::ones())), mesh_idx: 1, mat_idx: emissive, padding0: 0.0, padding1: 0.0 },
         // Gazebo
         lp::Instance { inv_transform: lp::mat4_inverse(lp::xform_to_matrix(lp::Vec3 { x: 30.0, y: 0.0, z: 0.0 }, lp::Quat::default(), lp::Vec3::ones())), mesh_idx: gazebo_mesh, mat_idx: brown_matte, padding0: 0.0, padding1: 0.0 },
+        lp::Instance { inv_transform: lp::mat4_inverse(lp::xform_to_matrix(lp::Vec3 { x: 30.0, y: 0.0, z: -20.0 }, lp::Quat::default(), lp::Vec3::ones())), mesh_idx: gazebo_mesh, mat_idx: brown_matte, padding0: 0.0, padding1: 0.0 },
         // Dragon
         //lp::Instance { inv_transform: lp::mat4_inverse(lp::xform_to_matrix(lp::Vec3 { x: 0.0, y: 2.5, z: 0.0 }, lp::Quat::default(), lp::Vec3::ones() * 10.0)), mesh_idx: dragon_80k_mesh, mat_idx: transparent, padding0: 0.0, padding1: 0.0 },
     ];
@@ -290,7 +291,7 @@ pub fn build_scene(device: &wgpu::Device, queue: &wgpu::Queue) -> lp::Scene
     let tlas_nodes = lp::build_tlas(instances.as_slice(), &mesh_aabbs);
 
     let env = push_asset(&mut environments, lp::Environment {
-        emission: lp::Vec3 { x: 0.01, y: 0.01, z: 0.01 },
+        emission: lp::Vec3 { x: 0.0, y: 0.0, z: 0.0 },
         emission_tex_idx: env_map,
     });
 

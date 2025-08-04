@@ -426,18 +426,19 @@ impl<'a> AppState<'a>
             }
             RenderType::Pathtrace =>
             {
-                if self.accum_counter < self.max_accums
+
+                if self.controlling_camera
                 {
-                    if self.controlling_camera
+                    if self.show_normals_when_moving
                     {
-                        if self.show_normals_when_moving
-                        {
-                            lp::raycast_normals(&self.device, &self.queue, &self.scene, &self.output_rgba8_snorm,
-                                                &self.pathtrace_resources, camera_transform.into());
-                            lp::convert_to_ldr_no_tonemap(&self.device, &self.queue, &self.tonemap_resources,
-                                                          &self.output_rgba8_snorm, &swapchain);
-                        }
-                        else
+                        lp::raycast_normals(&self.device, &self.queue, &self.scene, &self.output_rgba8_snorm,
+                                            &self.pathtrace_resources, camera_transform.into());
+                        lp::convert_to_ldr_no_tonemap(&self.device, &self.queue, &self.tonemap_resources,
+                                                      &self.output_rgba8_snorm, &swapchain);
+                    }
+                    else
+                    {
+                        if self.accum_counter < self.max_accums
                         {
                             lp::pathtrace_scene(&self.device, &self.queue, &lp::PathtraceDesc {
                                 scene: &self.scene,
@@ -450,17 +451,21 @@ impl<'a> AppState<'a>
                                 tile_params: &Default::default(),
                                 camera_transform: camera_transform,
                             });
-
-                            lp::apply_tonemapping(&self.device, &self.queue, &lp::TonemapDesc {
-                                resources: &self.tonemap_resources,
-                                hdr_texture: &self.output_textures[self.output_tex_front],
-                                render_target: &swapchain,
-                                tonemap_params: &self.tonemap_params,
-                            });
                         }
+
+                        lp::apply_tonemapping(&self.device, &self.queue, &lp::TonemapDesc {
+                            resources: &self.tonemap_resources,
+                            hdr_texture: &self.output_textures[self.output_tex_front],
+                            render_target: &swapchain,
+                            tonemap_params: &self.tonemap_params,
+                        });
                     }
-                    else
+                }
+                else
+                {
+                    if self.accum_counter < self.max_accums
                     {
+                        /*
                         lp::pathtrace_scene_tiles(&self.device, &self.queue, &lp::PathtraceDesc {
                             scene: &self.scene,
                             render_target: &self.output_textures[self.output_tex_front],
@@ -472,14 +477,27 @@ impl<'a> AppState<'a>
                             tile_params: &Default::default(),
                             camera_transform: camera_transform,
                         }, &mut self.tile_idx, 3);
+                        */
 
-                        lp::apply_tonemapping(&self.device, &self.queue, &lp::TonemapDesc {
-                            resources: &self.tonemap_resources,
-                            hdr_texture: &self.output_textures[self.output_tex_front],
-                            render_target: &swapchain,
-                            tonemap_params: &self.tonemap_params,
+                        lp::pathtrace_scene(&self.device, &self.queue, &lp::PathtraceDesc {
+                            scene: &self.scene,
+                            render_target: &self.output_textures[self.output_tex_front],
+                            resources: &self.pathtrace_resources,
+                            accum_params: &lp::AccumulationParams {
+                                prev_frame: Some(&self.output_textures[self.output_tex_back]),
+                                accum_counter: self.accum_counter,
+                            },
+                            tile_params: &Default::default(),
+                            camera_transform: camera_transform,
                         });
                     }
+
+                    lp::apply_tonemapping(&self.device, &self.queue, &lp::TonemapDesc {
+                        resources: &self.tonemap_resources,
+                        hdr_texture: &self.output_textures[self.output_tex_front],
+                        render_target: &swapchain,
+                        tonemap_params: &self.tonemap_params,
+                    });
                 }
 
                 // Swap output textures

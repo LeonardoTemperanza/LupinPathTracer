@@ -165,6 +165,7 @@ pub struct Environment
 pub struct Light
 {
     pub instance_idx: u32,
+    pub area: f32,
 }
 
 #[derive(Default, Clone, Copy, Debug)]

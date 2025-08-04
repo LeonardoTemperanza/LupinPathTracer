@@ -31,9 +31,7 @@ pub fn build_lights(device: &wgpu::Device, queue: &wgpu::Queue, scene: &SceneCPU
         let mesh_indices = &indices[instance.mesh_idx as usize];
         if mat.emission.is_zero() { continue; }
 
-        let light = Light { instance_idx: i as u32 };
-        lights.push(light);
-
+        let mut total_area: f32 = 0.0;
         let mut weights = Vec::<f32>::new();
         for i in (0..mesh_indices.len()).step_by(3)
         {
@@ -41,9 +39,13 @@ pub fn build_lights(device: &wgpu::Device, queue: &wgpu::Queue, scene: &SceneCPU
             let v1 = mesh_verts[mesh_indices[i+1] as usize];
             let v2 = mesh_verts[mesh_indices[i+2] as usize];
 
-            let weight = tri_area(v0.v, v1.v, v2.v);
-            weights.push(weight);
+            let area = tri_area(v0.v, v1.v, v2.v);
+            weights.push(area);
+            total_area += area;
         }
+
+        let light = Light { instance_idx: i as u32, area: total_area };
+        lights.push(light);
 
         let alias_table = build_alias_table(&weights);
         let alias_table_buf = upload_storage_buffer(device, queue, to_u8_slice(&alias_table));
@@ -60,19 +62,34 @@ pub fn build_lights(device: &wgpu::Device, queue: &wgpu::Queue, scene: &SceneCPU
         let env_height = envs_info[i].height;
         assert!(env_tex.len() == (env_width * env_height) as usize);
 
-        if scale.is_zero() { continue; }
+        // Environments have the sole purpose of emitting light,
+        // so an environment with 0.0 emission should not exist, thus
+        // there's a 1:1 mapping of environments and environment lights/alias tables.
 
         for (i, pixel) in env_tex.iter().enumerate()
         {
             let y = i / env_width as usize;
             let angle = (y as f32 + 0.5) * std::f32::consts::PI / env_height as f32;
-            let prob = f32::max(f32::max(pixel.x, pixel.y), pixel.z) * f32::sin(angle);
-            weights.push(prob);
+            let pixel_emission = f32::max(f32::max(pixel.x * scale.x, pixel.y * scale.y), pixel.z * scale.z);
+            let prob = pixel_emission * f32::sin(angle);
+
+            // Use uniform weights in case of 0.0 emission (this
+            // shouldn't happen but it's handled correctly).
+            if scale.x <= 0.0 && scale.y <= 0.0 && scale.z <= 0.0 {
+                weights.push(1.0);
+            } else {
+                weights.push(prob);
+            }
         }
 
         let alias_table = build_alias_table(&weights);
         let alias_table_buf = upload_storage_buffer(device, queue, to_u8_slice(&alias_table));
         env_alias_tables.push(alias_table_buf);
+    }
+
+    for light in &lights
+    {
+        println!("{:#?}", light);
     }
 
     return Lights {

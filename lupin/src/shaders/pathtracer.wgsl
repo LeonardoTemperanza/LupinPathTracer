@@ -35,7 +35,7 @@ struct PushConstants
     accum_counter: u32,  // If this is 0, nothing is taken from the previous frame.
 
     // Debug params
-    debug_flags: u32,
+    flags: u32,
     heatmap_min: f32,
     heatmap_max: f32,
 }
@@ -120,6 +120,7 @@ struct Environment
 struct Light
 {
     instance_idx: u32,
+    area: f32,
 }
 
 struct AliasBin
@@ -153,10 +154,12 @@ struct TlasNode
 }
 
 // NOTE: Coupled to constants in renderer.rs
-const DEBUG_FLAG_TRI_CHECKS:  u32       = 1 << 0;
-const DEBUG_FLAG_AABB_CHECKS: u32       = 1 << 1;
-const DEBUG_FLAG_NUM_BOUNCES: u32       = 1 << 2;
-const DEBUG_FLAG_FIRST_HIT_ONLY: u32    = 1 << 3;
+const FLAG_DEBUG_TRI_CHECKS:  u32       = 1 << 0;
+const FLAG_DEBUG_AABB_CHECKS: u32       = 1 << 1;
+const FLAG_DEBUG_NUM_BOUNCES: u32       = 1 << 2;
+const FLAG_DEBUG_FIRST_HIT_ONLY: u32    = 1 << 3;
+const FLAG_ENVS_EMPTY: u32              = 1 << 4;
+const FLAG_LIGHTS_EMPTY: u32            = 1 << 5;
 
 //////////////////////////////////////////////
 // Entrypoints
@@ -189,9 +192,11 @@ fn pathtrace_main(@builtin(local_invocation_id) local_id: vec3u, @builtin(global
         color = max(color, vec3f(0.0f));
     }
 
-    if global_id.x < output_dim.x && global_id.y < output_dim.y {
+    if all(global_id < output_dim) {
         textureStore(output_hdr, global_id.xy, vec4f(color, 1.0f));
     }
+
+    write_debug_color(global_id, output_dim);
 }
 
 @compute
@@ -207,8 +212,8 @@ fn pathtrace_debug_main(@builtin(local_invocation_id) local_id: vec3u, @builtin(
     let pixel_offset = random_vec2f() - 0.5f;
     let camera_ray = compute_camera_ray(global_id, output_dim, pixel_offset);
 
-    let first_hit_only = (constants.debug_flags & DEBUG_FLAG_FIRST_HIT_ONLY) != 0;
-    let debug_num_bounces = (constants.debug_flags & DEBUG_FLAG_NUM_BOUNCES) != 0;
+    let first_hit_only = (constants.flags & FLAG_DEBUG_FIRST_HIT_ONLY) != 0;
+    let debug_num_bounces = (constants.flags & FLAG_DEBUG_NUM_BOUNCES) != 0;
 
     if first_hit_only && !debug_num_bounces {
         ray_scene_intersection(local_id, camera_ray);
@@ -217,9 +222,9 @@ fn pathtrace_debug_main(@builtin(local_invocation_id) local_id: vec3u, @builtin(
     }
 
     var val = 0.0f;
-    if (constants.debug_flags & DEBUG_FLAG_TRI_CHECKS) != 0 {
+    if (constants.flags & FLAG_DEBUG_TRI_CHECKS) != 0 {
         val = f32(RAY_DEBUG_INFO.num_tri_checks);
-    } else if (constants.debug_flags & DEBUG_FLAG_AABB_CHECKS) != 0 {
+    } else if (constants.flags & FLAG_DEBUG_AABB_CHECKS) != 0 {
         val = f32(RAY_DEBUG_INFO.num_aabb_checks);
     } else if debug_num_bounces {
         val = f32(DEBUG_NUM_BOUNCES);
@@ -227,7 +232,7 @@ fn pathtrace_debug_main(@builtin(local_invocation_id) local_id: vec3u, @builtin(
 
     let color = get_heatmap_color(val, constants.heatmap_min, constants.heatmap_max);
 
-    if global_id.x < output_dim.x && global_id.y < output_dim.y {
+    if all(global_id < output_dim) {
         textureStore(output_rgba8unorm, global_id.xy, vec4f(color, 1.0f));
     }
 }
@@ -265,7 +270,7 @@ fn gbuffer_albedo_main(@builtin(local_invocation_id) local_id: vec3u, @builtin(g
     color /= f32(NUM_AA_SAMPLES_PER_DIR * NUM_AA_SAMPLES_PER_DIR);
     color = clamp(color, vec3f(0.0f), vec3f(1.0f));
 
-    if global_id.x < output_dim.x && global_id.y < output_dim.y {
+    if all(global_id < output_dim) {
         textureStore(output_rgba8unorm, global_id.xy, vec4f(color, 1.0f));
     }
 }
@@ -299,7 +304,7 @@ fn gbuffer_normals_main(@builtin(local_invocation_id) local_id: vec3u, @builtin(
     color /= f32(NUM_AA_SAMPLES_PER_DIR * NUM_AA_SAMPLES_PER_DIR);
     color = clamp(color, vec3f(-1.0f), vec3f(1.0f));
 
-    if global_id.x < output_dim.x && global_id.y < output_dim.y {
+    if all(global_id < output_dim) {
         textureStore(output_rgba8snorm, global_id.xy, vec4f(color, 1.0f));
     }
 }
@@ -357,8 +362,7 @@ fn pathtrace_naive(local_id: vec3u, start_ray: Ray) -> vec3f
 
         let color = textureSampleLevel(textures[mat.color_tex_idx], samplers[mat_sampler_idx], hit.tex_coords, 0.0f) * mat.color;
 
-        // Set next ray's origin at point of contact.
-        ray.ori = ray.ori + ray.dir * hit.dst;
+        let hit_pos = ray.ori + ray.dir * hit.dst;
 
         // TODO: No caustics param.
 
@@ -401,6 +405,7 @@ fn pathtrace_naive(local_id: vec3u, start_ray: Ray) -> vec3f
             weight *= eval_delta(material, normal, outgoing, incoming) / sample_delta_pdf(material, normal, outgoing, incoming);
         }
 
+        ray.ori = hit_pos;
         ray.dir = incoming;
         ray.inv_dir = 1.0f / ray.dir;
 
@@ -444,8 +449,11 @@ fn pathtrace(local_id: vec3u, start_ray: Ray) -> vec3f
 
         let color = textureSampleLevel(textures[mat.color_tex_idx], samplers[mat_sampler_idx], hit.tex_coords, 0.0f) * mat.color;
 
-        // Set next ray's origin at point of contact.
-        ray.ori = ray.ori + ray.dir * hit.dst;
+        let hit_pos = ray.ori + ray.dir * hit.dst;
+        if !debug_enable {
+        debug_enable = true;
+        debug_color = hit_pos;
+        }
 
         // TODO: No caustics param.
 
@@ -483,13 +491,13 @@ fn pathtrace(local_id: vec3u, start_ray: Ray) -> vec3f
             }
             else
             {
-                incoming = sample_lights(ray.ori, normal, outgoing);
+                incoming = sample_lights(hit_pos, normal, outgoing);
             }
 
             if all(incoming == vec3f(0.0f)) { break; }
 
             let prob = bsdf_prob  * sample_bsdfcos_pdf(material, normal, outgoing, incoming) +
-                       light_prob * sample_lights_pdf(local_id, ray.ori, incoming);
+                       light_prob * sample_lights_pdf(local_id, hit_pos, incoming);
             weight *= eval_bsdfcos(material, normal, outgoing, incoming) / prob;
         }
         else
@@ -501,6 +509,7 @@ fn pathtrace(local_id: vec3u, start_ray: Ray) -> vec3f
                       sample_delta_pdf(material, normal, outgoing, incoming);
         }
 
+        ray.ori = hit_pos;
         ray.dir = incoming;
         ray.inv_dir = 1.0f / ray.dir;
 
@@ -518,6 +527,9 @@ fn pathtrace(local_id: vec3u, start_ray: Ray) -> vec3f
 
     return radiance;
 }
+
+// Multiple Importance Sampling.
+fn pathtrace_mis(
 
 struct MaterialPoint
 {
@@ -1135,19 +1147,19 @@ fn ray_scene_intersection(local_id: vec3u, ray: Ray)->HitInfo
     var hit_info: HitInfo = invalid_hit;
     if min_hit.x != F32_MAX
     {
-        let vert0: Vertex = verts_array[mesh_idx].data[indices_array[mesh_idx].data[tri_idx*3 + 0]];
-        let vert1: Vertex = verts_array[mesh_idx].data[indices_array[mesh_idx].data[tri_idx*3 + 1]];
-        let vert2: Vertex = verts_array[mesh_idx].data[indices_array[mesh_idx].data[tri_idx*3 + 2]];
+        let v0: Vertex = verts_array[mesh_idx].data[indices_array[mesh_idx].data[tri_idx*3 + 0]];
+        let v1: Vertex = verts_array[mesh_idx].data[indices_array[mesh_idx].data[tri_idx*3 + 1]];
+        let v2: Vertex = verts_array[mesh_idx].data[indices_array[mesh_idx].data[tri_idx*3 + 2]];
         let u = min_hit.y;
         let v = min_hit.z;
         let w = 1.0 - u - v;
 
-        let local_normal = normalize(vert0.normal*w + vert1.normal*u + vert2.normal*v);
+        let local_normal = normalize(v0.normal*w + v1.normal*u + v2.normal*v);
         let normal_mat = transpose(mat3x3f(inv_trans[0].xyz, inv_trans[1].xyz, inv_trans[2].xyz));
 
         hit_info.dst = min_hit.x;
-        hit_info.normal = normalize(normal_mat * local_normal).xyz;
-        hit_info.tex_coords = vert0.tex_coords*w + vert1.tex_coords*u + vert2.tex_coords*v;
+        hit_info.normal = normalize(normal_mat * local_normal);
+        hit_info.tex_coords = v0.tex_coords*w + v1.tex_coords*u + v2.tex_coords*v;
         hit_info.mat_idx = mat_idx;
     }
 
@@ -1267,19 +1279,10 @@ fn ray_mesh_intersection(local_id: vec3u, ray: Ray, cur_min_hit_dst: f32, mesh_i
 
 fn ray_instance_intersection(local_id: vec3u, ray: Ray, cur_min_hit_dst: f32, instance_idx: u32) -> RayMeshIntersectionResult
 {
-    var min_hit = vec3f(cur_min_hit_dst, 0.0f, 0.0f);
-    var tri_idx = 0u;
-
     let instance = instances[instance_idx];
     let ray_trans = transform_ray_without_normalizing_direction(ray, instances[instance_idx].inv_transform);
     let result = ray_mesh_intersection(local_id, ray_trans, cur_min_hit_dst, instance.mesh_idx);
-    if result.hit.x < min_hit.x
-    {
-        min_hit   = result.hit;
-        tri_idx   = result.tri_idx;
-    }
-
-    return RayMeshIntersectionResult(min_hit, tri_idx);
+    return result;
 }
 
 //////////////////////////////////////////////
@@ -1957,7 +1960,6 @@ fn sample_lights(pos: vec3f, normal: vec3f, outgoing: vec3f) -> vec3f
 
     let num_instance_lights = arrayLength(&lights);
     let num_envs = arrayLength(&environments);
-    if num_envs <= 0 { return vec3f(); }
     if num_instance_lights + num_envs <= 0 { return vec3f(); }
 
     let light_idx = random_u32_range_unsafe(num_instance_lights + num_envs);
@@ -2004,19 +2006,27 @@ fn sample_lights_pdf(local_id: vec3u, pos: vec3f, incoming: vec3f) -> f32
         var next_pos = pos;
         for(var bounce = 0u; bounce < 100; bounce++)
         {
-            let ray = Ray(next_pos, incoming, 1.0f / incoming);
+            var ray = Ray(next_pos, incoming, 1.0f / incoming);
             let hit_info = ray_instance_intersection(local_id, ray, F32_MAX, instance_idx);
             let hit_dst = hit_info.hit.x;
             let hit_uv  = hit_info.hit.yz;
-            if hit_dst == F32_MAX { break; }  // No intersection.
+            if hit_dst == F32_MAX { if !debug_enable { debug_enable = true; debug_color = vec3f(0.0f, 0.0f, 1.0f); } break; }  // No intersection.
 
-            let light_normal = compute_tri_normal(instance_idx, hit_info.tri_idx, hit_uv);
-            let light_pos = pos + incoming * hit_dst;
+            let light_normal = compute_tri_geom_normal(instance_idx, hit_info.tri_idx);
 
-            // Prob triangle * area triangle = area triangle mesh
-            let area = 2.0f;  // TODO: Area is the sum of all probabilities
-            light_pdf += hit_dst * hit_dst / (abs(dot(light_normal, incoming)) * area);
+            let light_pos = ray.ori + ray.dir * hit_dst;
 
+            let prob = alias_tables[i].data[hit_info.tri_idx].prob;
+            let dist2 = dot(light_pos - pos, light_pos - pos);
+            let cos_theta = abs(dot(light_normal, incoming));
+
+            //if cos_theta < 0.001f && abs(dot(incoming, vec3f(0.0f, 1.0f, 0.0f))) < 0.01f
+            {
+                debug_enable = true;
+                debug_color = pos;
+            }
+
+            light_pdf += dist2 / (cos_theta * light.area);
             next_pos = light_pos;
         }
 
@@ -2100,7 +2110,19 @@ fn compute_tri_geom_normal(instance_idx: u32, tri_idx: u32) -> vec3f
 
     let local_normal = normalize(cross(v2 - v0, v1 - v0));
     let normal_mat = transpose(mat3x3f(inv_trans[0].xyz, inv_trans[1].xyz, inv_trans[2].xyz));
-    return normalize(normal_mat * local_normal).xyz;
+    return normalize(normal_mat * local_normal);
+}
+
+fn tri_area(instance_idx: u32, tri_idx: u32) -> f32
+{
+    let mesh_idx = instances[instance_idx].mesh_idx;
+    let inv_trans = instances[instance_idx].inv_transform;
+
+    let v0 = verts_pos_array[mesh_idx].data[indices_array[mesh_idx].data[tri_idx*3 + 0]];
+    let v1 = verts_pos_array[mesh_idx].data[indices_array[mesh_idx].data[tri_idx*3 + 1]];
+    let v2 = verts_pos_array[mesh_idx].data[indices_array[mesh_idx].data[tri_idx*3 + 2]];
+
+    return length(cross(v1 - v0, v2 - v0)) / 2.0f;
 }
 
 // Safely wraps values in the [0, 1] range.
@@ -2131,8 +2153,8 @@ fn env_uv_to_dir(uv: vec2f) -> vec3f
 }
 
 // As far as I know you need an extra extension to pass
-// pointers to arrays in functions, so unless we require
-// that this is bit is duplicated.
+// pointers to arrays in functions, so unless we want to
+// require that, this function is duplicated.
 fn sample_env_alias_table(env_idx: u32) -> u32
 {
     let num_env = arrayLength(&environments);
@@ -2233,4 +2255,19 @@ fn get_heatmap_color(val: f32, min: f32, max: f32) -> vec3f
 
     color = pow(factor * color, vec3f(gamma));
     return color;
+}
+
+// For quick printf-like debugging.
+
+var<private> debug_color = vec3f();
+var<private> debug_enable = false;
+
+fn write_debug_color(global_id: vec2u, output_dim: vec2u)
+{
+    if debug_enable
+    {
+        if all(global_id < output_dim) {
+            //textureStore(output_hdr, global_id.xy, vec4f(debug_color, 1.0f));
+        }
+    }
 }
