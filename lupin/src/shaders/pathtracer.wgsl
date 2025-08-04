@@ -489,7 +489,7 @@ fn pathtrace(local_id: vec3u, start_ray: Ray) -> vec3f
             if all(incoming == vec3f(0.0f)) { break; }
 
             let prob = bsdf_prob  * sample_bsdfcos_pdf(material, normal, outgoing, incoming) +
-                       light_prob * sample_lights_pdf(ray.ori, incoming);
+                       light_prob * sample_lights_pdf(local_id, ray.ori, incoming);
             weight *= eval_bsdfcos(material, normal, outgoing, incoming) / prob;
         }
         else
@@ -1164,6 +1164,7 @@ struct RayMeshIntersectionResult
     tri_idx: u32
 }
 
+// cur_min_hit_dst should be F32_MAX if absent.
 fn ray_mesh_intersection(local_id: vec3u, ray: Ray, cur_min_hit_dst: f32, mesh_idx: u32) -> RayMeshIntersectionResult
 {
     // Comment/Uncomment to test the performance of shared memory
@@ -1259,6 +1260,23 @@ fn ray_mesh_intersection(local_id: vec3u, ray: Ray, cur_min_hit_dst: f32, mesh_i
                 }
             }
         }
+    }
+
+    return RayMeshIntersectionResult(min_hit, tri_idx);
+}
+
+fn ray_instance_intersection(local_id: vec3u, ray: Ray, cur_min_hit_dst: f32, instance_idx: u32) -> RayMeshIntersectionResult
+{
+    var min_hit = vec3f(cur_min_hit_dst, 0.0f, 0.0f);
+    var tri_idx = 0u;
+
+    let instance = instances[instance_idx];
+    let ray_trans = transform_ray_without_normalizing_direction(ray, instances[instance_idx].inv_transform);
+    let result = ray_mesh_intersection(local_id, ray_trans, cur_min_hit_dst, instance.mesh_idx);
+    if result.hit.x < min_hit.x
+    {
+        min_hit   = result.hit;
+        tri_idx   = result.tri_idx;
     }
 
     return RayMeshIntersectionResult(min_hit, tri_idx);
@@ -1937,22 +1955,27 @@ fn sample_lights(pos: vec3f, normal: vec3f, outgoing: vec3f) -> vec3f
 {
     let up_normal = select(normal, -normal, dot(normal, outgoing) <= 0.0f);
 
-    //let num_instance_lights = arrayLength(&lights);
+    let num_instance_lights = arrayLength(&lights);
     let num_envs = arrayLength(&environments);
     if num_envs <= 0 { return vec3f(); }
-    //if num_instance_lights + num_envs <= 0 { return vec3f(); }
+    if num_instance_lights + num_envs <= 0 { return vec3f(); }
 
-    let light_idx = random_u32_range_unsafe(/*num_instance_lights + */num_envs);
-    /*if light_idx < num_instance_lights
+    let light_idx = random_u32_range_unsafe(num_instance_lights + num_envs);
+    if light_idx < num_instance_lights
     {
+        let tri_idx = sample_instance_alias_table(light_idx);
+        let instance_idx = lights[light_idx].instance_idx;
+        let mesh_idx = instances[instance_idx].mesh_idx;
+        let uv = random_tri_uv();
 
-        if dot(normal, incoming) < 0.0f) { return vec3f(0.0f); }
+        let incoming = compute_dir_from_point_to_tri(instance_idx, tri_idx, uv, pos);
+
+        if !same_hemisphere(up_normal, outgoing, incoming) { return vec3f(0.0f); }
         return incoming;
     }
     else
-    */
     {
-        let env_idx = light_idx /*- num_instance_lights*/;
+        let env_idx = light_idx - num_instance_lights;
         let env_tex_idx = environments[env_idx].emission_tex_idx;
         let env_tex_size = textureDimensions(textures[env_tex_idx]);
 
@@ -1962,19 +1985,42 @@ fn sample_lights(pos: vec3f, normal: vec3f, outgoing: vec3f) -> vec3f
 
         let incoming = env_idx_to_dir(sample, env_idx);
 
-        if (!same_hemisphere(up_normal, outgoing, incoming)) { return vec3f(); }
+        if !same_hemisphere(up_normal, outgoing, incoming) { return vec3f(0.0f); }
         return incoming;
     }
 }
 
-fn sample_lights_pdf(pos: vec3f, incoming: vec3f) -> f32
+fn sample_lights_pdf(local_id: vec3u, pos: vec3f, incoming: vec3f) -> f32
 {
     var pdf = 0.0f;
 
     let num_lights = arrayLength(&lights);
     for(var i = 0u; i < num_lights; i++)
     {
+        let light = lights[i];
+        let instance_idx = light.instance_idx;
 
+        var light_pdf = 0.0f;
+        var next_pos = pos;
+        for(var bounce = 0u; bounce < 100; bounce++)
+        {
+            let ray = Ray(next_pos, incoming, 1.0f / incoming);
+            let hit_info = ray_instance_intersection(local_id, ray, F32_MAX, instance_idx);
+            let hit_dst = hit_info.hit.x;
+            let hit_uv  = hit_info.hit.yz;
+            if hit_dst == F32_MAX { break; }  // No intersection.
+
+            let light_normal = compute_tri_normal(instance_idx, hit_info.tri_idx, hit_uv);
+            let light_pos = pos + incoming * hit_dst;
+
+            // Prob triangle * area triangle = area triangle mesh
+            let area = 2.0f;  // TODO: Area is the sum of all probabilities
+            light_pdf += hit_dst * hit_dst / (abs(dot(light_normal, incoming)) * area);
+
+            next_pos = light_pos;
+        }
+
+        pdf += light_pdf;
     }
 
     let num_envs = arrayLength(&environments);
@@ -1994,7 +2040,7 @@ fn sample_lights_pdf(pos: vec3f, incoming: vec3f) -> f32
         pdf += prob / solid_angle;
     }
 
-    pdf /= f32(/* num_lights + */ num_envs);
+    pdf /= f32(num_lights + num_envs);
 
     return pdf;
 }
@@ -2007,6 +2053,54 @@ fn dir_to_env_coords(dir: vec3f, env: u32) -> vec2u
     let uv = dir_to_env_uv(dir);
     return vec2u(clamp(u32(uv.x * f32(env_tex_size.x)), 0u, env_tex_size.x - 1),
                  clamp(u32(uv.y * f32(env_tex_size.y)), 0u, env_tex_size.y - 1));
+}
+
+fn compute_dir_from_point_to_tri(instance_idx: u32, tri_idx: u32, uv: vec2f, p: vec3f) -> vec3f
+{
+    let mesh_idx = instances[instance_idx].mesh_idx;
+    let inv_trans = instances[instance_idx].inv_transform;
+
+    let local_p = (inv_trans * vec4f(p, 1.0f)).xyz;
+
+    let v0: vec3f = verts_pos_array[mesh_idx].data[indices_array[mesh_idx].data[tri_idx*3 + 0]];
+    let v1: vec3f = verts_pos_array[mesh_idx].data[indices_array[mesh_idx].data[tri_idx*3 + 1]];
+    let v2: vec3f = verts_pos_array[mesh_idx].data[indices_array[mesh_idx].data[tri_idx*3 + 2]];
+    let w = 1.0 - uv.x - uv.y;
+
+    let local_tri_pos = v0*w + v1*uv.x + v2*uv.y;
+
+    let local_dir = normalize(local_tri_pos - local_p);
+    let normal_mat = transpose(mat3x3f(inv_trans[0].xyz, inv_trans[1].xyz, inv_trans[2].xyz));
+    return normalize(normal_mat * local_dir);
+}
+
+fn compute_tri_normal(instance_idx: u32, tri_idx: u32, uv: vec2f) -> vec3f
+{
+    let mesh_idx = instances[instance_idx].mesh_idx;
+    let inv_trans = instances[instance_idx].inv_transform;
+
+    let v0 = verts_array[mesh_idx].data[indices_array[mesh_idx].data[tri_idx*3 + 0]];
+    let v1 = verts_array[mesh_idx].data[indices_array[mesh_idx].data[tri_idx*3 + 1]];
+    let v2 = verts_array[mesh_idx].data[indices_array[mesh_idx].data[tri_idx*3 + 2]];
+    let w = 1.0 - uv.x - uv.y;
+
+    let local_normal = normalize(v0.normal*w + v1.normal*uv.x + v2.normal*uv.y);
+    let normal_mat = transpose(mat3x3f(inv_trans[0].xyz, inv_trans[1].xyz, inv_trans[2].xyz));
+    return normalize(normal_mat * local_normal).xyz;
+}
+
+fn compute_tri_geom_normal(instance_idx: u32, tri_idx: u32) -> vec3f
+{
+    let mesh_idx = instances[instance_idx].mesh_idx;
+    let inv_trans = instances[instance_idx].inv_transform;
+
+    let v0 = verts_pos_array[mesh_idx].data[indices_array[mesh_idx].data[tri_idx*3 + 0]];
+    let v1 = verts_pos_array[mesh_idx].data[indices_array[mesh_idx].data[tri_idx*3 + 1]];
+    let v2 = verts_pos_array[mesh_idx].data[indices_array[mesh_idx].data[tri_idx*3 + 2]];
+
+    let local_normal = normalize(cross(v2 - v0, v1 - v0));
+    let normal_mat = transpose(mat3x3f(inv_trans[0].xyz, inv_trans[1].xyz, inv_trans[2].xyz));
+    return normalize(normal_mat * local_normal).xyz;
 }
 
 // Safely wraps values in the [0, 1] range.

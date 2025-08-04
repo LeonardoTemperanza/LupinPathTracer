@@ -1178,7 +1178,7 @@ fn create_pathtracer_scene_bindgroup(device: &wgpu::Device, queue: &wgpu::Queue,
             wgpu::BindGroupEntry { binding: 7,  resource: wgpu::BindingResource::TextureViewArray(textures_array.as_slice()) },
             wgpu::BindGroupEntry { binding: 8,  resource: wgpu::BindingResource::SamplerArray(samplers_array.as_slice()) },
             wgpu::BindGroupEntry { binding: 9,  resource: buffer_resource(&scene.environments) },
-            wgpu::BindGroupEntry { binding: 10, resource: buffer_resource(&scene.environments) },  // TODO TODO
+            wgpu::BindGroupEntry { binding: 10, resource: buffer_resource(&scene.lights.lights) },
             wgpu::BindGroupEntry { binding: 11, resource: wgpu::BindingResource::BufferArray(alias_table_array.as_slice()) },
             wgpu::BindGroupEntry { binding: 12, resource: wgpu::BindingResource::BufferArray(env_alias_table_array.as_slice()) },
         ]
