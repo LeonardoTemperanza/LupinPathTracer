@@ -7,6 +7,12 @@ use wgpu::util::DeviceExt;  // For some extra device traits.
 pub static DEFAULT_PATHTRACER_SRC: &str = include_str!("shaders/pathtracer.wgsl");
 pub static TONEMAPPING_SRC: &str = include_str!("shaders/tonemapping.wgsl");
 
+macro_rules! static_assert {
+    ($($tt:tt)*) => {
+        const _: () = assert!($($tt)*);
+    }
+}
+
 #[derive(Default, Clone, Copy, Debug)]
 #[repr(C)]
 pub struct Vec2
@@ -228,21 +234,34 @@ pub struct TlasNode
 pub struct PushConstants
 {
     pub camera_transform: Mat4,
+    pub camera_lens: f32,
+    pub camera_film: f32,
+    pub camera_aspect: f32,
+    pub camera_focus: f32,
+    pub camera_aperture: f32,
+
+    pub flags: u32,
+
     pub id_offset: [u32; 2],
     pub accum_counter: u32,
-    pub flags: u32,
+
+    // Debug params
     pub heatmap_min: f32,
     pub heatmap_max: f32,
 }
 
-// Debug flags
+static_assert!(std::mem::size_of::<PushConstants>() < MAX_PUSH_CONSTANTS_SIZE as usize);
+
+// Shader behavior flags
 // NOTE: Coupled to shader.
-pub const DEBUG_FLAG_TRI_CHECKS:  u32    = 1 << 0;
-pub const DEBUG_FLAG_AABB_CHECKS: u32    = 1 << 1;
-pub const DEBUG_FLAG_NUM_BOUNCES: u32    = 1 << 2;
-pub const DEBUG_FLAG_FIRST_HIT_ONLY: u32 = 1 << 3;
+pub const FLAG_CAMERA_ORTHO: u32             = 1 << 0;
+pub const FLAG_DEBUG_TRI_CHECKS:  u32    = 1 << 1;
+pub const FLAG_DEBUG_AABB_CHECKS: u32    = 1 << 2;
+pub const FLAG_DEBUG_NUM_BOUNCES: u32    = 1 << 3;
+pub const FLAG_DEBUG_FIRST_HIT_ONLY: u32 = 1 << 4;
 
 // Constants
+pub const MAX_PUSH_CONSTANTS_SIZE: u32 = 128;
 pub const BVH_MAX_DEPTH: i32 = 25;
 pub const MAX_MESHES:    u32 = 15000;
 pub const MAX_ENVS:      u32 = 10;
@@ -267,7 +286,7 @@ pub fn get_required_device_spec()->wgpu::DeviceDescriptor<'static>
             max_storage_buffers_per_shader_stage: MAX_MESHES * NUM_STORAGE_BUFFERS_PER_MESH + MAX_ENVS + 64,
             max_sampled_textures_per_shader_stage: MAX_TEXTURES + 64,
             max_samplers_per_shader_stage: MAX_SAMPLERS + 8,
-            max_push_constant_size: 128,
+            max_push_constant_size: MAX_PUSH_CONSTANTS_SIZE,
             ..Default::default()
         },
         memory_hints: Default::default(),
@@ -485,6 +504,33 @@ impl Default for TileParams
     }
 }
 
+#[derive(Copy, Clone, Debug)]
+pub struct CameraParams
+{
+    pub is_orthographic: bool,
+
+    pub lens: f32,
+    pub film: f32,
+    pub aspect: f32,
+    pub focus: f32,
+    pub aperture: f32,
+}
+
+impl Default for CameraParams
+{
+    fn default() -> Self
+    {
+        return Self {
+            is_orthographic: false,
+            lens:     0.050,
+            film:     0.036,
+            aspect:   1.500,
+            focus:    10000.0,
+            aperture: 0.0,
+        };
+    }
+}
+
 pub struct PathtraceDesc<'a>
 {
     pub scene: &'a Scene,
@@ -492,6 +538,7 @@ pub struct PathtraceDesc<'a>
     pub resources: &'a PathtraceResources,
     pub accum_params: &'a AccumulationParams<'a>,
     pub tile_params: &'a TileParams,
+    pub camera_params: &'a CameraParams,
     pub camera_transform: Mat4,
 }
 
@@ -511,6 +558,7 @@ pub fn pathtrace_scene(device: &wgpu::Device, queue: &wgpu::Queue, desc: &Pathtr
     let render_target = desc.render_target;
     let resources = desc.resources;
     let accum_params = desc.accum_params;
+    let camera_params = desc.camera_params;
     let camera_transform = desc.camera_transform;
 
     let scene_bindgroup = create_pathtracer_scene_bindgroup(device, queue, resources, scene);
@@ -529,14 +577,18 @@ pub fn pathtrace_scene(device: &wgpu::Device, queue: &wgpu::Queue, desc: &Pathtr
         compute_pass.set_bind_group(1, &settings_bindgroup, &[]);
         compute_pass.set_bind_group(2, &output_bindgroup, &[]);
 
-        let push_constants = PushConstants {
-            camera_transform: camera_transform,
-            id_offset: [0, 0],
-            accum_counter: accum_params.accum_counter,
-            flags: 0,
-            heatmap_min: 0.0,
-            heatmap_max: 0.0,
-        };
+        let mut flags: u32 = 0;
+        if camera_params.is_orthographic { flags |= FLAG_CAMERA_ORTHO; }
+
+        let mut push_constants = PushConstants::default();
+        push_constants.camera_transform = camera_transform;
+        push_constants.camera_lens = camera_params.lens;
+        push_constants.camera_film = camera_params.film;
+        push_constants.camera_aspect = camera_params.aspect;
+        push_constants.camera_focus = camera_params.focus;
+        push_constants.camera_aperture = camera_params.aperture;
+        push_constants.flags = flags;
+        push_constants.accum_counter = accum_params.accum_counter;
         compute_pass.set_push_constants(0, to_u8_slice(&[push_constants]));
 
         // NOTE: This is tied to the corresponding value in the shader
@@ -566,6 +618,7 @@ pub fn pathtrace_scene_tiles(device: &wgpu::Device, queue: &wgpu::Queue, desc: &
     let render_target = desc.render_target;
     let resources = desc.resources;
     let accum_params = desc.accum_params;
+    let camera_params = desc.camera_params;
     let camera_transform = desc.camera_transform;
     let tile_size = desc.tile_params.tile_size;
 
@@ -587,17 +640,16 @@ pub fn pathtrace_scene_tiles(device: &wgpu::Device, queue: &wgpu::Queue, desc: &
 
         for i in *tile_counter..u32::min(*tile_counter + tiles_to_render, total_tiles)
         {
-            let push_constants = PushConstants {
-                camera_transform: camera_transform,
-                id_offset: [
-                    (i % num_tiles_x) * tile_size,
-                    (i / num_tiles_x) * tile_size,
-                ],
-                accum_counter: accum_params.accum_counter,
-                flags: 0,
-                heatmap_min: 0.0,
-                heatmap_max: 0.0,
-            };
+            let mut push_constants = PushConstants::default();
+            push_constants.camera_transform = camera_transform;
+            push_constants.camera_lens = camera_params.lens;
+            push_constants.camera_film = camera_params.film;
+            push_constants.camera_aspect = camera_params.aspect;
+            push_constants.camera_focus = camera_params.focus;
+            push_constants.camera_aperture = camera_params.aperture;
+            push_constants.flags = 0;
+            push_constants.id_offset = [ (i % num_tiles_x) * tile_size, (i / num_tiles_x) * tile_size, ];
+            push_constants.accum_counter = accum_params.accum_counter;
             compute_pass.set_push_constants(0, to_u8_slice(&[push_constants]));
 
             // NOTE: This is tied to the corresponding value in the shader
@@ -656,30 +708,27 @@ pub fn pathtrace_scene_debug(device: &wgpu::Device, queue: &wgpu::Queue, scene: 
         {
             DebugVizType::BVHAABBChecks =>
             {
-                debug_flags |= DEBUG_FLAG_AABB_CHECKS;
+                debug_flags |= FLAG_DEBUG_AABB_CHECKS;
             },
             DebugVizType::BVHTriChecks =>
             {
-                debug_flags |= DEBUG_FLAG_TRI_CHECKS;
+                debug_flags |= FLAG_DEBUG_TRI_CHECKS;
             },
             DebugVizType::NumBounces =>
             {
-                debug_flags |= DEBUG_FLAG_NUM_BOUNCES;
+                debug_flags |= FLAG_DEBUG_NUM_BOUNCES;
             },
         }
 
         if debug_desc.first_hit_only {
-            debug_flags |= DEBUG_FLAG_FIRST_HIT_ONLY
+            debug_flags |= FLAG_DEBUG_FIRST_HIT_ONLY
         }
 
-        let push_constants = PushConstants {
-            camera_transform: camera_transform,
-            id_offset: [0, 0],
-            accum_counter: 0,
-            flags: debug_flags,
-            heatmap_min: debug_desc.heatmap_min,
-            heatmap_max: debug_desc.heatmap_max,
-        };
+        let mut push_constants = PushConstants::default();
+        push_constants.camera_transform = camera_transform;
+        push_constants.flags = debug_flags;
+        push_constants.heatmap_min = debug_desc.heatmap_min;
+        push_constants.heatmap_max = debug_desc.heatmap_max;
         compute_pass.set_push_constants(0, to_u8_slice(&[push_constants]));
 
         // NOTE: This is tied to the corresponding value in the shader
@@ -720,14 +769,8 @@ pub fn raycast_albedo(device: &wgpu::Device, queue: &wgpu::Queue, scene: &Scene,
         compute_pass.set_bind_group(1, &settings_bindgroup, &[]);
         compute_pass.set_bind_group(2, &output_bindgroup, &[]);
 
-        let push_constants = PushConstants {
-            camera_transform: camera_transform,
-            id_offset: [0, 0],
-            accum_counter: 0,
-            flags: 0,
-            heatmap_min: 0.0,
-            heatmap_max: 0.0,
-        };
+        let mut push_constants = PushConstants::default();
+        push_constants.camera_transform = camera_transform;
         compute_pass.set_push_constants(0, to_u8_slice(&[push_constants]));
 
         // NOTE: This is tied to the corresponding value in the shader
@@ -760,14 +803,8 @@ pub fn raycast_normals(device: &wgpu::Device, queue: &wgpu::Queue, scene: &Scene
         compute_pass.set_bind_group(1, &settings_bindgroup, &[]);
         compute_pass.set_bind_group(2, &output_bindgroup, &[]);
 
-        let push_constants = PushConstants {
-            camera_transform: camera_transform,
-            id_offset: [0, 0],
-            accum_counter: 0,
-            flags: 0,
-            heatmap_min: 0.0,
-            heatmap_max: 0.0,
-        };
+        let mut push_constants = PushConstants::default();
+        push_constants.camera_transform = camera_transform;
         compute_pass.set_push_constants(0, to_u8_slice(&[push_constants]));
 
         // NOTE: This is tied to the corresponding value in the shader

@@ -3,8 +3,6 @@ use crate::base::*;
 use crate::wgpu_utils::*;
 use crate::renderer::*;
 
-use rand::Rng;
-
 pub struct EnvMapInfo
 {
     pub data: Vec::<Vec4>,
@@ -85,11 +83,6 @@ pub fn build_lights(device: &wgpu::Device, queue: &wgpu::Queue, scene: &SceneCPU
         let alias_table = build_alias_table(&weights);
         let alias_table_buf = upload_storage_buffer(device, queue, to_u8_slice(&alias_table));
         env_alias_tables.push(alias_table_buf);
-    }
-
-    for light in &lights
-    {
-        println!("{:#?}", light);
     }
 
     return Lights {
@@ -182,58 +175,6 @@ pub fn build_alias_table(weights: &[f32]) -> Vec::<AliasBin>
     }
 
     return bins;
-}
-
-// TODO: Turn this into an actual test.
-fn test_alias_table(alias_table: &Vec::<AliasBin>, env_width: u32)
-{
-    println!("test:");
-    struct TestValue
-    {
-        idx: usize,
-        hits: u32
-    }
-    let mut test_values = Vec::<TestValue>::new();
-    let mut rng = rand::thread_rng();
-    for i in 0..1000000
-    {
-        let slot_idx: usize = rng.gen_range(0..alias_table.len()); // inclusive range
-        let rnd: f32 = rng.gen();
-        if rnd >= alias_table[slot_idx].alias_threshold
-        {
-            add_to_test_value_array(&mut test_values, alias_table[slot_idx].alias as usize)
-        }
-        else
-        {
-            add_to_test_value_array(&mut test_values, slot_idx);
-        }
-    }
-
-    println!("results:");
-    test_values.sort_by(|a, b| b.hits.cmp(&a.hits));
-    for value in test_values
-    {
-        println!("x: {}, y: {}, hits: {}, prob: {}", value.idx % env_width as usize, value.idx / env_width as usize, value.hits, alias_table[value.idx].prob);
-    }
-
-    fn add_to_test_value_array(test_values: &mut Vec::<TestValue>, idx: usize)
-    {
-        let mut found = false;
-        for value in test_values.iter_mut()
-        {
-            if value.idx as usize == idx
-            {
-                value.hits += 1;
-                found = true;
-                break;
-            }
-        }
-
-        if !found
-        {
-            test_values.push(TestValue { idx: idx, hits: 1 });
-        }
-    }
 }
 
 // NOTE: This modifies the indices array to change the order of triangles (indices)
@@ -740,5 +681,69 @@ pub fn validate_scene(scene: &SceneCPU, num_textures: u32, num_samplers: u32)
     {
         assert!(env.emission.x >= 0.0 && env.emission.y >= 0.0 && env.emission.z >= 0.0);
         assert!(env.emission_tex_idx < num_textures);
+    }
+}
+
+mod tests
+{
+    use rand::Rng;
+    use super::*;
+
+    #[test]
+    fn test_alias_table()
+    {
+        let weights = [
+            0.2, 0.1, 0.05, 0.8, 1.2, 5.0, 0.1, 0.2, 0.3, 1.0, 1.0, 0.3, 0.35, 0.0,
+        ];
+
+        let mut weights_sum = 0.0;
+        for weight in &weights {
+            weights_sum += weight;
+        }
+
+        let alias_table = build_alias_table(&weights);
+        assert!(alias_table.len() == weights.len());
+
+        for (i, bin) in alias_table.iter().enumerate() {
+            assert!(f32::abs(bin.prob - weights[i] / weights_sum) < 0.01);
+        }
+
+        // Check that the alias probabilities are
+        // correct with a lot of random samples.
+
+        #[derive(Default, Clone, Copy)]
+        struct Record
+        {
+            pub idx: u32,
+            pub hits: u32,
+        }
+
+        let mut hits_per_idx = vec![Record::default(); weights.len()];
+        for (i, v) in hits_per_idx.iter_mut().enumerate() {
+            v.idx = i as u32;
+        }
+
+        let mut rng = rand::thread_rng();
+        const NUM_SAMPLES: u32 = 100000;
+        for i in 0..NUM_SAMPLES
+        {
+            let slot_idx: usize = rng.gen_range(0..alias_table.len()); // inclusive range
+            let rnd: f32 = rng.gen();
+            if rnd >= alias_table[slot_idx].alias_threshold
+            {
+                hits_per_idx[alias_table[slot_idx].alias as usize].hits += 1;
+            }
+            else
+            {
+                hits_per_idx[slot_idx as usize].hits += 1;
+            }
+        }
+
+        for (i, v) in hits_per_idx.iter().enumerate()
+        {
+            let ratio = v.hits as f32 / NUM_SAMPLES as f32;
+            let prob = weights[i] / weights_sum;
+            assert!(f32::abs(ratio - prob) < 0.01);
+        }
     }
 }

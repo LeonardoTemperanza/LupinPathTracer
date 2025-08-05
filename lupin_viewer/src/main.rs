@@ -449,6 +449,7 @@ impl<'a> AppState<'a>
                                     accum_counter: self.accum_counter,
                                 },
                                 tile_params: &Default::default(),
+                                camera_params: &Default::default(),
                                 camera_transform: camera_transform,
                             });
                         }
@@ -465,7 +466,6 @@ impl<'a> AppState<'a>
                 {
                     if self.accum_counter < self.max_accums
                     {
-                        /*
                         lp::pathtrace_scene_tiles(&self.device, &self.queue, &lp::PathtraceDesc {
                             scene: &self.scene,
                             render_target: &self.output_textures[self.output_tex_front],
@@ -475,21 +475,9 @@ impl<'a> AppState<'a>
                                 accum_counter: self.accum_counter,
                             },
                             tile_params: &Default::default(),
+                            camera_params: &Default::default(),
                             camera_transform: camera_transform,
                         }, &mut self.tile_idx, 3);
-                        */
-
-                        lp::pathtrace_scene(&self.device, &self.queue, &lp::PathtraceDesc {
-                            scene: &self.scene,
-                            render_target: &self.output_textures[self.output_tex_front],
-                            resources: &self.pathtrace_resources,
-                            accum_params: &lp::AccumulationParams {
-                                prev_frame: Some(&self.output_textures[self.output_tex_back]),
-                                accum_counter: self.accum_counter,
-                            },
-                            tile_params: &Default::default(),
-                            camera_transform: camera_transform,
-                        });
                     }
 
                     lp::apply_tonemapping(&self.device, &self.queue, &lp::TonemapDesc {

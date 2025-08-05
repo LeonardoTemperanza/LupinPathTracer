@@ -31,11 +31,18 @@
 struct PushConstants
 {
     camera_transform: mat4x4f,
+    camera_lens: f32,
+    camera_film: f32,
+    camera_aspect: f32,
+    camera_focus: f32,
+    camera_aperture: f32,
+
+    flags: u32,
+
     id_offset: vec2u,
     accum_counter: u32,  // If this is 0, nothing is taken from the previous frame.
 
     // Debug params
-    flags: u32,
     heatmap_min: f32,
     heatmap_max: f32,
 }
@@ -154,12 +161,14 @@ struct TlasNode
 }
 
 // NOTE: Coupled to constants in renderer.rs
-const FLAG_DEBUG_TRI_CHECKS:  u32       = 1 << 0;
-const FLAG_DEBUG_AABB_CHECKS: u32       = 1 << 1;
-const FLAG_DEBUG_NUM_BOUNCES: u32       = 1 << 2;
-const FLAG_DEBUG_FIRST_HIT_ONLY: u32    = 1 << 3;
-const FLAG_ENVS_EMPTY: u32              = 1 << 4;
-const FLAG_LIGHTS_EMPTY: u32            = 1 << 5;
+const FLAG_CAMERA_ORTHO: u32            = 1 << 0;
+
+const FLAG_DEBUG_TRI_CHECKS:  u32       = 1 << 1;
+const FLAG_DEBUG_AABB_CHECKS: u32       = 1 << 2;
+const FLAG_DEBUG_NUM_BOUNCES: u32       = 1 << 3;
+const FLAG_DEBUG_FIRST_HIT_ONLY: u32    = 1 << 4;
+const FLAG_ENVS_EMPTY: u32              = 1 << 5;
+const FLAG_LIGHTS_EMPTY: u32            = 1 << 6;
 
 //////////////////////////////////////////////
 // Entrypoints
@@ -311,6 +320,24 @@ fn gbuffer_normals_main(@builtin(local_invocation_id) local_id: vec3u, @builtin(
 
 // Pixel offset is expected to be in the [-0.5, 0.5] range.
 fn compute_camera_ray(global_id: vec2u, output_dim: vec2u, pixel_offset: vec2f) -> Ray
+{
+    let frag_coord = vec2f(global_id.xy) + 0.5f;
+    let resolution = vec2f(output_dim);
+
+    var nudged_uv = frag_coord + pixel_offset;  // Move 0.5 to the left and right
+    nudged_uv = clamp(nudged_uv, vec2(0.0f), resolution.xy) / resolution;
+
+    let uv = frag_coord / resolution;
+    var coord = 2.0f * nudged_uv - 1.0f;
+    coord.y *= -resolution.y / resolution.x;
+
+    let look_at = normalize(vec3(coord, 1.0f));
+
+    let res = Ray(vec3f(0.0f, 0.0f, 0.0f), look_at, 1.0f / look_at);
+    return transform_ray(res, constants.camera_transform);
+}
+
+fn compute_camera_ray_fancy(global_id: vec2u, output_dim: vec2u, pixel_offset: vec2f) -> Ray
 {
     let frag_coord = vec2f(global_id.xy) + 0.5f;
     let resolution = vec2f(output_dim);
@@ -527,9 +554,6 @@ fn pathtrace(local_id: vec3u, start_ray: Ray) -> vec3f
 
     return radiance;
 }
-
-// Multiple Importance Sampling.
-fn pathtrace_mis(
 
 struct MaterialPoint
 {
