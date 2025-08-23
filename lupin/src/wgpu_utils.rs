@@ -79,11 +79,48 @@ pub fn upload_storage_buffer(device: &wgpu::Device, queue: &wgpu::Queue, buf: &[
     return wgpu_buffer
 }
 
+pub fn upload_storage_buffer_with_name(device: &wgpu::Device, queue: &wgpu::Queue, buf: &[u8], label: &str)->wgpu::Buffer
+{
+    let wgpu_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some(label),
+        size: buf.len() as u64,
+        usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::STORAGE,
+        mapped_at_creation: false,
+    });
+
+    queue.write_buffer(&wgpu_buffer, 0, to_u8_slice(&buf));
+    return wgpu_buffer
+}
+
 pub fn create_empty_storage_buffer(device: &wgpu::Device)->wgpu::Buffer
 {
     let wgpu_buffer = device.create_buffer(&wgpu::BufferDescriptor {
         label: None,
-        size: 64,
+        size: 0,
+        usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::STORAGE,
+        mapped_at_creation: false,
+    });
+
+    return wgpu_buffer
+}
+
+pub fn create_storage_buffer_with_size(device: &wgpu::Device, size: usize) -> wgpu::Buffer
+{
+    let wgpu_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+        label: None,
+        size: size as u64,
+        usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::STORAGE,
+        mapped_at_creation: false,
+    });
+
+    return wgpu_buffer
+}
+
+pub fn create_storage_buffer_with_size_and_name(device: &wgpu::Device, size: usize, name: &str) -> wgpu::Buffer
+{
+    let wgpu_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some(name),
+        size: size as u64,
         usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::STORAGE,
         mapped_at_creation: false,
     });
@@ -128,4 +165,18 @@ pub fn create_white_texture(device: &wgpu::Device, queue: &wgpu::Queue) -> wgpu:
     );
 
     return texture;
+}
+
+pub fn create_linear_sampler(device: &wgpu::Device) -> wgpu::Sampler
+{
+    return device.create_sampler(&wgpu::SamplerDescriptor {
+        label: None,
+        address_mode_u: wgpu::AddressMode::Repeat,
+        address_mode_v: wgpu::AddressMode::Repeat,
+        address_mode_w: wgpu::AddressMode::Repeat,
+        mag_filter: wgpu::FilterMode::Linear,
+        min_filter: wgpu::FilterMode::Linear,
+        mipmap_filter: wgpu::FilterMode::Linear,
+        ..Default::default()
+    });
 }

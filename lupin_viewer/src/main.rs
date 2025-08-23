@@ -173,15 +173,22 @@ pub struct AppState<'a>
     pub show_normals_when_moving: bool,
     pub should_rebuild_pathtrace_resources: bool,
     pub controlling_camera: bool,
+    pub camera_params: lp::CameraParams,
+    pub keep_aspect_ratio: bool,
+    pub ui_panel_width: u32,
+    pub cam_speed_multiplier: f32,
 
     // Camera
     pub cam_pos: lp::Vec3,
     pub cam_rot: lp::Quat,
+    pub cam_transform: lp::Mat4,
 
     // Lupin resources,
     pub pathtrace_resources: lp::PathtraceResources,
     pub tonemap_resources: lp::TonemapResources,
     pub scene: lp::Scene,
+    pub scene_cameras: Vec<SceneCamera>,
+    pub selected_cam: i32,  // If -1, no cam is selected (free-roam).
 
     // Textures
     pub output_textures: [wgpu::Texture; 2],
@@ -200,8 +207,8 @@ impl<'a> AppState<'a>
 {
     pub fn new(device: &'a wgpu::Device, queue: &'a wgpu::Queue, window: &'a winit::window::Window) -> Self
     {
-        const DEFAULT_SAMPLES_PER_PIXEL: u32 = 1;
-        const DEFAULT_MAX_BOUNCES: u32 = 5;
+        const DEFAULT_SAMPLES_PER_PIXEL: u32 = 5;
+        const DEFAULT_MAX_BOUNCES: u32 = 10;
 
         let pathtrace_resources = lp::build_pathtrace_resources(&device, &lp::BakedPathtraceParams {
             with_runtime_checks: true,
@@ -213,7 +220,9 @@ impl<'a> AppState<'a>
         let width = window.inner_size().width;
         let height = window.inner_size().height;
 
-        let scene = build_scene(&device, &queue);
+        let (scene, scene_cameras) = (build_scene(&device, &queue), Vec::<SceneCamera>::new());
+        //let (scene, scene_cameras) = (build_scene_empty(&device, &queue), Vec::<SceneCamera>::new());
+        let (scene, scene_cameras) = load_scene_json(std::path::Path::new("yocto-scenes/bathroom1/bathroom1.json"), &device, &queue).unwrap();
 
         let output_textures = [
             device.create_texture(&wgpu::TextureDescriptor {
@@ -282,15 +291,22 @@ impl<'a> AppState<'a>
             show_normals_when_moving: true,
             should_rebuild_pathtrace_resources: false,
             controlling_camera: false,
+            camera_params: Default::default(),
+            selected_cam: -1,
+            keep_aspect_ratio: true,
+            ui_panel_width: 0,
+            cam_speed_multiplier: 1.0,
 
             // Camera
-            cam_pos: lp::Vec3 { x: 0.0, y: 1.0, z: -3.0 },
+            cam_pos: Default::default(),
             cam_rot: Default::default(),
+            cam_transform: Default::default(),
 
             // Lupin resources
             pathtrace_resources,
             tonemap_resources,
             scene,
+            scene_cameras,
 
             // Textures
             output_textures,
@@ -309,11 +325,19 @@ impl<'a> AppState<'a>
     pub fn update_and_render(&mut self, egui_ctx: &egui::Context, egui_state: &mut egui_winit::State, egui_renderer: &mut egui_wgpu::Renderer, swapchain: &wgpu::Texture, input: &Input, delta_time: f32)
     {
         // Update
-        self.update_camera(input, delta_time);
+        if self.selected_cam == -1  // Free-roam
+        {
+            self.update_camera(input, delta_time);
+            self.cam_transform = lp::xform_to_matrix(self.cam_pos, self.cam_rot, lp::Vec3 { x: 1.0, y: 1.0, z: 1.0 });
+        }
 
         self.controlling_camera = input.rmouse.pressing;
-        if input.rmouse.pressing {
+        if input.rmouse.pressing
+        {
             self.reset_accumulation();
+            if self.selected_cam != -1 {
+                self.switch_to_freeroam();
+            }
         }
 
         // Consume the accumulated egui inputs
@@ -401,28 +425,55 @@ impl<'a> AppState<'a>
 
     fn render_scene(&mut self, swapchain: &wgpu::Texture)
     {
-        let camera_transform = lp::xform_to_matrix(self.cam_pos, self.cam_rot, lp::Vec3 { x: 1.0, y: 1.0, z: 1.0 });
-        if camera_transform.m != self.prev_cam_transform.m
+        if self.cam_transform.m != self.prev_cam_transform.m
         {
             self.reset_accumulation();
         }
-        self.prev_cam_transform = camera_transform;
+        self.prev_cam_transform = self.cam_transform;
 
+        let viewport = lp::Viewport {
+            x: self.ui_panel_width as f32,
+            y: 0.0,
+            w: swapchain.size().width as f32 - self.ui_panel_width as f32,
+            h: swapchain.size().height as f32,
+        };
+
+        // TODO: @cleanup PathtraceDesc is repeated many times.
         match self.render_type
         {
             RenderType::Albedo =>
             {
-                lp::raycast_albedo(&self.device, &self.queue, &self.scene, &self.output_rgba8_unorm,
-                                   &self.pathtrace_resources, camera_transform.into());
-                lp::convert_to_ldr_no_tonemap(&self.device, &self.queue, &self.tonemap_resources,
-                                              &self.output_rgba8_unorm, &swapchain);
+                lp::raycast_albedo(&self.device, &self.queue, &lp::PathtraceDesc {
+                    scene: &self.scene,
+                    render_target: &self.output_rgba8_unorm,
+                    resources: &self.pathtrace_resources,
+                    accum_params: &lp::AccumulationParams {
+                        prev_frame: Some(&self.output_textures[self.output_tex_back]),
+                        accum_counter: self.accum_counter,
+                    },
+                    tile_params: &Default::default(),
+                    camera_params: &self.camera_params,
+                    camera_transform: self.cam_transform,
+                });
+                lp::blit_texture_and_fit_aspect(&self.device, &self.queue, &self.tonemap_resources,
+                                                &self.output_rgba8_unorm, &swapchain, Some(viewport));
             }
             RenderType::Normals =>
             {
-                lp::raycast_normals(&self.device, &self.queue, &self.scene, &self.output_rgba8_snorm,
-                                    &self.pathtrace_resources, camera_transform.into());
-                lp::convert_to_ldr_no_tonemap(&self.device, &self.queue, &self.tonemap_resources,
-                                              &self.output_rgba8_snorm, &swapchain);
+                lp::raycast_normals(&self.device, &self.queue, &lp::PathtraceDesc {
+                    scene: &self.scene,
+                    render_target: &self.output_rgba8_snorm,
+                    resources: &self.pathtrace_resources,
+                    accum_params: &lp::AccumulationParams {
+                        prev_frame: Some(&self.output_textures[self.output_tex_back]),
+                        accum_counter: self.accum_counter,
+                    },
+                    tile_params: &Default::default(),
+                    camera_params: &self.camera_params,
+                    camera_transform: self.cam_transform,
+                });
+                lp::blit_texture_and_fit_aspect(&self.device, &self.queue, &self.tonemap_resources,
+                                                &self.output_rgba8_snorm, &swapchain, Some(viewport));
             }
             RenderType::Pathtrace =>
             {
@@ -431,10 +482,20 @@ impl<'a> AppState<'a>
                 {
                     if self.show_normals_when_moving
                     {
-                        lp::raycast_normals(&self.device, &self.queue, &self.scene, &self.output_rgba8_snorm,
-                                            &self.pathtrace_resources, camera_transform.into());
-                        lp::convert_to_ldr_no_tonemap(&self.device, &self.queue, &self.tonemap_resources,
-                                                      &self.output_rgba8_snorm, &swapchain);
+                        lp::raycast_normals(&self.device, &self.queue, &lp::PathtraceDesc {
+                            scene: &self.scene,
+                            render_target: &self.output_rgba8_snorm,
+                            resources: &self.pathtrace_resources,
+                            accum_params: &lp::AccumulationParams {
+                                prev_frame: Some(&self.output_textures[self.output_tex_back]),
+                                accum_counter: self.accum_counter,
+                            },
+                            tile_params: &Default::default(),
+                            camera_params: &self.camera_params,
+                            camera_transform: self.cam_transform,
+                        });
+                        lp::blit_texture_and_fit_aspect(&self.device, &self.queue, &self.tonemap_resources,
+                                                        &self.output_rgba8_snorm, &swapchain, Some(viewport));
                     }
                     else
                     {
@@ -449,17 +510,17 @@ impl<'a> AppState<'a>
                                     accum_counter: self.accum_counter,
                                 },
                                 tile_params: &Default::default(),
-                                camera_params: &Default::default(),
-                                camera_transform: camera_transform,
+                                camera_params: &self.camera_params,
+                                camera_transform: self.cam_transform,
                             });
                         }
 
-                        lp::apply_tonemapping(&self.device, &self.queue, &lp::TonemapDesc {
+                        lp::tonemap_and_fit_aspect(&self.device, &self.queue, &lp::TonemapDesc {
                             resources: &self.tonemap_resources,
                             hdr_texture: &self.output_textures[self.output_tex_front],
                             render_target: &swapchain,
                             tonemap_params: &self.tonemap_params,
-                        });
+                        }, Some(viewport));
                     }
                 }
                 else
@@ -475,17 +536,17 @@ impl<'a> AppState<'a>
                                 accum_counter: self.accum_counter,
                             },
                             tile_params: &Default::default(),
-                            camera_params: &Default::default(),
-                            camera_transform: camera_transform,
+                            camera_params: &self.camera_params,
+                            camera_transform: self.cam_transform,
                         }, &mut self.tile_idx, 3);
                     }
 
-                    lp::apply_tonemapping(&self.device, &self.queue, &lp::TonemapDesc {
+                    lp::tonemap_and_fit_aspect(&self.device, &self.queue, &lp::TonemapDesc {
                         resources: &self.tonemap_resources,
                         hdr_texture: &self.output_textures[self.output_tex_front],
                         render_target: &swapchain,
                         tonemap_params: &self.tonemap_params,
-                    });
+                    }, Some(viewport));
                 }
 
                 // Swap output textures
@@ -509,10 +570,21 @@ impl<'a> AppState<'a>
                     first_hit_only: !self.debug_viz.multibounce,
                 };
 
-                lp::pathtrace_scene_debug(&self.device, &self.queue, &self.scene, &self.output_rgba8_unorm,
-                                          &self.pathtrace_resources, camera_transform.into(), &debug_desc);
-                lp::convert_to_ldr_no_tonemap(&self.device, &self.queue, &self.tonemap_resources,
-                                              &self.output_rgba8_unorm, &swapchain);
+                lp::pathtrace_scene_debug(&self.device, &self.queue, &lp::PathtraceDesc {
+                    scene: &self.scene,
+                    render_target: &self.output_rgba8_unorm,
+                    resources: &self.pathtrace_resources,
+                    accum_params: &lp::AccumulationParams {
+                        prev_frame: Some(&self.output_textures[self.output_tex_back]),
+                        accum_counter: self.accum_counter,
+                    },
+                    tile_params: &Default::default(),
+                    camera_params: &self.camera_params,
+                    camera_transform: self.cam_transform,
+                }, &debug_desc);
+
+                lp::blit_texture_and_fit_aspect(&self.device, &self.queue, &self.tonemap_resources,
+                                               &self.output_rgba8_unorm, &swapchain, Some(viewport));
             }
             RenderType::AABBChecks =>
             {
@@ -523,10 +595,21 @@ impl<'a> AppState<'a>
                     first_hit_only: !self.debug_viz.multibounce,
                 };
 
-                lp::pathtrace_scene_debug(&self.device, &self.queue, &self.scene, &self.output_rgba8_unorm,
-                                          &self.pathtrace_resources, camera_transform.into(), &debug_desc);
-                lp::convert_to_ldr_no_tonemap(&self.device, &self.queue, &self.tonemap_resources,
-                                              &self.output_rgba8_unorm, &swapchain);
+                lp::pathtrace_scene_debug(&self.device, &self.queue, &lp::PathtraceDesc {
+                    scene: &self.scene,
+                    render_target: &self.output_rgba8_unorm,
+                    resources: &self.pathtrace_resources,
+                    accum_params: &lp::AccumulationParams {
+                        prev_frame: Some(&self.output_textures[self.output_tex_back]),
+                        accum_counter: self.accum_counter,
+                    },
+                    tile_params: &Default::default(),
+                    camera_params: &self.camera_params,
+                    camera_transform: self.cam_transform,
+                }, &debug_desc);
+
+                lp::blit_texture_and_fit_aspect(&self.device, &self.queue, &self.tonemap_resources,
+                                              &self.output_rgba8_unorm, &swapchain, Some(viewport));
             }
             RenderType::NumBounces =>
             {
@@ -537,10 +620,21 @@ impl<'a> AppState<'a>
                     first_hit_only: !self.debug_viz.multibounce,
                 };
 
-                lp::pathtrace_scene_debug(&self.device, &self.queue, &self.scene, &self.output_rgba8_unorm,
-                                          &self.pathtrace_resources, camera_transform.into(), &debug_desc);
-                lp::convert_to_ldr_no_tonemap(&self.device, &self.queue, &self.tonemap_resources,
-                                              &self.output_rgba8_unorm, &swapchain);
+                lp::pathtrace_scene_debug(&self.device, &self.queue, &lp::PathtraceDesc {
+                    scene: &self.scene,
+                    render_target: &self.output_rgba8_unorm,
+                    resources: &self.pathtrace_resources,
+                    accum_params: &lp::AccumulationParams {
+                        prev_frame: Some(&self.output_textures[self.output_tex_back]),
+                        accum_counter: self.accum_counter,
+                    },
+                    tile_params: &Default::default(),
+                    camera_params: &self.camera_params,
+                    camera_transform: self.cam_transform,
+                }, &debug_desc);
+
+                lp::blit_texture_and_fit_aspect(&self.device, &self.queue, &self.tonemap_resources,
+                                                &self.output_rgba8_unorm, &swapchain, Some(viewport));
             }
         }
     }
@@ -613,7 +707,7 @@ impl<'a> AppState<'a>
 
         unsafe {
             CUR_VEL = approach_linear(CUR_VEL, target_vel, move_accel * delta_time);
-            self.cam_pos += CUR_VEL * delta_time;
+            self.cam_pos += CUR_VEL * self.cam_speed_multiplier * delta_time;
         }
 
         fn approach_linear(cur: lp::Vec3, target: lp::Vec3, delta: f32) -> lp::Vec3
@@ -628,6 +722,15 @@ impl<'a> AppState<'a>
 
     fn resize_callback(&mut self, new_width: u32, new_height: u32)
     {
+        //self.reset_accumulation();
+        //resize_texture(&self.device, &mut self.output_textures[0], new_width, new_height);
+        //resize_texture(&self.device, &mut self.output_textures[1], new_width, new_height);
+        //resize_texture(&self.device, &mut self.output_rgba8_unorm, new_width, new_height);
+        //resize_texture(&self.device, &mut self.output_rgba8_snorm, new_width, new_height);
+    }
+
+    fn resize_output_textures(&mut self, new_width: u32, new_height: u32)
+    {
         self.reset_accumulation();
         resize_texture(&self.device, &mut self.output_textures[0], new_width, new_height);
         resize_texture(&self.device, &mut self.output_textures[1], new_width, new_height);
@@ -637,96 +740,234 @@ impl<'a> AppState<'a>
 
     fn update_ui(&mut self, egui_ctx: &egui::Context)
     {
-        egui::SidePanel::left("backend_panel").resizable(false).show(egui_ctx, |ui| {
-            ui.add_space(4.0);
-            ui.vertical_centered(|ui| {
-                ui.heading("Settings");
-            });
+        let panel = egui::SidePanel::left("settings_panel").resizable(false).show(egui_ctx, |ui| {
+            egui::ScrollArea::vertical().auto_shrink([false; 2]).show(ui, |ui| {
+                ui.add_space(4.0);
+                ui.vertical_centered(|ui| {
+                    ui.heading("Settings");
+                });
 
-            ui.separator();
-            ui.add_space(12.0);
+                ui.separator();
+                ui.add_space(12.0);
 
-            ui.heading("Visualization:");
-            ui.add_space(4.0);
-            {
-                let changed = self.ui_render_type(ui);
-
-                match self.render_type
+                ui.heading("Visualization:");
+                ui.add_space(4.0);
                 {
-                    RenderType::Albedo => {}
-                    RenderType::Normals => {}
-                    RenderType::Pathtrace =>
+                    let changed = self.ui_render_type(ui);
+
+                    match self.render_type
                     {
-                        ui.horizontal(|ui| {
-                            let response = ui.add(egui::DragValue::new(&mut self.samples_per_pixel).range(1..=200));
-                            if response.changed() { self.should_rebuild_pathtrace_resources = true; }
-                            ui.label("Samples per pixel");
-                        });
-
-                        ui.horizontal(|ui| {
-                            let response = ui.add(egui::DragValue::new(&mut self.max_bounces).range(1..=200));
-                            if response.changed() { self.should_rebuild_pathtrace_resources = true; }
-                            ui.label("Max bounces");
-                        });
-
-                        ui.horizontal(|ui| {
-                            let response = ui.add(egui::DragValue::new(&mut self.max_accums).range(1..=10000));
-                            ui.label("Max accumulations");
-                        });
-
-                        ui.checkbox(&mut self.show_normals_when_moving, "Show normals when moving");
-
-                        egui::CollapsingHeader::new("Stats").show(ui, |ui| {
-                            ui.label(format!("Iteration: {:?}", self.accum_counter));
-                            ui.label(format!("Tile: {:?}", self.tile_idx));
-                        });
-                    }
-                    RenderType::TriChecks =>
-                    {
-                        ui.checkbox(&mut self.debug_viz.multibounce, "Multiple bounces");
-
-                        if changed {
-                            (self.debug_viz.heatmap_min, self.debug_viz.heatmap_max) = default_tri_check_heatmap_params();
+                        RenderType::Albedo => {}
+                        RenderType::Normals => {}
+                        RenderType::Pathtrace =>
+                        {
+                            ui.checkbox(&mut self.show_normals_when_moving, "Show normals when moving");
                         }
+                        RenderType::TriChecks =>
+                        {
+                            ui.checkbox(&mut self.debug_viz.multibounce, "Multiple bounces");
 
-                        self.ui_heatmap_params(ui);
-                    }
-                    RenderType::AABBChecks =>
-                    {
-                        ui.checkbox(&mut self.debug_viz.multibounce, "Multiple bounces");
+                            if changed {
+                                (self.debug_viz.heatmap_min, self.debug_viz.heatmap_max) = default_tri_check_heatmap_params();
+                            }
 
-                        if changed {
-                            (self.debug_viz.heatmap_min, self.debug_viz.heatmap_max) = default_aabb_check_heatmap_params();
+                            self.ui_heatmap_params(ui);
                         }
+                        RenderType::AABBChecks =>
+                        {
+                            ui.checkbox(&mut self.debug_viz.multibounce, "Multiple bounces");
 
-                        self.ui_heatmap_params(ui);
-                    }
-                    RenderType::NumBounces =>
-                    {
-                        if changed {
-                            (self.debug_viz.heatmap_min, self.debug_viz.heatmap_max) = default_num_bounces_heatmap_params();
+                            if changed {
+                                (self.debug_viz.heatmap_min, self.debug_viz.heatmap_max) = default_aabb_check_heatmap_params();
+                            }
+
+                            self.ui_heatmap_params(ui);
                         }
+                        RenderType::NumBounces =>
+                        {
+                            if changed {
+                                (self.debug_viz.heatmap_min, self.debug_viz.heatmap_max) = default_num_bounces_heatmap_params();
+                            }
 
-                        self.ui_heatmap_params(ui);
+                            self.ui_heatmap_params(ui);
+                        }
+                    }
+
+                    ui.horizontal(|ui| {
+                        ui.add(egui::DragValue::new(&mut self.cam_speed_multiplier).range(0.1..=10.0).speed(0.01));
+                        ui.label("Camera speed multiplier");
+                    });
+                }
+
+                ui.add_space(12.0);
+                ui.separator();
+                ui.add_space(12.0);
+
+                ui.heading("Pathtrace settings:");
+                ui.add_space(4.0);
+                {
+                    ui.horizontal(|ui| {
+                        let response = ui.add(egui::DragValue::new(&mut self.samples_per_pixel).range(1..=200));
+                        if response.changed() { self.should_rebuild_pathtrace_resources = true; }
+                        ui.label("Samples per pixel");
+                    });
+
+                    ui.horizontal(|ui| {
+                        let response = ui.add(egui::DragValue::new(&mut self.max_bounces).range(1..=200));
+                        if response.changed() { self.should_rebuild_pathtrace_resources = true; }
+                        ui.label("Max bounces");
+                    });
+
+                    ui.horizontal(|ui| {
+                        ui.add(egui::DragValue::new(&mut self.max_accums).range(1..=10000));
+                        ui.label("Max accumulations");
+                    });
+
+                    egui::CollapsingHeader::new("Stats").id_source("stats_pathtrace").show(ui, |ui| {
+                        ui.label(format!("Iteration: {:?}", self.accum_counter));
+                        ui.label(format!("Tile: {:?}", self.tile_idx));
+                    });
+                }
+
+                ui.add_space(12.0);
+                ui.separator();
+                ui.add_space(12.0);
+
+                let old_camera_params = self.camera_params;
+
+                ui.heading("Camera:");
+                ui.add_space(4.0);
+                {
+                    ui.checkbox(&mut self.camera_params.is_orthographic, "Orthographic");
+
+                    ui.horizontal(|ui| {
+                        ui.add(egui::DragValue::new(&mut self.camera_params.lens).range(0.0..=5.0).speed(0.0001));
+                        ui.label("Lens");
+                    });
+
+                    ui.horizontal(|ui| {
+                        ui.add(egui::DragValue::new(&mut self.camera_params.film).range(0.0..=5.0).speed(0.0001));
+                        ui.label("Film");
+                    });
+
+                    ui.horizontal(|ui| {
+                        ui.add(egui::DragValue::new(&mut self.camera_params.aspect).range(0.0..=100.0).speed(0.01));
+                        ui.label("Aspect");
+                    });
+
+                    ui.horizontal(|ui| {
+                        ui.add(egui::DragValue::new(&mut self.camera_params.focus).range(0.0..=50000.0).speed(0.1));
+                        ui.label("Focus");
+                    });
+
+                    ui.horizontal(|ui| {
+                        ui.add(egui::DragValue::new(&mut self.camera_params.aperture).range(0.0..=5.0).speed(0.0001));
+                        ui.label("Aperture");
+                    });
+
+                    if ui.button("Reset").clicked() {
+                        self.camera_params = Default::default();
                     }
                 }
-            }
 
-            ui.add_space(12.0);
-            ui.separator();
-            ui.add_space(12.0);
+                if old_camera_params != self.camera_params
+                {
+                    self.reset_accumulation();
+                    self.switch_to_freeroam();
+                }
 
-            ui.heading("Tonemapping:");
-            ui.add_space(4.0);
-            {
-                self.ui_tonemap_operator(ui);
+                ui.add_space(12.0);
+                ui.separator();
+                ui.add_space(12.0);
 
-                ui.horizontal(|ui| {
-                    ui.add(egui::DragValue::new(&mut self.tonemap_params.exposure).speed(0.05));
-                    ui.label("Exposure");
-                });
-            }
+                ui.heading("Tonemapping:");
+                ui.add_space(4.0);
+                {
+                    self.ui_tonemap_operator(ui);
+
+                    ui.horizontal(|ui| {
+                        ui.add(egui::DragValue::new(&mut self.tonemap_params.exposure).speed(0.05));
+                        ui.label("Exposure");
+                    });
+                }
+
+                ui.add_space(12.0);
+                ui.separator();
+                ui.add_space(12.0);
+
+                ui.heading("Scene:");
+                ui.add_space(4.0);
+                {
+                    if ui.button("Load scene").clicked()
+                    {
+                        if let Some(path) = rfd::FileDialog::new()
+                            .add_filter("json", &["json"])
+                            .pick_file()
+                        {
+                            (self.scene, self.scene_cameras) = load_scene_json(&path, self.device, self.queue).unwrap();
+                            self.reset_accumulation();
+                        }
+                    }
+
+                    for i in 0..self.scene_cameras.len()
+                    {
+                        let selected = self.selected_cam == i as i32;
+                        if ui.add(egui::RadioButton::new(selected, format!("Camera {}", i+1))).clicked()
+                        {
+                            self.switch_to_cam(i as i32);
+                            println!("clicked {}", i);
+                        }
+                    }
+
+                    ui.add(egui::RadioButton::new(self.selected_cam == -1, "Free-roam"));
+
+                    egui::CollapsingHeader::new("Stats").id_source("stats_scene").show(ui, |ui| {
+                        ui.label(format!("Num instances: {:?}", self.scene.instances.size() as usize / std::mem::size_of::<lp::Instance>()));
+                    });
+                }
+
+                ui.add_space(12.0);
+                ui.separator();
+                ui.add_space(12.0);
+
+                ui.heading("Result image:");
+                ui.add_space(4.0);
+                {
+                    let mut output_res_x = self.output_textures[self.output_tex_back].size().width;
+                    let mut output_res_y = self.output_textures[self.output_tex_back].size().height;
+                    let old_output_res_x = output_res_x;
+                    let old_output_res_y = output_res_y;
+
+                    ui.checkbox(&mut self.keep_aspect_ratio, "Keep aspect ratio");
+                    ui.horizontal(|ui| {
+                        ui.add(egui::DragValue::new(&mut output_res_x).range(1..=10000).speed(1));
+                        ui.label("Image size width");
+                    });
+                    ui.horizontal(|ui| {
+                        ui.add(egui::DragValue::new(&mut output_res_y).range(1..=10000).speed(1));
+                        ui.label("Image size height");
+                    });
+
+                    if self.keep_aspect_ratio
+                    {
+                        if output_res_y != old_output_res_y {
+                            output_res_x = u32::max(1, (output_res_y as f32 * self.camera_params.aspect) as u32);
+                        } else {
+                            output_res_y = u32::max(1, (output_res_x as f32 / self.camera_params.aspect) as u32);
+                        }
+                    }
+
+                    if output_res_x != old_output_res_x || output_res_y != old_output_res_y
+                    {
+                        self.reset_accumulation();
+                        self.resize_output_textures(output_res_x, output_res_y);
+                    }
+                }
+            });
         });
+
+        let pixels_per_point = egui_ctx.pixels_per_point();
+        self.ui_panel_width = (panel.response.rect.width() * pixels_per_point) as u32;
     }
 
     fn ui_render_type(&mut self, ui: &mut egui::Ui) -> bool
@@ -747,7 +988,7 @@ impl<'a> AppState<'a>
 
     fn ui_heatmap_params(&mut self, ui: &mut egui::Ui)
     {
-        ui_min_max(ui, "Heatmap:", &mut self.debug_viz.heatmap_min, &mut self.debug_viz.heatmap_max, 0.0..=200.0);
+        ui_min_max(ui, "Heatmap:", &mut self.debug_viz.heatmap_min, &mut self.debug_viz.heatmap_max, 0.0..=1000.0);
     }
 
     fn ui_tonemap_operator(&mut self, ui: &mut egui::Ui)
@@ -844,6 +1085,29 @@ impl<'a> AppState<'a>
         self.accum_counter = 0;
         self.tile_idx = 0;
     }
+
+    fn switch_to_freeroam(&mut self)
+    {
+        if self.selected_cam == -1 { return; }
+        self.selected_cam = -1;
+        let old = self.cam_rot;
+        self.cam_pos = Default::default();
+        self.cam_rot = Default::default();
+        (self.cam_pos, self.cam_rot, _) = lp::matrix_to_xform(self.cam_transform);
+        self.cam_transform = Default::default();
+        if old.x != self.cam_rot.x || old.y != self.cam_rot.y ||old.z != self.cam_rot.z || old.w != self.cam_rot.w
+        {
+            println!("changed");
+        }
+    }
+
+    fn switch_to_cam(&mut self, cam_idx: i32)
+    {
+        if cam_idx < 0 { return; }
+        self.selected_cam = cam_idx;
+        self.cam_transform = self.scene_cameras[cam_idx as usize].transform;
+        self.camera_params = self.scene_cameras[cam_idx as usize].params;
+    }
 }
 
 fn resize_texture(device: &wgpu::Device, texture: &mut wgpu::Texture, new_width: u32, new_height: u32)
@@ -870,7 +1134,7 @@ fn default_tri_check_heatmap_params() -> (f32, f32)
 
 fn default_aabb_check_heatmap_params() -> (f32, f32)
 {
-    return (0.0, 1000.0);
+    return (0.0, 400.0);
 }
 
 fn default_num_bounces_heatmap_params() -> (f32, f32)

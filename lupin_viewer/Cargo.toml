@@ -12,6 +12,7 @@ winit = "0.30.7"
 egui  = "0.31.1"
 egui-wgpu  = "0.31.1"
 egui-winit = "0.31.1"
+rfd = "0.14"  # File dialog
 
 # Serialization
 tobj  = "4.0.2"

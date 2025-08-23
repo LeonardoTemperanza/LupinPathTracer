@@ -783,6 +783,71 @@ pub fn xform_to_matrix(pos: Vec3, rot: Quat, scale: Vec3) -> Mat4
     return position_matrix(pos) * rotation_matrix(rot) * scale_matrix(scale);
 }
 
+pub fn matrix_to_xform(mat: Mat4) -> (Vec3, Quat, Vec3)
+{
+    let translation = Vec3 {
+        x: mat.m[3][0],
+        y: mat.m[3][1],
+        z: mat.m[3][2],
+    };
+
+    let mut col0 = Vec3 { x: mat.m[0][0], y: mat.m[0][1], z: mat.m[0][2] };
+    let mut col1 = Vec3 { x: mat.m[1][0], y: mat.m[1][1], z: mat.m[1][2] };
+    let mut col2 = Vec3 { x: mat.m[2][0], y: mat.m[2][1], z: mat.m[2][2] };
+
+    let sx = (col0.x*col0.x + col0.y*col0.y + col0.z*col0.z).sqrt();
+    let sy = (col1.x*col1.x + col1.y*col1.y + col1.z*col1.z).sqrt();
+    let sz = (col2.x*col2.x + col2.y*col2.y + col2.z*col2.z).sqrt();
+    let scale = Vec3 { x: sx, y: sy, z: sz };
+
+    if sx > 0.0001 { col0.x /= sx; col0.y /= sx; col0.z /= sx; }
+    if sy > 0.0001 { col1.x /= sy; col1.y /= sy; col1.z /= sy; }
+    if sz > 0.0001 { col2.x /= sz; col2.y /= sz; col2.z /= sz; }
+
+    let rot = [
+        [col0.x, col1.x, col2.x],
+        [col0.y, col1.y, col2.y],
+        [col0.z, col1.z, col2.z],
+    ];
+
+    let trace = rot[0][0] + rot[1][1] + rot[2][2];
+    let quat = if trace > 0.0 {
+        let s = (trace + 1.0).sqrt() * 2.0;
+        Quat {
+            w: 0.25 * s,
+            x: (rot[2][1] - rot[1][2]) / s,
+            y: (rot[0][2] - rot[2][0]) / s,
+            z: (rot[1][0] - rot[0][1]) / s,
+        }
+    } else if rot[0][0] > rot[1][1] && rot[0][0] > rot[2][2] {
+        let s = (1.0 + rot[0][0] - rot[1][1] - rot[2][2]).sqrt() * 2.0;
+        Quat {
+            w: (rot[2][1] - rot[1][2]) / s,
+            x: 0.25 * s,
+            y: (rot[0][1] + rot[1][0]) / s,
+            z: (rot[0][2] + rot[2][0]) / s,
+        }
+    } else if rot[1][1] > rot[2][2] {
+        let s = (1.0 + rot[1][1] - rot[0][0] - rot[2][2]).sqrt() * 2.0;
+        Quat {
+            w: (rot[0][2] - rot[2][0]) / s,
+            x: (rot[0][1] + rot[1][0]) / s,
+            y: 0.25 * s,
+            z: (rot[1][2] + rot[2][1]) / s,
+        }
+    } else {
+        let s = (1.0 + rot[2][2] - rot[0][0] - rot[1][1]).sqrt() * 2.0;
+        Quat {
+            w: (rot[1][0] - rot[0][1]) / s,
+            x: (rot[0][2] + rot[2][0]) / s,
+            y: (rot[1][2] + rot[2][1]) / s,
+            z: 0.25 * s,
+        }
+    };
+
+    return (translation, quat, scale);
+}
+
 ////////
 // Miscellaneous
 

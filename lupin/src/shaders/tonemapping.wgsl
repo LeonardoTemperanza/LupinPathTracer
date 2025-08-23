@@ -6,6 +6,7 @@
 
 struct TonemapParams
 {
+    scale: vec2f,
     exposure: f32,
     // For filmic tonemapping
     linear_white: f32,
@@ -41,7 +42,7 @@ fn vert_main(@builtin(vertex_index) vertex_index : u32) -> VertexOutput
     );
 
     return VertexOutput(
-        vec4f(pos[vertex_index], 0, 1),
+        vec4f(pos[vertex_index] * params.scale, 0.0f, 1.0f),
         tex_coords[vertex_index],
     );
 }
@@ -49,18 +50,26 @@ fn vert_main(@builtin(vertex_index) vertex_index : u32) -> VertexOutput
 @fragment
 fn filmic_main(input: VertexOutput) -> @location(0) vec4f
 {
+    if any(input.tex_coords > vec2f(1.0f)) || any(input.tex_coords < vec2f(0.0f)) {
+        return vec4f(0.0f, 0.0f, 0.0f, 1.0f);
+    }
+
     var color = max(textureSample(source_texture, source_sampler, input.tex_coords).rgb, vec3f(0.0f));
     color *= pow(2.0f, params.exposure);
     color = tonemap_filmic_uc2(color, params.linear_white,
                                params.a, params.b,
                                params.c, params.d,
                                params.e, params.f);
-    return vec4(linear_to_srgb(color), 1.0f);
+    return vec4f(linear_to_srgb(color), 1.0f);
 }
 
 @fragment
 fn aces_main(input: VertexOutput) -> @location(0) vec4f
 {
+    if any(input.tex_coords > vec2f(1.0f)) || any(input.tex_coords < vec2f(0.0f)) {
+        return vec4f(0.0f, 0.0f, 0.0f, 1.0f);
+    }
+
     var color = max(textureSample(source_texture, source_sampler, input.tex_coords).rgb, vec3f(0.0f));
     color *= pow(2.0f, params.exposure);
     return vec4(linear_to_srgb(tonemap_aces(color)), 1.0f);
@@ -69,6 +78,10 @@ fn aces_main(input: VertexOutput) -> @location(0) vec4f
 @fragment
 fn no_tonemap_main(input: VertexOutput) -> @location(0) vec4f
 {
+    if any(input.tex_coords > vec2f(1.0f)) || any(input.tex_coords < vec2f(0.0f)) {
+        return vec4f(0.0f, 0.0f, 0.0f, 1.0f);
+    }
+
     let color = clamp(textureSample(source_texture, source_sampler, input.tex_coords).rgb, vec3f(0.0f), vec3f(1.0f));
     return vec4(color, 1.0f);
 }

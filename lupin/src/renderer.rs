@@ -65,6 +65,7 @@ pub struct Scene
     pub lights: Lights,
 }
 
+#[derive(Debug)]
 pub struct SceneCPU
 {
     pub verts_pos_array: Vec<Vec<VertexPos>>,
@@ -80,6 +81,7 @@ pub struct SceneCPU
     pub environments: Vec<Environment>,
 }
 
+#[derive(Debug)]
 pub struct Lights
 {
     pub lights: wgpu::Buffer,
@@ -87,6 +89,7 @@ pub struct Lights
     pub env_alias_tables: Vec::<wgpu::Buffer>,
 }
 
+#[derive(Debug)]
 pub struct Mesh
 {
     pub verts_pos: wgpu::Buffer,
@@ -121,7 +124,7 @@ pub enum MaterialType
     GltfPbr     = 7,
 }
 
-#[derive(Default, Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug)]
 #[repr(C)]
 pub struct Material
 {
@@ -141,6 +144,30 @@ pub struct Material
     pub scattering_tex_idx: u32,
     pub normal_tex_idx:     u32,
     pub padding0: u32,
+}
+
+impl Default for Material
+{
+    fn default() -> Self
+    {
+        return Self {
+            color: Vec4 { x: 0.0, y: 0.0, z: 0.0, w: 1.0 },
+            emission: Vec4::default(),
+            scattering: Vec4::default(),
+            mat_type: MaterialType::Matte,
+            roughness: 0.0,
+            metallic: 0.0,
+            ior: 1.5,
+            sc_anisotropy: 0.0,
+            tr_depth: 0.01,
+            color_tex_idx: 0,
+            emission_tex_idx: 0,
+            roughness_tex_idx: 0,
+            scattering_tex_idx: 0,
+            normal_tex_idx: 0,
+            padding0: 0,
+        };
+    }
 }
 
 impl Material
@@ -254,11 +281,13 @@ static_assert!(std::mem::size_of::<PushConstants>() < MAX_PUSH_CONSTANTS_SIZE as
 
 // Shader behavior flags
 // NOTE: Coupled to shader.
-pub const FLAG_CAMERA_ORTHO: u32             = 1 << 0;
-pub const FLAG_DEBUG_TRI_CHECKS:  u32    = 1 << 1;
-pub const FLAG_DEBUG_AABB_CHECKS: u32    = 1 << 2;
-pub const FLAG_DEBUG_NUM_BOUNCES: u32    = 1 << 3;
-pub const FLAG_DEBUG_FIRST_HIT_ONLY: u32 = 1 << 4;
+pub const FLAG_CAMERA_ORTHO: u32         = 1 << 0;
+pub const FLAG_ENVS_EMPTY: u32           = 1 << 1;
+pub const FLAG_LIGHTS_EMPTY: u32         = 1 << 2;
+pub const FLAG_DEBUG_TRI_CHECKS:  u32    = 1 << 3;
+pub const FLAG_DEBUG_AABB_CHECKS: u32    = 1 << 4;
+pub const FLAG_DEBUG_NUM_BOUNCES: u32    = 1 << 5;
+pub const FLAG_DEBUG_FIRST_HIT_ONLY: u32 = 1 << 6;
 
 // Constants
 pub const MAX_PUSH_CONSTANTS_SIZE: u32 = 128;
@@ -305,6 +334,22 @@ pub struct PathtraceResources
     pub dummy_albedo_texture: wgpu::Texture,
     pub dummy_normals_texture: wgpu::Texture,
     pub dummy_output_texture: wgpu::Texture,
+
+    // NOTE: Hack to guard for 0 size buffers.
+    // WGPU doesn't allow 0 size bindings and
+    // 0 length arrays of bindings. (Sigh...)
+    pub dummy_buf_vertpos: wgpu::Buffer,
+    pub dummy_buf_vert: wgpu::Buffer,
+    pub dummy_buf_idx: wgpu::Buffer,
+    pub dummy_buf_bvh_node: wgpu::Buffer,
+    pub dummy_scene_tex: wgpu::Texture,
+    pub dummy_scene_sampler: wgpu::Sampler,
+    pub dummy_buf_alias_bin: wgpu::Buffer,
+    pub dummy_buf_tlas: wgpu::Buffer,
+    pub dummy_buf_instance: wgpu::Buffer,
+    pub dummy_buf_material: wgpu::Buffer,
+    pub dummy_buf_environment: wgpu::Buffer,
+    pub dummy_buf_light: wgpu::Buffer,
 }
 
 pub struct BakedPathtraceParams
@@ -470,6 +515,17 @@ pub fn build_pathtrace_resources(device: &wgpu::Device, baked_pathtrace_params: 
         view_formats: &[],
     });
 
+    let dummy_scene_tex = device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("Dummy Scene Texture"),
+        size,
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: wgpu::TextureFormat::Rgba8Snorm,
+        usage: wgpu::TextureUsages::TEXTURE_BINDING,
+        view_formats: &[],
+    });
+
     return PathtraceResources {
         pipeline,
         debug_pipeline,
@@ -479,6 +535,22 @@ pub fn build_pathtrace_resources(device: &wgpu::Device, baked_pathtrace_params: 
         dummy_output_texture,
         dummy_albedo_texture,
         dummy_normals_texture,
+
+        // NOTE: Hack to guard for 0 size buffers.
+        // WGPU doesn't allow 0 size bindings and
+        // 0 length arrays of bindings. (Sigh...)
+        dummy_buf_vertpos: create_storage_buffer_with_size_and_name(device, std::mem::size_of::<VertexPos>(), "dummy_buf_vertpos"),
+        dummy_buf_vert: create_storage_buffer_with_size_and_name(device, std::mem::size_of::<Vertex>(), "dummy_buf_vert"),
+        dummy_buf_idx: create_storage_buffer_with_size_and_name(device, std::mem::size_of::<u32>(), "dummy_buf_idx"),
+        dummy_buf_bvh_node: create_storage_buffer_with_size_and_name(device, std::mem::size_of::<BvhNode>(), "dummy_buf_bvh_node"),
+        dummy_scene_tex,
+        dummy_scene_sampler: create_linear_sampler(device),
+        dummy_buf_alias_bin: create_storage_buffer_with_size_and_name(device, std::mem::size_of::<AliasBin>(), "dummy_buf_alias_bin"),
+        dummy_buf_tlas: create_storage_buffer_with_size_and_name(device, std::mem::size_of::<TlasNode>(), "dummy_buf_tlas"),
+        dummy_buf_instance: create_storage_buffer_with_size_and_name(device, std::mem::size_of::<Instance>(), "dummy_buf_instance"),
+        dummy_buf_material: create_storage_buffer_with_size_and_name(device, std::mem::size_of::<Material>(), "dummy_buf_material"),
+        dummy_buf_environment: create_storage_buffer_with_size_and_name(device, std::mem::size_of::<Environment>(), "dummy_buf_environment"),
+        dummy_buf_light: create_storage_buffer_with_size_and_name(device, std::mem::size_of::<Light>(), "dummy_buf_light"),
     };
 }
 
@@ -504,7 +576,7 @@ impl Default for TileParams
     }
 }
 
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, PartialEq)]
 pub struct CameraParams
 {
     pub is_orthographic: bool,
@@ -567,36 +639,24 @@ pub fn pathtrace_scene(device: &wgpu::Device, queue: &wgpu::Queue, desc: &Pathtr
 
     let mut encoder = device.create_command_encoder(&Default::default());
     {
-        let mut compute_pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+        let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
             label: None,
             timestamp_writes: None
         });
 
-        compute_pass.set_pipeline(&resources.pipeline);
-        compute_pass.set_bind_group(0, &scene_bindgroup, &[]);
-        compute_pass.set_bind_group(1, &settings_bindgroup, &[]);
-        compute_pass.set_bind_group(2, &output_bindgroup, &[]);
+        pass.set_pipeline(&resources.pipeline);
+        pass.set_bind_group(0, &scene_bindgroup, &[]);
+        pass.set_bind_group(1, &settings_bindgroup, &[]);
+        pass.set_bind_group(2, &output_bindgroup, &[]);
 
-        let mut flags: u32 = 0;
-        if camera_params.is_orthographic { flags |= FLAG_CAMERA_ORTHO; }
-
-        let mut push_constants = PushConstants::default();
-        push_constants.camera_transform = camera_transform;
-        push_constants.camera_lens = camera_params.lens;
-        push_constants.camera_film = camera_params.film;
-        push_constants.camera_aspect = camera_params.aspect;
-        push_constants.camera_focus = camera_params.focus;
-        push_constants.camera_aperture = camera_params.aperture;
-        push_constants.flags = flags;
-        push_constants.accum_counter = accum_params.accum_counter;
-        compute_pass.set_push_constants(0, to_u8_slice(&[push_constants]));
+        pathtracer_push_constants(&mut pass, desc, None, Default::default());
 
         // NOTE: This is tied to the corresponding value in the shader
         const WORKGROUP_SIZE_X: u32 = 4;
         const WORKGROUP_SIZE_Y: u32 = 4;
         let num_workers_x = (render_target.width() + WORKGROUP_SIZE_X - 1) / WORKGROUP_SIZE_X;
         let num_workers_y = (render_target.height() + WORKGROUP_SIZE_Y - 1) / WORKGROUP_SIZE_Y;
-        compute_pass.dispatch_workgroups(num_workers_x, num_workers_y, 1);
+        pass.dispatch_workgroups(num_workers_x, num_workers_y, 1);
     }
 
     queue.submit(Some(encoder.finish()));
@@ -628,36 +688,29 @@ pub fn pathtrace_scene_tiles(device: &wgpu::Device, queue: &wgpu::Queue, desc: &
 
     let mut encoder = device.create_command_encoder(&Default::default());
     {
-        let mut compute_pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+        let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
             label: None,
             timestamp_writes: None
         });
 
-        compute_pass.set_pipeline(&resources.pipeline);
-        compute_pass.set_bind_group(0, &scene_bindgroup, &[]);
-        compute_pass.set_bind_group(1, &settings_bindgroup, &[]);
-        compute_pass.set_bind_group(2, &output_bindgroup, &[]);
+        pass.set_pipeline(&resources.pipeline);
+        pass.set_bind_group(0, &scene_bindgroup, &[]);
+        pass.set_bind_group(1, &settings_bindgroup, &[]);
+        pass.set_bind_group(2, &output_bindgroup, &[]);
 
         for i in *tile_counter..u32::min(*tile_counter + tiles_to_render, total_tiles)
         {
             let mut push_constants = PushConstants::default();
-            push_constants.camera_transform = camera_transform;
-            push_constants.camera_lens = camera_params.lens;
-            push_constants.camera_film = camera_params.film;
-            push_constants.camera_aspect = camera_params.aspect;
-            push_constants.camera_focus = camera_params.focus;
-            push_constants.camera_aperture = camera_params.aperture;
-            push_constants.flags = 0;
             push_constants.id_offset = [ (i % num_tiles_x) * tile_size, (i / num_tiles_x) * tile_size, ];
             push_constants.accum_counter = accum_params.accum_counter;
-            compute_pass.set_push_constants(0, to_u8_slice(&[push_constants]));
+            pathtracer_push_constants(&mut pass, desc, None, push_constants);
 
             // NOTE: This is tied to the corresponding value in the shader
             const WORKGROUP_SIZE_X: u32 = 4;
             const WORKGROUP_SIZE_Y: u32 = 4;
             let num_workers_x = (tile_size + WORKGROUP_SIZE_X - 1) / WORKGROUP_SIZE_X;
             let num_workers_y = (tile_size + WORKGROUP_SIZE_Y - 1) / WORKGROUP_SIZE_Y;
-            compute_pass.dispatch_workgroups(num_workers_x, num_workers_y, 1);
+            pass.dispatch_workgroups(num_workers_x, num_workers_y, 1);
         }
     }
 
@@ -682,137 +735,124 @@ pub struct DebugVizDesc
     pub first_hit_only: bool,
 }
 
-pub fn pathtrace_scene_debug(device: &wgpu::Device, queue: &wgpu::Queue, scene: &Scene, albedo_target: &wgpu::Texture, resources: &PathtraceResources, camera_transform: Mat4, debug_desc: &DebugVizDesc)
+pub fn pathtrace_scene_debug(device: &wgpu::Device, queue: &wgpu::Queue, desc: &PathtraceDesc, debug_desc: &DebugVizDesc)
 {
     // TODO: Check format and usage of render target params and others.
 
+    let scene = desc.scene;
+    let render_target = desc.render_target;
+    let resources = desc.resources;
+    let accum_params = desc.accum_params;
+    let camera_params = desc.camera_params;
+    let camera_transform = desc.camera_transform;
+
     let scene_bindgroup = create_pathtracer_scene_bindgroup(device, queue, resources, scene);
     let settings_bindgroup = create_pathtracer_settings_bindgroup(device, queue, resources, None);
-    let output_bindgroup = create_pathtracer_output_bindgroup(device, queue, resources, None, Some(albedo_target), None);
+    let output_bindgroup = create_pathtracer_output_bindgroup(device, queue, resources, None, Some(desc.render_target), None);
 
     let mut encoder = device.create_command_encoder(&Default::default());
 
     {
-        let mut compute_pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+        let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
             label: None,
             timestamp_writes: None
         });
 
-        compute_pass.set_pipeline(&resources.debug_pipeline);
-        compute_pass.set_bind_group(0, &scene_bindgroup, &[]);
-        compute_pass.set_bind_group(1, &settings_bindgroup, &[]);
-        compute_pass.set_bind_group(2, &output_bindgroup, &[]);
+        pass.set_pipeline(&resources.debug_pipeline);
+        pass.set_bind_group(0, &scene_bindgroup, &[]);
+        pass.set_bind_group(1, &settings_bindgroup, &[]);
+        pass.set_bind_group(2, &output_bindgroup, &[]);
 
-        let mut debug_flags: u32 = 0;
-        match debug_desc.viz_type
-        {
-            DebugVizType::BVHAABBChecks =>
-            {
-                debug_flags |= FLAG_DEBUG_AABB_CHECKS;
-            },
-            DebugVizType::BVHTriChecks =>
-            {
-                debug_flags |= FLAG_DEBUG_TRI_CHECKS;
-            },
-            DebugVizType::NumBounces =>
-            {
-                debug_flags |= FLAG_DEBUG_NUM_BOUNCES;
-            },
-        }
-
-        if debug_desc.first_hit_only {
-            debug_flags |= FLAG_DEBUG_FIRST_HIT_ONLY
-        }
-
-        let mut push_constants = PushConstants::default();
-        push_constants.camera_transform = camera_transform;
-        push_constants.flags = debug_flags;
-        push_constants.heatmap_min = debug_desc.heatmap_min;
-        push_constants.heatmap_max = debug_desc.heatmap_max;
-        compute_pass.set_push_constants(0, to_u8_slice(&[push_constants]));
+        pathtracer_push_constants(&mut pass, desc, Some(debug_desc), Default::default());
 
         // NOTE: This is tied to the corresponding value in the shader
         const WORKGROUP_SIZE_X: u32 = 4;
         const WORKGROUP_SIZE_Y: u32 = 4;
-        let num_workers_x = (albedo_target.width() + WORKGROUP_SIZE_X - 1) / WORKGROUP_SIZE_X;
-        let num_workers_y = (albedo_target.height() + WORKGROUP_SIZE_Y - 1) / WORKGROUP_SIZE_Y;
-        compute_pass.dispatch_workgroups(num_workers_x, num_workers_y, 1);
+        let num_workers_x = (desc.render_target.width() + WORKGROUP_SIZE_X - 1) / WORKGROUP_SIZE_X;
+        let num_workers_y = (desc.render_target.height() + WORKGROUP_SIZE_Y - 1) / WORKGROUP_SIZE_Y;
+        pass.dispatch_workgroups(num_workers_x, num_workers_y, 1);
     }
 
     queue.submit(Some(encoder.finish()));
 }
 
-pub fn raycast_gbuffers(device: &wgpu::Device, queue: &wgpu::Queue, scene: &Scene, albedo_target: &wgpu::Texture, normals_target: &wgpu::Texture, resources: &PathtraceResources, camera_transform: Mat4)
-{
-    raycast_albedo(device, queue, scene, albedo_target, resources, camera_transform);
-    raycast_normals(device, queue, scene, normals_target, resources, camera_transform);
-}
-
-pub fn raycast_albedo(device: &wgpu::Device, queue: &wgpu::Queue, scene: &Scene, albedo_target: &wgpu::Texture, resources: &PathtraceResources, camera_transform: Mat4)
+pub fn raycast_albedo(device: &wgpu::Device, queue: &wgpu::Queue, desc: &PathtraceDesc)
 {
     // TODO: Check format and usage of render target params and others.
 
+    let scene = desc.scene;
+    let render_target = desc.render_target;
+    let resources = desc.resources;
+    let accum_params = desc.accum_params;
+    let camera_params = desc.camera_params;
+    let camera_transform = desc.camera_transform;
+
     let scene_bindgroup = create_pathtracer_scene_bindgroup(device, queue, resources, scene);
     let settings_bindgroup = create_pathtracer_settings_bindgroup(device, queue, resources, None);
-    let output_bindgroup = create_pathtracer_output_bindgroup(device, queue, resources, None, Some(albedo_target), None);
+    let output_bindgroup = create_pathtracer_output_bindgroup(device, queue, resources, None, Some(render_target), None);
 
     let mut encoder = device.create_command_encoder(&Default::default());
 
     {
-        let mut compute_pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+        let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
             label: None,
             timestamp_writes: None
         });
 
-        compute_pass.set_pipeline(&resources.gbuffer_albedo_pipeline);
-        compute_pass.set_bind_group(0, &scene_bindgroup, &[]);
-        compute_pass.set_bind_group(1, &settings_bindgroup, &[]);
-        compute_pass.set_bind_group(2, &output_bindgroup, &[]);
+        pass.set_pipeline(&resources.gbuffer_albedo_pipeline);
+        pass.set_bind_group(0, &scene_bindgroup, &[]);
+        pass.set_bind_group(1, &settings_bindgroup, &[]);
+        pass.set_bind_group(2, &output_bindgroup, &[]);
 
-        let mut push_constants = PushConstants::default();
-        push_constants.camera_transform = camera_transform;
-        compute_pass.set_push_constants(0, to_u8_slice(&[push_constants]));
+        pathtracer_push_constants(&mut pass, desc, None, Default::default());
 
         // NOTE: This is tied to the corresponding value in the shader
         const WORKGROUP_SIZE_X: u32 = 4;
         const WORKGROUP_SIZE_Y: u32 = 4;
-        let num_workers_x = (albedo_target.width() + WORKGROUP_SIZE_X - 1) / WORKGROUP_SIZE_X;
-        let num_workers_y = (albedo_target.height() + WORKGROUP_SIZE_Y - 1) / WORKGROUP_SIZE_Y;
-        compute_pass.dispatch_workgroups(num_workers_x, num_workers_y, 1);
+        let num_workers_x = (render_target.width() + WORKGROUP_SIZE_X - 1) / WORKGROUP_SIZE_X;
+        let num_workers_y = (render_target.height() + WORKGROUP_SIZE_Y - 1) / WORKGROUP_SIZE_Y;
+        pass.dispatch_workgroups(num_workers_x, num_workers_y, 1);
     }
 
     queue.submit(Some(encoder.finish()));
 }
 
-pub fn raycast_normals(device: &wgpu::Device, queue: &wgpu::Queue, scene: &Scene, normals_target: &wgpu::Texture, resources: &PathtraceResources, camera_transform: Mat4)
+pub fn raycast_normals(device: &wgpu::Device, queue: &wgpu::Queue, desc: &PathtraceDesc)
 {
+    // TODO: Check format and usage of render target params and others.
+
+    let scene = desc.scene;
+    let render_target = desc.render_target;
+    let resources = desc.resources;
+    let accum_params = desc.accum_params;
+    let camera_params = desc.camera_params;
+    let camera_transform = desc.camera_transform;
+
     let scene_bindgroup = create_pathtracer_scene_bindgroup(device, queue, resources, scene);
     let settings_bindgroup = create_pathtracer_settings_bindgroup(device, queue, resources, None);
-    let output_bindgroup = create_pathtracer_output_bindgroup(device, queue, resources, None, None, Some(normals_target));
+    let output_bindgroup = create_pathtracer_output_bindgroup(device, queue, resources, None, None, Some(render_target));
 
     let mut encoder = device.create_command_encoder(&Default::default());
 
     {
-        let mut compute_pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+        let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
             label: None,
             timestamp_writes: None
         });
 
-        compute_pass.set_pipeline(&resources.gbuffer_normals_pipeline);
-        compute_pass.set_bind_group(0, &scene_bindgroup, &[]);
-        compute_pass.set_bind_group(1, &settings_bindgroup, &[]);
-        compute_pass.set_bind_group(2, &output_bindgroup, &[]);
+        pass.set_pipeline(&resources.gbuffer_normals_pipeline);
+        pass.set_bind_group(0, &scene_bindgroup, &[]);
+        pass.set_bind_group(1, &settings_bindgroup, &[]);
+        pass.set_bind_group(2, &output_bindgroup, &[]);
 
-        let mut push_constants = PushConstants::default();
-        push_constants.camera_transform = camera_transform;
-        compute_pass.set_push_constants(0, to_u8_slice(&[push_constants]));
+        pathtracer_push_constants(&mut pass, desc, None, Default::default());
 
         // NOTE: This is tied to the corresponding value in the shader
         const WORKGROUP_SIZE_X: u32 = 4;
         const WORKGROUP_SIZE_Y: u32 = 4;
-        let num_workers_x = (normals_target.width() + WORKGROUP_SIZE_X - 1) / WORKGROUP_SIZE_X;
-        let num_workers_y = (normals_target.height() + WORKGROUP_SIZE_Y - 1) / WORKGROUP_SIZE_Y;
-        compute_pass.dispatch_workgroups(num_workers_x, num_workers_y, 1);
+        let num_workers_x = (render_target.width() + WORKGROUP_SIZE_X - 1) / WORKGROUP_SIZE_X;
+        let num_workers_y = (render_target.height() + WORKGROUP_SIZE_Y - 1) / WORKGROUP_SIZE_Y;
+        pass.dispatch_workgroups(num_workers_x, num_workers_y, 1);
     }
 
     queue.submit(Some(encoder.finish()));
@@ -859,7 +899,7 @@ pub fn build_tonemap_resources(device: &wgpu::Device) -> TonemapResources
             },
             wgpu::BindGroupLayoutEntry {
                 binding: 2,
-                visibility: wgpu::ShaderStages::FRAGMENT,
+                visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
                 ty: wgpu::BindingType::Buffer {
                     ty: wgpu::BufferBindingType::Uniform,
                     has_dynamic_offset: false,
@@ -965,7 +1005,28 @@ pub struct TonemapDesc<'a>
     pub tonemap_params: &'a TonemapParams,
 }
 
-pub fn apply_tonemapping(device: &wgpu::Device, queue: &wgpu::Queue, desc: &TonemapDesc)
+// NOTE: Coupled to the tonemapping shader
+#[derive(Default)]
+#[repr(C)]
+struct TonemapUniforms
+{
+    scale: Vec2,
+    exposure: f32,
+    // For filmic tonemapping
+    linear_white: f32,
+    a: f32, b: f32, c: f32, d: f32, e: f32, f: f32,
+}
+
+#[derive(Default, Copy, Clone, Debug)]
+pub struct Viewport
+{
+    pub x: f32,
+    pub y: f32,
+    pub w: f32,
+    pub h: f32
+}
+
+pub fn tonemap_and_fit_aspect(device: &wgpu::Device, queue: &wgpu::Queue, desc: &TonemapDesc, viewport: Option<Viewport>)
 {
     let resources = desc.resources;
     let hdr_texture = desc.hdr_texture;
@@ -975,19 +1036,23 @@ pub fn apply_tonemapping(device: &wgpu::Device, queue: &wgpu::Queue, desc: &Tone
     let render_target_view = render_target.create_view(&Default::default());
     let hdr_texture_view = hdr_texture.create_view(&Default::default());
 
-    // NOTE: Coupled to the struct in the shader of the same name.
-    #[derive(Default)]
-    #[repr(C)]
-    struct TonemapResources
-    {
-        exposure: f32,
-        // For filmic tonemapping
-        linear_white: f32,
-        a: f32, b: f32, c: f32, d: f32, e: f32, f: f32,
-    }
+    let viewport = viewport.unwrap_or(Viewport {
+        x: 0.0,
+        y: 0.0,
+        w: desc.render_target.size().width as f32,
+        h: desc.render_target.size().height as f32
+    });
 
-    let mut params = TonemapResources::default();
+    let src_aspect = desc.hdr_texture.size().width as f32 / desc.hdr_texture.size().height as f32;
+    let dst_aspect = viewport.w / viewport.h;
+
+    let mut params = TonemapUniforms::default();
     params.exposure = tonemap_params.exposure;
+    params.scale = if src_aspect > dst_aspect {
+        Vec2 { x: 1.0, y: dst_aspect / src_aspect }
+    } else {
+        Vec2 { x: src_aspect / dst_aspect, y: 1.0 }
+    };
 
     let pipeline = match tonemap_params.operator
     {
@@ -1030,7 +1095,7 @@ pub fn apply_tonemapping(device: &wgpu::Device, queue: &wgpu::Queue, desc: &Tone
         entries: &[
             wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(&hdr_texture_view) },
             wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::Sampler(&resources.sampler) },
-            wgpu::BindGroupEntry { binding: 2, resource: buffer_resource(&params_uniform) },
+            wgpu::BindGroupEntry { binding: 2, resource: buffer_resource_nocheck(&params_uniform) },
         ]
     });
 
@@ -1052,6 +1117,8 @@ pub fn apply_tonemapping(device: &wgpu::Device, queue: &wgpu::Queue, desc: &Tone
             timestamp_writes: None
         });
 
+        pass.set_viewport(viewport.x, viewport.y, viewport.w, viewport.h, 0.0, 1.0);
+        pass.set_scissor_rect(viewport.x as u32, viewport.y as u32, viewport.w as u32, viewport.h as u32);
         pass.set_pipeline(&pipeline);
         pass.set_bind_group(0, &bind_group, &[]);
         pass.draw(0..6, 0..1);
@@ -1060,22 +1127,27 @@ pub fn apply_tonemapping(device: &wgpu::Device, queue: &wgpu::Queue, desc: &Tone
     queue.submit(Some(encoder.finish()));
 }
 
-pub fn convert_to_ldr_no_tonemap(device: &wgpu::Device, queue: &wgpu::Queue, resources: &TonemapResources, hdr_texture: &wgpu::Texture, render_target: &wgpu::Texture)
+pub fn blit_texture_and_fit_aspect(device: &wgpu::Device, queue: &wgpu::Queue, resources: &TonemapResources, input: &wgpu::Texture, blit_to: &wgpu::Texture, viewport: Option<Viewport>)
 {
-    let render_target_view = render_target.create_view(&Default::default());
-    let hdr_texture_view = hdr_texture.create_view(&Default::default());
+    let blit_to_view = blit_to.create_view(&Default::default());
+    let input_view = input.create_view(&Default::default());
 
-    #[derive(Default)]
-    #[repr(C)]
-    struct TonemapResources
-    {
-        exposure: f32,
-        // For filmic tonemapping
-        linear_white: f32,
-        a: f32, b: f32, c: f32, d: f32, e: f32, f: f32,
-    }
+    let viewport = viewport.unwrap_or(Viewport {
+        x: 0.0,
+        y: 0.0,
+        w: blit_to.size().width as f32,
+        h: blit_to.size().height as f32
+    });
 
-    let params = TonemapResources::default();
+    let src_aspect = input.size().width as f32 / input.size().height as f32;
+    let dst_aspect = viewport.w / viewport.h;
+
+    let mut params = TonemapUniforms::default();
+    params.scale = if src_aspect > dst_aspect {
+        Vec2 { x: 1.0, y: dst_aspect / src_aspect }
+    } else {
+        Vec2 { x: src_aspect / dst_aspect, y: 1.0 }
+    };
 
     let params_uniform = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: None,
@@ -1087,9 +1159,9 @@ pub fn convert_to_ldr_no_tonemap(device: &wgpu::Device, queue: &wgpu::Queue, res
         label: None,
         layout: &resources.aces_pipeline.get_bind_group_layout(0),
         entries: &[
-            wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(&hdr_texture_view) },
+            wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(&input_view) },
             wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::Sampler(&resources.sampler) },
-            wgpu::BindGroupEntry { binding: 2, resource: buffer_resource(&params_uniform) },
+            wgpu::BindGroupEntry { binding: 2, resource: buffer_resource_nocheck(&params_uniform) },
         ]
     });
 
@@ -1099,7 +1171,7 @@ pub fn convert_to_ldr_no_tonemap(device: &wgpu::Device, queue: &wgpu::Queue, res
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: None,
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                view: &render_target_view,
+                view: &blit_to_view,
                 resolve_target: None,
                 ops: wgpu::Operations {
                     load: wgpu::LoadOp::Clear(wgpu::Color { r: 0.0, g: 0.0, b: 0.0, a: 1.0 }),
@@ -1111,6 +1183,8 @@ pub fn convert_to_ldr_no_tonemap(device: &wgpu::Device, queue: &wgpu::Queue, res
             timestamp_writes: None
         });
 
+        pass.set_viewport(viewport.x, viewport.y, viewport.w, viewport.h, 0.0, 1.0);
+        pass.set_scissor_rect(viewport.x as u32, viewport.y as u32, viewport.w as u32, viewport.h as u32);
         pass.set_pipeline(&resources.identity_pipeline);
         pass.set_bind_group(0, &bind_group, &[]);
         pass.draw(0..6, 0..1);
@@ -1121,21 +1195,33 @@ pub fn convert_to_ldr_no_tonemap(device: &wgpu::Device, queue: &wgpu::Queue, res
 
 // Wrappers
 
-fn buffer_resource(buffer: &wgpu::Buffer) -> wgpu::BindingResource
+fn buffer_resource_nocheck(buffer: &wgpu::Buffer) -> wgpu::BindingResource
 {
     return wgpu::BindingResource::Buffer(wgpu::BufferBinding { buffer: buffer, offset: 0, size: None });
 }
 
-fn array_of_buffer_bindings_resource<'a>(buffers: &'a Vec<wgpu::Buffer>, empty_buffer: &'a wgpu::Buffer) -> Vec<wgpu::BufferBinding<'a>>
+fn buffer_resource<'a>(buffer: &'a wgpu::Buffer, dummy: &'a wgpu::Buffer) -> wgpu::BindingResource<'a>
 {
     // NOTE: Arrays of bindings can't be empty.
-    if buffers.len() <= 0
+    if buffer.size() <= 0 {
+        return wgpu::BindingResource::Buffer(wgpu::BufferBinding { buffer: dummy, offset: 0, size: None });
+    }
+
+    return wgpu::BindingResource::Buffer(wgpu::BufferBinding { buffer: buffer, offset: 0, size: None });
+}
+
+fn array_of_buffer_bindings_resource<'a, 'b>(buffers: &'a Vec<wgpu::Buffer>, dummy: &'a wgpu::Buffer) -> Vec<wgpu::BufferBinding<'a>>
+{
+    // NOTE: Arrays of bindings can't be empty.
+    if buffers.is_empty()
     {
-        return vec![wgpu::BufferBinding {
-            buffer: empty_buffer,
+        // NOTE: Buffer bindings can't be 0 size either.
+        let res = vec![wgpu::BufferBinding {
+            buffer: &dummy,
             offset: 0,
             size: None,
         }];
+        return res;
     }
 
     let mut bindings: Vec<wgpu::BufferBinding> = Vec::with_capacity(buffers.len());
@@ -1163,8 +1249,13 @@ fn array_of_texture_views(textures: &Vec<wgpu::Texture>) -> Vec<wgpu::TextureVie
     return bindings;
 }
 
-fn array_of_texture_bindings_resource<'a>(texture_views: &'a Vec<wgpu::TextureView>) -> Vec<&'a wgpu::TextureView>
+fn array_of_texture_bindings_resource<'a>(texture_views: &'a Vec<wgpu::TextureView>, dummy: &'a wgpu::TextureView) -> Vec<&'a wgpu::TextureView>
 {
+    // NOTE: Arrays of bindings can't be empty.
+    if texture_views.is_empty() {
+        return vec![dummy];
+    }
+
     let mut bindings: Vec<&'a wgpu::TextureView> = Vec::with_capacity(texture_views.len());
     for i in 0..texture_views.len() {
         bindings.push(&texture_views[i]);
@@ -1173,8 +1264,13 @@ fn array_of_texture_bindings_resource<'a>(texture_views: &'a Vec<wgpu::TextureVi
     return bindings;
 }
 
-fn array_of_sampler_bindings_resource<'a>(samplers: &'a Vec<wgpu::Sampler>) -> Vec<&'a wgpu::Sampler>
+fn array_of_sampler_bindings_resource<'a>(samplers: &'a Vec<wgpu::Sampler>, dummy: &'a wgpu::Sampler) -> Vec<&'a wgpu::Sampler>
 {
+    // NOTE: Arrays of bindings can't be empty.
+    if samplers.is_empty() {
+        return vec![dummy];
+    }
+
     let mut bindings: Vec<&'a wgpu::Sampler> = Vec::with_capacity(samplers.len());
     for i in 0..samplers.len() {
         bindings.push(&samplers[i]);
@@ -1190,17 +1286,30 @@ fn create_pathtracer_scene_bindgroup(device: &wgpu::Device, queue: &wgpu::Queue,
     let indices = &scene.indices_array;
     let bvh_nodes = &scene.bvh_nodes_array;
 
+    // NOTE: Need to do a whole lot of work here to guard from 0 size buffers.
+    // WGPU doesn't like 0 size bindings and 0 length binding arrays, but for
+    // ergonomics of this library we'd like for them to just work.
+
+    let texture_views = array_of_texture_views(&scene.textures);
+    let dummy_tex_view = resources.dummy_scene_tex.create_view(&Default::default());
+
     use crate::wgpu_utils::*;
-    let empty_buf = create_empty_storage_buffer(device);
-    let verts_pos_array = array_of_buffer_bindings_resource(&verts_pos, &empty_buf);
-    let verts_array     = array_of_buffer_bindings_resource(&verts, &empty_buf);
-    let indices_array   = array_of_buffer_bindings_resource(&indices, &empty_buf);
-    let bvh_nodes_array = array_of_buffer_bindings_resource(&bvh_nodes, &empty_buf);
-    let texture_views   = array_of_texture_views(&scene.textures);
-    let textures_array  = array_of_texture_bindings_resource(&texture_views);
-    let samplers_array  = array_of_sampler_bindings_resource(&scene.samplers);
-    let alias_table_array = array_of_buffer_bindings_resource(&scene.lights.alias_tables, &empty_buf);
-    let env_alias_table_array = array_of_buffer_bindings_resource(&scene.lights.env_alias_tables, &empty_buf);
+    let verts_pos_array = array_of_buffer_bindings_resource(&verts_pos, &resources.dummy_buf_vertpos);
+    let verts_array     = array_of_buffer_bindings_resource(&verts, &resources.dummy_buf_vert);
+    let indices_array   = array_of_buffer_bindings_resource(&indices, &resources.dummy_buf_idx);
+    let bvh_nodes_array = array_of_buffer_bindings_resource(&bvh_nodes, &resources.dummy_buf_bvh_node);
+    let textures_array  = array_of_texture_bindings_resource(&texture_views, &dummy_tex_view);
+    let samplers_array  = array_of_sampler_bindings_resource(&scene.samplers, &resources.dummy_scene_sampler);
+    let alias_table_array     = array_of_buffer_bindings_resource(&scene.lights.alias_tables, &resources.dummy_buf_alias_bin);
+    let env_alias_table_array = array_of_buffer_bindings_resource(&scene.lights.env_alias_tables, &resources.dummy_buf_alias_bin);
+
+    let tlas_buf = buffer_resource(&scene.tlas_nodes, &resources.dummy_buf_tlas);
+    let instances_buf = buffer_resource(&scene.instances, &resources.dummy_buf_instance);
+    let materials_buf = buffer_resource(&scene.materials, &resources.dummy_buf_material);
+    let environments_buf = buffer_resource(&scene.environments, &resources.dummy_buf_environment);
+    let lights_buf = buffer_resource(&&scene.lights.lights, &resources.dummy_buf_light);
+
+    //println!("{} {} {} {} {} {} {} {}", verts_pos_array.len(), verts_array.len(), indices_array.len(), bvh_nodes_array.len(), textures_array.len(), samplers_array.len(), alias_table_array.len(), env_alias_table_array.len(),);
 
     let scene_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
         label: Some("Scene bind group"),
@@ -1210,13 +1319,13 @@ fn create_pathtracer_scene_bindgroup(device: &wgpu::Device, queue: &wgpu::Queue,
             wgpu::BindGroupEntry { binding: 1,  resource: wgpu::BindingResource::BufferArray(verts_array.as_slice())     },
             wgpu::BindGroupEntry { binding: 2,  resource: wgpu::BindingResource::BufferArray(indices_array.as_slice())   },
             wgpu::BindGroupEntry { binding: 3,  resource: wgpu::BindingResource::BufferArray(bvh_nodes_array.as_slice()) },
-            wgpu::BindGroupEntry { binding: 4,  resource: buffer_resource(&scene.tlas_nodes) },
-            wgpu::BindGroupEntry { binding: 5,  resource: buffer_resource(&scene.instances) },
-            wgpu::BindGroupEntry { binding: 6,  resource: buffer_resource(&scene.materials) },
+            wgpu::BindGroupEntry { binding: 4,  resource: tlas_buf },
+            wgpu::BindGroupEntry { binding: 5,  resource: instances_buf },
+            wgpu::BindGroupEntry { binding: 6,  resource: materials_buf },
             wgpu::BindGroupEntry { binding: 7,  resource: wgpu::BindingResource::TextureViewArray(textures_array.as_slice()) },
             wgpu::BindGroupEntry { binding: 8,  resource: wgpu::BindingResource::SamplerArray(samplers_array.as_slice()) },
-            wgpu::BindGroupEntry { binding: 9,  resource: buffer_resource(&scene.environments) },
-            wgpu::BindGroupEntry { binding: 10, resource: buffer_resource(&scene.lights.lights) },
+            wgpu::BindGroupEntry { binding: 9,  resource: environments_buf },
+            wgpu::BindGroupEntry { binding: 10, resource: lights_buf },
             wgpu::BindGroupEntry { binding: 11, resource: wgpu::BindingResource::BufferArray(alias_table_array.as_slice()) },
             wgpu::BindGroupEntry { binding: 12, resource: wgpu::BindingResource::BufferArray(env_alias_table_array.as_slice()) },
         ]
@@ -1472,4 +1581,55 @@ fn create_pathtracer_output_bindgroup_layout(device: &wgpu::Device) -> wgpu::Bin
             },
         ]
     });
+}
+
+fn pathtracer_push_constants(pass: &mut wgpu::ComputePass, desc: &PathtraceDesc, debug_desc: Option<&DebugVizDesc>, template: PushConstants)
+{
+    let mut push_constants = template;
+
+    if let Some(debug_desc) = debug_desc
+    {
+        match debug_desc.viz_type
+        {
+            DebugVizType::BVHAABBChecks =>
+            {
+                push_constants.flags |= FLAG_DEBUG_AABB_CHECKS;
+            },
+            DebugVizType::BVHTriChecks =>
+            {
+                push_constants.flags |= FLAG_DEBUG_TRI_CHECKS;
+            },
+            DebugVizType::NumBounces =>
+            {
+                push_constants.flags |= FLAG_DEBUG_NUM_BOUNCES;
+            },
+        }
+
+        if debug_desc.first_hit_only {
+            push_constants.flags |= FLAG_DEBUG_FIRST_HIT_ONLY
+        }
+
+        push_constants.heatmap_min = debug_desc.heatmap_min;
+        push_constants.heatmap_max = debug_desc.heatmap_max;
+    }
+
+    if desc.camera_params.is_orthographic { push_constants.flags |= FLAG_CAMERA_ORTHO; }
+
+    push_constants.camera_transform = desc.camera_transform;
+    push_constants.camera_lens = desc.camera_params.lens;
+    push_constants.camera_film = desc.camera_params.film;
+    push_constants.camera_aspect = desc.camera_params.aspect;
+    push_constants.camera_focus = desc.camera_params.focus;
+    push_constants.camera_aperture = desc.camera_params.aperture;
+
+    if desc.scene.environments.size() <= 0 {
+        push_constants.flags |= FLAG_ENVS_EMPTY;
+    }
+    if desc.scene.lights.lights.size() <= 0 {
+        push_constants.flags |= FLAG_LIGHTS_EMPTY;
+    }
+
+    push_constants.accum_counter = desc.accum_params.accum_counter;
+
+    pass.set_push_constants(0, to_u8_slice(&[push_constants]));
 }

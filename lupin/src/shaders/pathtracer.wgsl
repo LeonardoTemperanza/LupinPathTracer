@@ -162,13 +162,13 @@ struct TlasNode
 
 // NOTE: Coupled to constants in renderer.rs
 const FLAG_CAMERA_ORTHO: u32            = 1 << 0;
-
-const FLAG_DEBUG_TRI_CHECKS:  u32       = 1 << 1;
-const FLAG_DEBUG_AABB_CHECKS: u32       = 1 << 2;
-const FLAG_DEBUG_NUM_BOUNCES: u32       = 1 << 3;
-const FLAG_DEBUG_FIRST_HIT_ONLY: u32    = 1 << 4;
-const FLAG_ENVS_EMPTY: u32              = 1 << 5;
-const FLAG_LIGHTS_EMPTY: u32            = 1 << 6;
+const FLAG_ENVS_EMPTY: u32              = 1 << 1;
+const FLAG_LIGHTS_EMPTY: u32            = 1 << 2;
+// Debug flags
+const FLAG_DEBUG_TRI_CHECKS:  u32       = 1 << 3;
+const FLAG_DEBUG_AABB_CHECKS: u32       = 1 << 4;
+const FLAG_DEBUG_NUM_BOUNCES: u32       = 1 << 5;
+const FLAG_DEBUG_FIRST_HIT_ONLY: u32    = 1 << 6;
 
 //////////////////////////////////////////////
 // Entrypoints
@@ -314,10 +314,11 @@ fn gbuffer_normals_main(@builtin(local_invocation_id) local_id: vec3u, @builtin(
     color = clamp(color, vec3f(-1.0f), vec3f(1.0f));
 
     if all(global_id < output_dim) {
-        textureStore(output_rgba8snorm, global_id.xy, vec4f(color, 1.0f));
+        textureStore(output_rgba8snorm, global_id.xy, vec4f(color * 0.5f + 0.5f, 1.0f));
     }
 }
 
+/*
 // Pixel offset is expected to be in the [-0.5, 0.5] range.
 fn compute_camera_ray(global_id: vec2u, output_dim: vec2u, pixel_offset: vec2f) -> Ray
 {
@@ -329,30 +330,53 @@ fn compute_camera_ray(global_id: vec2u, output_dim: vec2u, pixel_offset: vec2f) 
 
     let uv = frag_coord / resolution;
     var coord = 2.0f * nudged_uv - 1.0f;
-    coord.y *= -resolution.y / resolution.x;
+    coord.y *= -f32(resolution.y) / f32(resolution.x);
 
     let look_at = normalize(vec3(coord, 1.0f));
 
     let res = Ray(vec3f(0.0f, 0.0f, 0.0f), look_at, 1.0f / look_at);
     return transform_ray(res, constants.camera_transform);
 }
+*/
 
-fn compute_camera_ray_fancy(global_id: vec2u, output_dim: vec2u, pixel_offset: vec2f) -> Ray
+// pixel_offset is expected to be in the [-0.5, 0.5] range.
+fn compute_camera_ray(global_id: vec2u, output_dim: vec2u, pixel_offset: vec2f) -> Ray
 {
-    let frag_coord = vec2f(global_id.xy) + 0.5f;
     let resolution = vec2f(output_dim);
+    let pixel_coord = vec2f(f32(global_id.x), resolution.y - f32(global_id.y)) + vec2f(0.5f);
+    let nudged_uv = (pixel_coord + pixel_offset) / resolution;
 
-    var nudged_uv = frag_coord + pixel_offset;  // Move 0.5 to the left and right
-    nudged_uv = clamp(nudged_uv, vec2(0.0f), resolution.xy) / resolution;
+    let camera_lens = constants.camera_lens;
+    let camera_film = constants.camera_film;
+    let camera_aspect = constants.camera_aspect;
+    let camera_focus = constants.camera_focus;
+    let camera_aperture = constants.camera_aperture;
 
-    let uv = frag_coord / resolution;
-    var coord = 2.0f * nudged_uv - 1.0f;
-    coord.y *= -resolution.y / resolution.x;
+    let film_size = select(vec2f(camera_film * camera_aspect, camera_film), vec2f(camera_film, camera_film / camera_aspect), camera_aspect >= 1);
+    let lens_uv = random_in_disk();
 
-    let look_at = normalize(vec3(coord, 1.0f));
+    if (constants.flags & FLAG_CAMERA_ORTHO) != 0
+    {
+        let scale = 1.0 / camera_lens;
+        let q = vec3f(film_size.x * (0.5f - nudged_uv.x) * scale, film_size.y * (0.5f - nudged_uv.y) * scale, camera_lens);
+        let e = vec3f(-q.x, -q.y, 0) + vec3f(lens_uv.x * camera_aperture / 2.0f,
+                                             lens_uv.y * camera_aperture / 2.0f, 0);
+        let p = vec3f(-q.x, -q.y, -camera_focus);
+        let d = normalize(p - e) * vec3f(1.0f, 1.0f, -1.0f);
+        let res = Ray(e, d, 1.0f / d);
+        return transform_ray(res, constants.camera_transform);
+    }
+    else
+    {
+        let q = vec3f(film_size * vec2f(0.5f - nudged_uv.x, 0.5f - nudged_uv.y), camera_lens);
+        let look_at = -normalize(q);
+        let lens_point = vec3f(lens_uv * vec2f(camera_aperture / 2.0f), 0.0f);
+        let focus_point = vec3f(look_at * camera_focus / abs(look_at.z));
+        let final_dir = normalize(focus_point - lens_point) * vec3f(1.0f, 1.0f, -1.0f);
 
-    let res = Ray(vec3f(0.0f, 0.0f, 0.0f), look_at, 1.0f / look_at);
-    return transform_ray(res, constants.camera_transform);
+        let res = Ray(lens_point, final_dir, 1.0f / final_dir);
+        return transform_ray(res, constants.camera_transform);
+    }
 }
 
 //////////////////////////////////////////////
@@ -375,7 +399,7 @@ fn pathtrace_naive(local_id: vec3u, start_ray: Ray) -> vec3f
         let hit = ray_scene_intersection(local_id, ray);
         if hit.dst == F32_MAX  // Missed.
         {
-            radiance += sample_environments(ray.dir) * weight;
+            radiance += weight * sample_environments(ray.dir);
             break;
         }
 
@@ -406,14 +430,14 @@ fn pathtrace_naive(local_id: vec3u, start_ray: Ray) -> vec3f
         let roughness = textureSampleLevel(textures[mat.roughness_tex_idx], samplers[mat_sampler_idx], hit.tex_coords, 0.0f).r * mat.roughness;
         let density = select(vec3f(0.0f), -log(clamp(color.rgb, vec3f(0.0001f), vec3f(1.0f))) / mat.tr_depth, mat.mat_type == MAT_TYPE_REFRACTIVE || mat.mat_type == MAT_TYPE_VOLUMETRIC || mat.mat_type == MAT_TYPE_SUBSURFACE);
         let normal = hit.normal;
+        let outgoing = -ray.dir;
 
         let material = MaterialPoint(mat.mat_type, emission, color.rgb, roughness, mat.metallic, mat.ior, density, mat.scattering.rgb, mat.sc_anisotropy, mat.tr_depth);
 
         // Accumulate emission.
-        radiance += weight * emission;
+        radiance += weight * emission * f32(dot(normal, outgoing) >= 0.0f);
 
         // Compute next direction.
-        let outgoing = -ray.dir;
         var incoming = vec3f();
         if !is_mat_delta(mat)
         {
@@ -437,7 +461,7 @@ fn pathtrace_naive(local_id: vec3u, start_ray: Ray) -> vec3f
         ray.inv_dir = 1.0f / ray.dir;
 
         // Check weight.
-        if all(weight == vec3f(0.0f)) || !is_vec3f_finite(weight) { break; }
+        if all(weight == vec3f(0.0f)) || !is_finite_vec3f(weight) { break; }
 
         // Russian roulette.
         if bounce > 3
@@ -462,7 +486,7 @@ fn pathtrace(local_id: vec3u, start_ray: Ray) -> vec3f
         let hit = ray_scene_intersection(local_id, ray);
         if hit.dst == F32_MAX  // Missed.
         {
-            radiance += sample_environments(ray.dir) * weight;
+            radiance += weight * sample_environments(ray.dir);
             break;
         }
 
@@ -477,10 +501,6 @@ fn pathtrace(local_id: vec3u, start_ray: Ray) -> vec3f
         let color = textureSampleLevel(textures[mat.color_tex_idx], samplers[mat_sampler_idx], hit.tex_coords, 0.0f) * mat.color;
 
         let hit_pos = ray.ori + ray.dir * hit.dst;
-        if !debug_enable {
-        debug_enable = true;
-        debug_color = hit_pos;
-        }
 
         // TODO: No caustics param.
 
@@ -498,13 +518,14 @@ fn pathtrace(local_id: vec3u, start_ray: Ray) -> vec3f
         let density = select(vec3f(0.0f), -log(clamp(color.rgb, vec3f(0.0001f), vec3f(1.0f))) / mat.tr_depth, mat.mat_type == MAT_TYPE_REFRACTIVE || mat.mat_type == MAT_TYPE_VOLUMETRIC || mat.mat_type == MAT_TYPE_SUBSURFACE);
         let normal = hit.normal;
 
-        let material = MaterialPoint(mat.mat_type, emission, color.rgb, roughness, mat.metallic, mat.ior, density, mat.scattering.rgb, mat.sc_anisotropy, mat.tr_depth);
+        let material = clean_up_material(MaterialPoint(mat.mat_type, emission, color.rgb, roughness, mat.metallic, mat.ior, density, mat.scattering.rgb, mat.sc_anisotropy, mat.tr_depth));
+
+        let outgoing = -ray.dir;
 
         // Accumulate emission.
-        radiance += weight * emission;
+        radiance += weight * emission * f32(dot(normal, outgoing) >= 0.0f);
 
         // Compute next direction.
-        let outgoing = -ray.dir;
         var incoming = vec3f();
         if !is_mat_delta(mat)
         {
@@ -541,7 +562,7 @@ fn pathtrace(local_id: vec3u, start_ray: Ray) -> vec3f
         ray.inv_dir = 1.0f / ray.dir;
 
         // Check weight.
-        if all(weight == vec3f(0.0f)) || !is_vec3f_finite(weight) { break; }
+        if all(weight == vec3f(0.0f)) || !is_finite_vec3f(weight) { break; }
 
         // Russian roulette.
         if bounce > 3
@@ -569,8 +590,41 @@ struct MaterialPoint
     trdepth: f32,
 }
 
+const MIN_ROUGHNESS: f32 = 0.03f * 0.03f;
+
+fn clean_up_material(mat: MaterialPoint) -> MaterialPoint
+{
+    var res = mat;
+
+    // Clean up density
+    if res.mat_type == MAT_TYPE_REFRACTIVE ||
+       res.mat_type == MAT_TYPE_VOLUMETRIC ||
+       res.mat_type == MAT_TYPE_SUBSURFACE {
+        res.density = -log(clamp(res.color, vec3f(0.0001f), vec3f(1.0f))) / res.trdepth;
+    } else {
+        res.density = vec3f(0.0f);
+    }
+
+    // Clean up roughness.
+    if res.mat_type == MAT_TYPE_MATTE   ||
+       res.mat_type == MAT_TYPE_GLTFPBR ||
+       res.mat_type == MAT_TYPE_GLOSSY {
+        res.roughness = clamp(res.roughness, MIN_ROUGHNESS, 1.0f);
+    } else if res.mat_type == MAT_TYPE_VOLUMETRIC {
+        res.roughness = 0.0f;
+    } else {
+        if res.roughness < MIN_ROUGHNESS { res.roughness = 0.0f; }
+    }
+
+    return res;
+}
+
 fn sample_environments(dir: vec3f) -> vec3f
 {
+    if (constants.flags & FLAG_ENVS_EMPTY) != 0 {
+        return vec3f(0.0f);
+    }
+
     var emission = vec3f(0.0f);
     for(var i = 0u; i < arrayLength(&environments); i++) {
         emission += sample_environment(dir, i);
@@ -593,161 +647,6 @@ fn is_mat_delta(mat: Material) -> bool
            (mat.mat_type == MAT_TYPE_TRANSPARENT && mat.roughness == 0) ||
            (mat.mat_type == MAT_TYPE_VOLUMETRIC);
 }
-
-/*
-struct BsdfSample
-{
-    incoming: vec3f,  // Keep in mind this also points outwards.
-    weight: vec3f,
-    prob: f32,
-}
-
-fn sample_bsdf(mat_type: u32, color: vec3f, normal: vec3f, roughness: f32, ior: f32, outgoing: vec3f) -> BsdfSample
-{
-    var res = BsdfSample();
-
-    //let up_normal = select(-normal, normal, dot(normal, outgoing) > 0.0f);
-    let up_normal = normal;
-
-    switch(mat_type)
-    {
-        case MAT_TYPE_MATTE:
-        {
-            res.incoming = random_direction_cos(up_normal);
-            if !same_hemisphere(up_normal, outgoing, res.incoming) { return res; }
-
-            res.weight = color / PI * abs(dot(up_normal, res.incoming));
-            let cosw = dot(up_normal, res.incoming);
-            res.prob = select(cosw / PI, 0.0f, cosw <= 0.0f);
-        }
-        case MAT_TYPE_GLOSSY:
-        {
-            let fresnel = fresnel_dielectric(ior, up_normal, outgoing);
-            if random_f32() < fresnel
-            {
-                // TODO: Roughness
-
-                res.incoming = reflect(-outgoing, up_normal);
-                if !same_hemisphere(up_normal, outgoing, res.incoming) { return res; }
-            }
-            else
-            {
-                res.incoming = random_direction_cos(up_normal);
-            }
-
-            if !same_hemisphere(normal, outgoing, res.incoming) { return res; }
-
-            let halfway = normalize(res.incoming + outgoing);
-
-            let fresnel_out  = fresnel_dielectric(ior, up_normal, outgoing);
-            let fresnel_in   = fresnel_dielectric(ior, halfway, res.incoming);
-            //let micro_dist   = microfacet_distribution(roughness, up_normal, halfway);
-            //let micro_shadow = microfacet_shadowing(roughness, up_normal, halfway, outgoing, res.incoming);
-            let micro_dist   = 1.0f;
-            let micro_shadow = 0.0f;
-            res.weight = color * (1.0f - fresnel_out) / PI * abs(dot(up_normal, res.incoming)) +
-                         vec3f(1.0f) * fresnel_in * micro_dist * micro_shadow / (4.0f * dot(up_normal, outgoing) * dot(up_normal, res.incoming)) * abs(dot(up_normal, res.incoming));
-
-            // let microfacet_prob = ;
-            let cosw = dot(up_normal, res.incoming);
-            let cos_prob = select(cosw / PI, 0.0f, cosw <= 0.0f);
-            let microfacet_prob = 1.0f;
-            res.prob = fresnel_out * microfacet_prob / (4.0f * abs(dot(outgoing, halfway))) + (1.0f - fresnel_out) * cos_prob;
-        }
-        case MAT_TYPE_REFLECTIVE:
-        {
-            // Microfacet sampling is pretty expensive so we do it conditionally.
-            let microfacet_normal = up_normal;
-            res.prob = 1.0f;
-            if roughness > 0.0f
-            {
-
-            }
-
-            res.incoming = reflect(-outgoing, microfacet_normal);
-            if !same_hemisphere(up_normal, outgoing, res.incoming) { return res; }
-            res.weight = fresnel_conductor(reflectivity_to_eta(color), vec3f(0.0f), up_normal, outgoing);
-        }
-        case MAT_TYPE_TRANSPARENT:
-        {
-            // Microfacet sampling is pretty expensive so we do it conditionally.
-            let microfacet_normal = up_normal;
-            let microfacet_prob = 1.0f;
-            if roughness > 0.0f
-            {
-
-            }
-
-            let fresnel = fresnel_dielectric(ior, up_normal, outgoing);
-            if random_f32() < fresnel
-            {
-                res.incoming = reflect(-outgoing, up_normal);
-                res.weight = vec3f(1.0f) * fresnel;
-                res.prob = fresnel;
-            }
-            else
-            {
-                res.incoming = -outgoing;
-                res.weight = color * (1.0f - fresnel);
-                res.prob = 1.0f - fresnel;
-            }
-        }
-        case MAT_TYPE_REFRACTIVE:
-        {
-            // Microfacet sampling is pretty expensive so we do it conditionally.
-            let microfacet_normal = up_normal;
-            let microfacet_prob = 1.0f;
-            if roughness > 0.0f
-            {
-
-            }
-
-            let entering = dot(normal, outgoing) >= 0;
-            let rel_ior = select(1.0f / ior, ior, entering);
-            let fresnel = fresnel_dielectric(rel_ior, up_normal, outgoing);
-
-            if (random_f32() < fresnel) {
-                res.incoming = reflect(-outgoing, up_normal);
-            } else {
-                res.incoming = refract(-outgoing, up_normal, 1.0f / rel_ior);
-            }
-
-            let same_hemisphere = same_hemisphere(up_normal, outgoing, res.incoming);
-
-            if abs(ior - 1.0f) < 1e-3
-            {
-                if same_hemisphere
-                {
-                    res.prob = 0.0f;
-                    res.weight = vec3f(0.0f);
-                }
-                else
-                {
-                    res.prob = 1.0f;
-                    res.weight = vec3f(1.0f);
-                }
-            }
-            else
-            {
-                if same_hemisphere {
-                    res.prob = fresnel;
-                } else {
-                    res.prob = (1.0f - fresnel);
-                }
-
-                res.weight = vec3f(1.0f) * (1.0f / (rel_ior * rel_ior)) * (1.0f - fresnel_dielectric(rel_ior, up_normal, outgoing));
-            }
-        }
-        case MAT_TYPE_VOLUMETRIC:
-        {
-
-        }
-        case default: {}
-    }
-
-    return res;
-}
-*/
 
 fn reflectivity_to_eta(reflectivity: vec3f) -> vec3f
 {
@@ -938,12 +837,12 @@ fn random_f32_normal_dist() -> f32
     return rho * cos(theta);
 }
 
-fn random_in_circle() -> vec2f
+fn random_in_disk() -> vec2f
 {
-    let angle: f32 = random_f32() * 2.0f * PI;
-    var res: vec2f = vec2f(cos(angle), sin(angle));
-    res *= sqrt(random_f32());
-    return res;
+    let rnd = random_vec2f();
+    let r   = sqrt(rnd.y);
+    let phi = 2.0f * PI * rnd.x;
+    return vec2f(cos(phi) * r, sin(phi) * r);
 }
 
 fn random_direction() -> vec3f
@@ -1320,7 +1219,8 @@ fn transform_point(p: vec3f, transform: mat4x4f)->vec3f
 {
     let p_vec4 = vec4f(p, 1.0f);
     let transformed = transform * p_vec4;
-    return (transformed / transformed.w).xyz;
+    return transformed.xyz;
+    //return (transformed / transformed.w).xyz;
 }
 
 fn transform_dir(dir: vec3f, transform: mat4x4f)->vec3f
@@ -1349,17 +1249,36 @@ fn transform_ray_without_normalizing_direction(ray: Ray, transform: mat4x4f) -> 
     return res;
 }
 
-fn is_vec3f_finite(v: vec3f) -> bool
-{
-    return all(v == v && abs(v) <= vec3f(F32_MAX));
-}
-
 fn same_hemisphere(normal: vec3f, outgoing: vec3f, incoming: vec3f) -> bool
 {
     return dot(normal, outgoing) * dot(normal, incoming) >= 0;
 }
 
+// From: https://twitter.com/_Humus_
+fn is_finite(x: f32) -> bool
+{
+    return (u32(x) & 0x7F800000) != 0x7F800000;
+}
 
+fn is_positive_finite(x: f32) -> bool
+{
+    return u32(x) < 0x7F800000;
+}
+
+fn is_nan(x: f32) -> bool
+{
+    return (u32(x) & 0x7FFFFFFF) > 0x7F800000;
+}
+
+fn is_inf(x: f32) -> bool
+{
+    return (u32(x) & 0x7FFFFFFF) == 0x7F800000;
+}
+
+fn is_finite_vec3f(v: vec3f) -> bool
+{
+    return all((vec3u(v) & vec3u(0x7F800000)) != vec3u(0x7F800000));
+}
 
 
 
@@ -1982,12 +1901,12 @@ fn sample_lights(pos: vec3f, normal: vec3f, outgoing: vec3f) -> vec3f
 {
     let up_normal = select(normal, -normal, dot(normal, outgoing) <= 0.0f);
 
-    let num_instance_lights = arrayLength(&lights);
-    let num_envs = arrayLength(&environments);
-    if num_instance_lights + num_envs <= 0 { return vec3f(); }
+    let num_lights = select(arrayLength(&lights), 0u, (constants.flags & FLAG_LIGHTS_EMPTY)  != 0);
+    let num_envs = select(arrayLength(&environments), 0u, (constants.flags & FLAG_ENVS_EMPTY) != 0);
+    if num_lights + num_envs <= 0 { return vec3f(); }
 
-    let light_idx = random_u32_range_unsafe(num_instance_lights + num_envs);
-    if light_idx < num_instance_lights
+    let light_idx = random_u32_range_unsafe(num_lights + num_envs);
+    if light_idx < num_lights
     {
         let tri_idx = sample_instance_alias_table(light_idx);
         let instance_idx = lights[light_idx].instance_idx;
@@ -2001,7 +1920,7 @@ fn sample_lights(pos: vec3f, normal: vec3f, outgoing: vec3f) -> vec3f
     }
     else
     {
-        let env_idx = light_idx - num_instance_lights;
+        let env_idx = light_idx - num_lights;
         let env_tex_idx = environments[env_idx].emission_tex_idx;
         let env_tex_size = textureDimensions(textures[env_tex_idx]);
 
@@ -2020,7 +1939,9 @@ fn sample_lights_pdf(local_id: vec3u, pos: vec3f, incoming: vec3f) -> f32
 {
     var pdf = 0.0f;
 
-    let num_lights = arrayLength(&lights);
+    let num_lights = select(arrayLength(&lights), 0u, (constants.flags & FLAG_LIGHTS_EMPTY) != 0);
+    let num_envs = select(arrayLength(&environments), 0u, (constants.flags & FLAG_ENVS_EMPTY) != 0);
+
     for(var i = 0u; i < num_lights; i++)
     {
         let light = lights[i];
@@ -2034,7 +1955,7 @@ fn sample_lights_pdf(local_id: vec3u, pos: vec3f, incoming: vec3f) -> f32
             let hit_info = ray_instance_intersection(local_id, ray, F32_MAX, instance_idx);
             let hit_dst = hit_info.hit.x;
             let hit_uv  = hit_info.hit.yz;
-            if hit_dst == F32_MAX { if !debug_enable { debug_enable = true; debug_color = vec3f(0.0f, 0.0f, 1.0f); } break; }  // No intersection.
+            if hit_dst == F32_MAX { break; }  // No intersection.
 
             let light_normal = compute_tri_geom_normal(instance_idx, hit_info.tri_idx);
 
@@ -2044,12 +1965,6 @@ fn sample_lights_pdf(local_id: vec3u, pos: vec3f, incoming: vec3f) -> f32
             let dist2 = dot(light_pos - pos, light_pos - pos);
             let cos_theta = abs(dot(light_normal, incoming));
 
-            //if cos_theta < 0.001f && abs(dot(incoming, vec3f(0.0f, 1.0f, 0.0f))) < 0.01f
-            {
-                debug_enable = true;
-                debug_color = pos;
-            }
-
             light_pdf += dist2 / (cos_theta * light.area);
             next_pos = light_pos;
         }
@@ -2057,7 +1972,6 @@ fn sample_lights_pdf(local_id: vec3u, pos: vec3f, incoming: vec3f) -> f32
         pdf += light_pdf;
     }
 
-    let num_envs = arrayLength(&environments);
     for(var i = 0u; i < num_envs; i++)
     {
         let env_tex_idx = environments[i].emission_tex_idx;
@@ -2291,7 +2205,7 @@ fn write_debug_color(global_id: vec2u, output_dim: vec2u)
     if debug_enable
     {
         if all(global_id < output_dim) {
-            //textureStore(output_hdr, global_id.xy, vec4f(debug_color, 1.0f));
+            textureStore(output_hdr, global_id.xy, vec4f(debug_color, 1.0f));
         }
     }
 }

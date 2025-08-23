@@ -28,6 +28,7 @@ pub fn build_lights(device: &wgpu::Device, queue: &wgpu::Queue, scene: &SceneCPU
         let mesh_verts = &verts_pos[instance.mesh_idx as usize];
         let mesh_indices = &indices[instance.mesh_idx as usize];
         if mat.emission.is_zero() { continue; }
+        if mesh_indices.is_empty() { continue; }
 
         let mut total_area: f32 = 0.0;
         let mut weights = Vec::<f32>::new();
@@ -42,11 +43,17 @@ pub fn build_lights(device: &wgpu::Device, queue: &wgpu::Queue, scene: &SceneCPU
             total_area += area;
         }
 
+        // Guard against extreme edgecase where all triangles
+        // have 0 area.
+        if total_area <= 0.0 { continue; }
+
         let light = Light { instance_idx: i as u32, area: total_area };
         lights.push(light);
 
         let alias_table = build_alias_table(&weights);
         let alias_table_buf = upload_storage_buffer(device, queue, to_u8_slice(&alias_table));
+        assert!(alias_table_buf.size() > 0);  // WGPU doesn't like 0 size buffers anyway
+
         alias_tables.push(alias_table_buf);
     }
 
@@ -72,7 +79,7 @@ pub fn build_lights(device: &wgpu::Device, queue: &wgpu::Queue, scene: &SceneCPU
             let prob = pixel_emission * f32::sin(angle);
 
             // Use uniform weights in case of 0.0 emission (this
-            // shouldn't happen but it's handled correctly).
+            // shouldn't happen but it's handled correctly regardless).
             if scale.x <= 0.0 && scale.y <= 0.0 && scale.z <= 0.0 {
                 weights.push(1.0);
             } else {
@@ -82,6 +89,8 @@ pub fn build_lights(device: &wgpu::Device, queue: &wgpu::Queue, scene: &SceneCPU
 
         let alias_table = build_alias_table(&weights);
         let alias_table_buf = upload_storage_buffer(device, queue, to_u8_slice(&alias_table));
+        assert!(alias_table_buf.size() > 0);  // WGPU doesn't like 0 size buffers anyway
+
         env_alias_tables.push(alias_table_buf);
     }
 
@@ -109,7 +118,7 @@ pub fn build_alias_table(weights: &[f32]) -> Vec::<AliasBin>
         sum += *weight as f64;
     }
 
-    assert!(sum > 0.0);
+    if sum == 0.0 { return vec![]; }
 
     // Normalize weights.
     let normalize_factor = 1.0 / sum;  // * is faster than /
@@ -527,6 +536,8 @@ fn compute_aabb(_indices: &[u32], tri_bounds: &mut[Aabb], tri_begin: u32, tri_co
 // The aabbs are in model space, and they're indexed using the instance mesh_idx member.
 pub fn build_tlas(instances: &[Instance], model_aabbs: &[Aabb]) -> Vec<TlasNode>
 {
+    if instances.is_empty() || model_aabbs.is_empty() { return vec![]; }
+
     let mut node_indices = Vec::<u32>::with_capacity(instances.len());
     let mut tlas = Vec::<TlasNode>::with_capacity(instances.len() * 2 - 1);
 
@@ -616,15 +627,15 @@ pub fn tlas_find_best_match(tlas: &[TlasNode], idx_array: &[u32], node_a: u32) -
 /// Also builds auxiliary data structures, e.g. lights.
 pub fn upload_scene_to_gpu(device: &wgpu::Device, queue: &wgpu::Queue, scene: &SceneCPU, textures: Vec<wgpu::Texture>, samplers: Vec<wgpu::Sampler>, envs_info: &[EnvMapInfo]) -> Scene
 {
-    let verts_pos_array = scene.verts_pos_array.iter().map(|x| upload_storage_buffer(device, queue, to_u8_slice(x))).collect();
-    let verts_array = scene.verts_array.iter().map(|x| upload_storage_buffer(device, queue, to_u8_slice(x))).collect();
-    let indices_array = scene.indices_array.iter().map(|x| upload_storage_buffer(device, queue, to_u8_slice(x))).collect();
-    let bvh_nodes_array = scene.bvh_nodes_array.iter().map(|x| upload_storage_buffer(device, queue, to_u8_slice(x))).collect();
+    let verts_pos_array: Vec::<wgpu::Buffer> = scene.verts_pos_array.iter().map(|x| upload_storage_buffer(device, queue, to_u8_slice(x))).collect();
+    let verts_array: Vec::<wgpu::Buffer> = scene.verts_array.iter().map(|x| upload_storage_buffer(device, queue, to_u8_slice(x))).collect();
+    let indices_array: Vec::<wgpu::Buffer> = scene.indices_array.iter().map(|x| upload_storage_buffer(device, queue, to_u8_slice(x))).collect();
+    let bvh_nodes_array: Vec::<wgpu::Buffer> = scene.bvh_nodes_array.iter().map(|x| upload_storage_buffer(device, queue, to_u8_slice(x))).collect();
 
-    let tlas_nodes = upload_storage_buffer(device, queue, to_u8_slice(&scene.tlas_nodes));
-    let instances = upload_storage_buffer(device, queue, to_u8_slice(&scene.instances));
-    let materials = upload_storage_buffer(device, queue, to_u8_slice(&scene.materials));
-    let environments = upload_storage_buffer(device, queue, to_u8_slice(&scene.environments));
+    let tlas_nodes = upload_storage_buffer_with_name(device, queue, to_u8_slice(&scene.tlas_nodes), "tlas_nodes");
+    let instances = upload_storage_buffer_with_name(device, queue, to_u8_slice(&scene.instances), "instances");
+    let materials = upload_storage_buffer_with_name(device, queue, to_u8_slice(&scene.materials), "materials");
+    let environments = upload_storage_buffer_with_name(device, queue, to_u8_slice(&scene.environments), "environments");
 
     // Build auxiliary data structures.
     let lights = build_lights(device, queue, scene, envs_info);
@@ -684,6 +695,7 @@ pub fn validate_scene(scene: &SceneCPU, num_textures: u32, num_samplers: u32)
     }
 }
 
+#[cfg(test)]
 mod tests
 {
     use rand::Rng;
@@ -696,8 +708,13 @@ mod tests
             0.2, 0.1, 0.05, 0.8, 1.2, 5.0, 0.1, 0.2, 0.3, 1.0, 1.0, 0.3, 0.35, 0.0,
         ];
 
+        test_alias_table_any(&weights);
+    }
+
+    fn test_alias_table_any(weights: &[f32])
+    {
         let mut weights_sum = 0.0;
-        for weight in &weights {
+        for weight in weights {
             weights_sum += weight;
         }
 
