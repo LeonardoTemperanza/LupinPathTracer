@@ -4,8 +4,8 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-wgpu  = "24.0.1"
 lupin = { path = "../lupin" }
+lupin_loader = { path = "../lupin_loader" }
 
 # GUI
 winit = "0.30.7"
@@ -13,8 +13,3 @@ egui  = "0.31.1"
 egui-wgpu  = "0.31.1"
 egui-winit = "0.31.1"
 rfd = "0.14"  # File dialog
-
-# Serialization
-tobj  = "4.0.2"
-image = "0.25.0"
-half = "2.3"

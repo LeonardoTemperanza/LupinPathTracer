@@ -20,6 +20,7 @@ pub use winit::
 use ::egui::FontDefinitions;
 
 pub use lupin as lp;
+use  lupin::wgpu as wgpu;
 
 mod loader;
 mod input;
@@ -27,6 +28,8 @@ mod ui;
 pub use loader::*;
 pub use input::*;
 pub use ui::*;
+
+pub use lupin_loader as lpl;
 
 fn main()
 {
@@ -187,7 +190,7 @@ pub struct AppState<'a>
     pub pathtrace_resources: lp::PathtraceResources,
     pub tonemap_resources: lp::TonemapResources,
     pub scene: lp::Scene,
-    pub scene_cameras: Vec<SceneCamera>,
+    pub scene_cameras: Vec<lpl::SceneCamera>,
     pub selected_cam: i32,  // If -1, no cam is selected (free-roam).
 
     // Textures
@@ -220,9 +223,9 @@ impl<'a> AppState<'a>
         let width = window.inner_size().width;
         let height = window.inner_size().height;
 
-        let (scene, scene_cameras) = (build_scene(&device, &queue), Vec::<SceneCamera>::new());
-        //let (scene, scene_cameras) = (build_scene_empty(&device, &queue), Vec::<SceneCamera>::new());
-        //let (scene, scene_cameras) = load_scene_json(std::path::Path::new("yocto-scenes/bathroom1/bathroom1.json"), &device, &queue).unwrap();
+        let (scene, scene_cameras) = (lpl::build_scene(&device, &queue), Vec::<lpl::SceneCamera>::new());
+        //let (scene, scene_cameras) = (lpl::build_scene_empty(&device, &queue), Vec::<SceneCamera>::new());
+        //let (scene, scene_cameras) = lpl::load_scene_json(std::path::Path::new("yocto-scenes/bathroom1/bathroom1.json"), &device, &queue).unwrap();
 
         let output_textures = [
             device.create_texture(&wgpu::TextureDescriptor {
@@ -904,7 +907,7 @@ impl<'a> AppState<'a>
                             .add_filter("json", &["json"])
                             .pick_file()
                         {
-                            (self.scene, self.scene_cameras) = load_scene_json(&path, self.device, self.queue).unwrap();
+                            (self.scene, self.scene_cameras) = lpl::load_scene_json(&path, self.device, self.queue).unwrap();
                             self.reset_accumulation();
                         }
                     }

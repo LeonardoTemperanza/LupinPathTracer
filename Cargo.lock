@@ -1905,6 +1905,8 @@ dependencies = [
 name = "lupin_loader"
 version = "0.1.0"
 dependencies = [
+ "half",
+ "image 0.25.6",
  "lupin",
  "tobj",
 ]
@@ -1927,12 +1929,9 @@ dependencies = [
  "egui",
  "egui-wgpu",
  "egui-winit",
- "half",
- "image 0.25.6",
  "lupin",
+ "lupin_loader",
  "rfd",
- "tobj",
- "wgpu",
  "winit 0.30.11",
 ]
 

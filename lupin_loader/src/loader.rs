@@ -1,7 +1,6 @@
 
-/*
-
 use lupin as lp;
+use lupin::wgpu as wgpu;
 
 pub fn build_scene(device: &wgpu::Device, queue: &wgpu::Queue) -> lp::Scene
 {
@@ -1752,5 +1751,3 @@ fn extract_f32(buf: &[u8], offset: usize) -> f32
     let val = unsafe { std::ptr::read_unaligned(ptr) };
     return val;
 }
-
-*/
