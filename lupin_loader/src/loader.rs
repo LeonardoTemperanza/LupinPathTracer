@@ -17,7 +17,7 @@ pub fn build_scene(device: &wgpu::Device, queue: &wgpu::Queue) -> lp::Scene
 
     // Textures
     let white_tex = push_asset(&mut textures, lp::create_white_texture(device, queue));
-    let bunny_color = push_asset(&mut textures, load_texture(device, queue, "bunny_color.png", false));
+    let bunny_color = push_asset(&mut textures, load_texture(device, queue, "bunny_color.png", false).unwrap());
     //let (env_map_cpu, env_map_gpu) = load_hdr_texture_and_keep_cpu_copy(device, queue, "poly_haven_studio_1k.hdr");
     let (env_map_cpu, env_map_gpu) = load_hdr_texture_and_keep_cpu_copy(device, queue, "sky.hdr");
     let env_map = push_asset(&mut textures, env_map_gpu);
@@ -393,11 +393,11 @@ pub fn build_scene_cornell_box(device: &wgpu::Device, queue: &wgpu::Queue) -> lp
 }
 */
 
-pub fn load_texture(device: &wgpu::Device, queue: &wgpu::Queue, path: &str, hdr: bool) -> wgpu::Texture
+pub fn load_texture(device: &wgpu::Device, queue: &wgpu::Queue, path: &str, hdr: bool) -> Result<wgpu::Texture, image::ImageError>
 {
     use image::GenericImageView;
 
-    let img = image::open(path).expect("Failed to load image");
+    let img = image::open(path)?;
     let dimensions = img.dimensions();
 
     let size = wgpu::Extent3d {
@@ -458,7 +458,7 @@ pub fn load_texture(device: &wgpu::Device, queue: &wgpu::Queue, path: &str, hdr:
         );
     }
 
-    return texture;
+    return Ok(texture);
 }
 
 pub fn load_hdr_texture_and_keep_cpu_copy(device: &wgpu::Device, queue: &wgpu::Queue, path: &str) -> (lp::EnvMapInfo, wgpu::Texture)
@@ -762,7 +762,11 @@ pub fn load_scene_json(path: &std::path::Path, device: &wgpu::Device, queue: &wg
                                     let is_hdr = matches!(ext.to_lowercase().as_str(), "hdr" | "exr");
                                     let full_path = parent_dir.join(path);
 
-                                    push_asset(&mut textures, load_texture(device, queue, full_path.to_str().unwrap(), is_hdr));
+                                    let res = load_texture(device, queue, full_path.to_str().unwrap(), is_hdr);
+                                    if res.is_err() {
+                                        return Err(res.unwrap_err().into());
+                                    }
+                                    push_asset(&mut textures, res.unwrap());
                                 }
                             }
                             "name" =>
@@ -839,7 +843,10 @@ pub fn load_scene_json(path: &std::path::Path, device: &wgpu::Device, queue: &wg
                                     {
                                         "ply" =>
                                         {
-                                            load_mesh_ply(&full_path, &mut verts_pos_array, &mut verts_array, &mut indices_array, &mut bvh_nodes_array, &mut mesh_aabbs).unwrap();
+                                            let res = load_mesh_ply(&full_path, &mut verts_pos_array, &mut verts_array, &mut indices_array, &mut bvh_nodes_array, &mut mesh_aabbs);
+                                            if !res.is_ok() {
+                                                return Err(res.unwrap_err());
+                                            }
                                         },
                                         "obj" =>
                                         {
@@ -966,6 +973,7 @@ pub fn load_scene_json(path: &std::path::Path, device: &wgpu::Device, queue: &wg
     return Ok((scene, scene_cams));
 }
 
+// Utility functions used for parsing any simple textual format.
 struct Parser<'a>
 {
     pub buf: &'a [u8],
@@ -1367,6 +1375,7 @@ impl<'a> Parser<'a>
 pub enum LoadError
 {
     Io(std::io::Error),
+    ImageErr(image::ImageError),
     InvalidPly,
     InvalidJson,
 }
@@ -1376,6 +1385,14 @@ impl From<std::io::Error> for LoadError
     fn from(err: std::io::Error) -> Self
     {
         return LoadError::Io(err);
+    }
+}
+
+impl From<image::ImageError> for LoadError
+{
+    fn from(err: image::ImageError) -> Self
+    {
+        return LoadError::ImageErr(err);
     }
 }
 
@@ -1751,3 +1768,14 @@ fn extract_f32(buf: &[u8], offset: usize) -> f32
     let val = unsafe { std::ptr::read_unaligned(ptr) };
     return val;
 }
+
+// Saving
+
+/*
+/// Assumes image to be letterboxed/pillarboxed inside of 'texture'.
+fn save_texture_png(device: &wgpu::Device, queue: &wgpu::Queue, path: &std::path::Path, texture: &wgpu::Texture, width: u32, height: u32)
+{
+}
+
+fn save_texture_hdr(
+*/

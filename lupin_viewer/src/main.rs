@@ -20,7 +20,7 @@ pub use winit::
 use ::egui::FontDefinitions;
 
 pub use lupin as lp;
-use  lupin::wgpu as wgpu;
+use lupin::wgpu as wgpu;
 
 mod loader;
 mod input;
@@ -33,7 +33,7 @@ pub use lupin_loader as lpl;
 
 fn main()
 {
-    let event_loop = EventLoop::builder().build().unwrap();
+    let event_loop = EventLoop::new().unwrap();
     let window_attributes = WindowAttributes::default()
         .with_title("Lupin Pathtracer")
         .with_inner_size(PhysicalSize::new(1920.0, 1080.0))
@@ -86,8 +86,6 @@ fn main()
             {
                 WindowEvent::Resized(new_size) =>
                 {
-                    app_state.resize_callback(new_size.width, new_size.height);
-
                     // Resize surface
                     surface_config.width  = new_size.width;
                     surface_config.height = new_size.height;
@@ -723,15 +721,6 @@ impl<'a> AppState<'a>
         }
     }
 
-    fn resize_callback(&mut self, new_width: u32, new_height: u32)
-    {
-        //self.reset_accumulation();
-        //resize_texture(&self.device, &mut self.output_textures[0], new_width, new_height);
-        //resize_texture(&self.device, &mut self.output_textures[1], new_width, new_height);
-        //resize_texture(&self.device, &mut self.output_rgba8_unorm, new_width, new_height);
-        //resize_texture(&self.device, &mut self.output_rgba8_snorm, new_width, new_height);
-    }
-
     fn resize_output_textures(&mut self, new_width: u32, new_height: u32)
     {
         self.reset_accumulation();
@@ -907,8 +896,15 @@ impl<'a> AppState<'a>
                             .add_filter("json", &["json"])
                             .pick_file()
                         {
-                            (self.scene, self.scene_cameras) = lpl::load_scene_json(&path, self.device, self.queue).unwrap();
-                            self.reset_accumulation();
+                            if let Ok(res) = lpl::load_scene_json(&path, self.device, self.queue)
+                            {
+                                (self.scene, self.scene_cameras) = res;
+                                self.reset_accumulation();
+                            }
+                            else
+                            {
+                                println!("Failed to load json file!");
+                            }
                         }
                     }
 
@@ -965,7 +961,31 @@ impl<'a> AppState<'a>
                         self.reset_accumulation();
                         self.resize_output_textures(output_res_x, output_res_y);
                     }
+
+                    if ui.button("Save HDR").clicked()
+                    {
+                        if let Some(path) = rfd::FileDialog::new()
+                            .set_title("Save HDR")
+                            .add_filter("HDR Image", &["hdr"])
+                            .save_file()
+                        {
+
+                        }
+                    }
+
+                    if ui.button("Save tonemapped").clicked()
+                    {
+                        if let Some(path) = rfd::FileDialog::new()
+                            .set_title("Save tonemapped")
+                            .add_filter("PNG Image", &["png"])
+                            .save_file()
+                        {
+
+                        }
+                    }
                 }
+
+                ui.add_space(12.0);
             });
         });
 
