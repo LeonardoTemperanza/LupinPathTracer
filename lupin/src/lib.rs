@@ -9,8 +9,10 @@ mod base;
 mod renderer;
 mod wgpu_utils;
 mod data_structures;
+mod tonemapping;
 
 pub use base::*;
 pub use renderer::*;
 pub use wgpu_utils::*;
 pub use data_structures::*;
+pub use tonemapping::*;

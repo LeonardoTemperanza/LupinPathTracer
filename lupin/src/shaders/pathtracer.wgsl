@@ -596,6 +596,8 @@ fn clean_up_material(mat: MaterialPoint) -> MaterialPoint
 {
     var res = mat;
 
+    res.roughness *= res.roughness;
+
     // Clean up density
     if res.mat_type == MAT_TYPE_REFRACTIVE ||
        res.mat_type == MAT_TYPE_VOLUMETRIC ||

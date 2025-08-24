@@ -608,7 +608,7 @@ pub fn load_scene_json(path: &std::path::Path, device: &wgpu::Device, queue: &wg
     let mut bvh_nodes_array = Vec::<Vec::<lp::BvhNode>>::new();
     let mut mesh_aabbs = Vec::<lp::Aabb>::new();
     let mut materials = Vec::<lp::Material>::new();
-    let mut environments = Vec::<lp::Environment>::new();
+    let environments = Vec::<lp::Environment>::new();
 
     let mut textures = Vec::<wgpu::Texture>::new();
     let mut samplers = Vec::<wgpu::Sampler>::new();
@@ -624,7 +624,7 @@ pub fn load_scene_json(path: &std::path::Path, device: &wgpu::Device, queue: &wg
     assert!(default_tex == 0);
     let base_tex_id = 1;
 
-    let mut default_mat = lp::Material::default();  // Default texture is 0 which is what we want
+    let default_mat = lp::Material::default();  // Default texture is 0 which is what we want
 
     // Conversion matrix to Lupin's coordinate system, which is left-handed.
     let mut conversion = lp::Mat4::IDENTITY;
@@ -1385,7 +1385,7 @@ fn load_mesh_ply(path: &std::path::Path, mesh_verts_pos: &mut Vec<Vec<lp::Vertex
     // Parse header
     let ply = std::fs::read(path)?;
     let mut p = Parser::new(&ply);
-    let mut header_continue = true;
+    let header_continue = true;
 
     let mut x_buf = Buffer::default();
     let mut y_buf = Buffer::default();
@@ -1395,11 +1395,11 @@ fn load_mesh_ply(path: &std::path::Path, mesh_verts_pos: &mut Vec<Vec<lp::Vertex
     let mut nz_buf = Buffer::default();
     let mut u_buf = Buffer::default();
     let mut v_buf = Buffer::default();
-    let mut indices = Vec::<u32>::default();
+    let indices = Vec::<u32>::default();
     let mut num_verts = 0;
     let mut num_faces = 0;
     let mut vert_size = 0;
-    let mut indices_offset = 0;
+    let indices_offset = 0;
 
     p.expect_ident("ply");
 

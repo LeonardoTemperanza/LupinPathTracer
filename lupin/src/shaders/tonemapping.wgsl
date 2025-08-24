@@ -120,6 +120,44 @@ fn tonemap_filmic_uc2_default(color: vec3f) -> vec3f
 
 fn tonemap_aces(color: vec3f) -> vec3f
 {
+    // https://knarkowicz.wordpress.com/2016/01/06/aces-filmic-tone-mapping-curve/
+    /*
+    let hdr = color * 0.6f;  // brings it back to ACES range
+    let ldr = (hdr * hdr * 2.51f + hdr * 0.03f) /
+              (hdr * hdr * 2.43f + hdr * 0.59f + vec3f(0.14f));
+    return max(vec3f(0.0f), ldr);
+    */
+
+    /*
+    // https://github.com/TheRealMJP/BakingLab/blob/master/BakingLab/ACES.hlsl
+    // sRGB => XYZ => D65_2_D60 => AP1 => RRT_SAT
+    let ACESInputMat = transpose(mat3x3f(
+        0.59719f, 0.35458f, 0.04823f,
+        0.07600f, 0.90834f, 0.01566f,
+        0.02840f, 0.13383f, 0.83777f,
+    ));
+    // ODT_SAT => XYZ => D60_2_D65 => sRGB
+    let ACESOutputMat = transpose(mat3x3f(
+        1.60475f, -0.53108f, -0.07367f,
+        -0.10208f, 1.10813f, -0.00605f,
+        -0.00327f, -0.07276f, 1.07602f,
+    ));
+
+    let srgb = ACESInputMat * color;
+
+    // RRT => ODT
+    let odt = (srgb * srgb + srgb * 0.0245786f - 0.000090537f) /
+             (srgb * srgb * 0.983729f + srgb * 0.4329510f + 0.238081f);
+
+    let ldr = ACESOutputMat * odt;
+    return max(vec3f(0, 0, 0), ldr);
+    */
+
+    return color;
+
+    // OLD ACES IMPL
+
+    /*
     // ACES filmic tonemapper with highlight desaturation ("crosstalk").
     // Based on the curve fit by Krzysztof Narkowicz.
     // https://knarkowicz.wordpress.com/2016/01/06/aces-filmic-tone-mapping-curve/
@@ -148,6 +186,7 @@ fn tonemap_aces(color: vec3f) -> vec3f
 
     // Return after desaturation step.
     return mix(tonemap.rgb, tonemap.aaa, t);
+    */
 }
 
 fn linear_to_srgb(linear_color: vec3f) -> vec3f

@@ -52,10 +52,37 @@ fn my_waker() -> Waker { unsafe { return Waker::from_raw(my_raw_waker()) } }
 pub const DEG_TO_RAD: f32 = 0.017453292;
 pub const RAD_TO_DEG: f32 = 57.29578049;
 
-use crate::renderer::Vec3;
-use crate::renderer::Vec2;
-use crate::renderer::Mat4;
-use crate::renderer::Aabb;
+#[derive(Default, Clone, Copy, Debug)]
+#[repr(C)]
+pub struct Vec2
+{
+    pub x: f32,
+    pub y: f32
+}
+
+#[derive(Default, Clone, Copy, Debug)]
+#[repr(C)]
+pub struct Vec3
+{
+    pub x: f32,
+    pub y: f32,
+    pub z: f32
+}
+
+#[derive(Debug, Clone, Copy)]
+#[repr(C)]
+pub struct Mat4
+{
+    pub m: [[f32; 4]; 4]
+}
+
+#[derive(Debug, Default, Clone, Copy)]
+#[repr(C)]
+pub struct Aabb
+{
+    pub min: Vec3,
+    pub max: Vec3
+}
 
 impl Vec3
 {

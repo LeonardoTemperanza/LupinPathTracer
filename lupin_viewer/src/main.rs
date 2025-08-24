@@ -222,7 +222,7 @@ impl<'a> AppState<'a>
 
         let (scene, scene_cameras) = (build_scene(&device, &queue), Vec::<SceneCamera>::new());
         //let (scene, scene_cameras) = (build_scene_empty(&device, &queue), Vec::<SceneCamera>::new());
-        let (scene, scene_cameras) = load_scene_json(std::path::Path::new("yocto-scenes/bathroom1/bathroom1.json"), &device, &queue).unwrap();
+        //let (scene, scene_cameras) = load_scene_json(std::path::Path::new("yocto-scenes/bathroom1/bathroom1.json"), &device, &queue).unwrap();
 
         let output_textures = [
             device.create_texture(&wgpu::TextureDescriptor {
@@ -823,7 +823,7 @@ impl<'a> AppState<'a>
                         ui.label("Max accumulations");
                     });
 
-                    egui::CollapsingHeader::new("Stats").id_source("stats_pathtrace").show(ui, |ui| {
+                    egui::CollapsingHeader::new("Stats").id_salt("stats_pathtrace").show(ui, |ui| {
                         ui.label(format!("Iteration: {:?}", self.accum_counter));
                         ui.label(format!("Tile: {:?}", self.tile_idx));
                     });
@@ -921,7 +921,7 @@ impl<'a> AppState<'a>
 
                     ui.add(egui::RadioButton::new(self.selected_cam == -1, "Free-roam"));
 
-                    egui::CollapsingHeader::new("Stats").id_source("stats_scene").show(ui, |ui| {
+                    egui::CollapsingHeader::new("Stats").id_salt("stats_scene").show(ui, |ui| {
                         ui.label(format!("Num instances: {:?}", self.scene.instances.size() as usize / std::mem::size_of::<lp::Instance>()));
                     });
                 }
