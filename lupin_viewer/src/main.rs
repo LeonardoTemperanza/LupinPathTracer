@@ -22,10 +22,8 @@ use ::egui::FontDefinitions;
 pub use lupin as lp;
 use lupin::wgpu as wgpu;
 
-mod loader;
 mod input;
 mod ui;
-pub use loader::*;
 pub use input::*;
 pub use ui::*;
 
@@ -969,7 +967,12 @@ impl<'a> AppState<'a>
                             .add_filter("HDR Image", &["hdr"])
                             .save_file()
                         {
-
+                            let res = lpl::save_texture_png(self.device, self.queue,
+                                                            &path,
+                                                            &self.output_textures[self.output_tex_front]);
+                            if let Err(err) = res {
+                                println!("Failed to save texture: {}", err);
+                            }
                         }
                     }
 
@@ -980,7 +983,38 @@ impl<'a> AppState<'a>
                             .add_filter("PNG Image", &["png"])
                             .save_file()
                         {
+                            let width  = self.output_textures[self.output_tex_back].size().width;
+                            let height = self.output_textures[self.output_tex_back].size().height;
 
+                            // Create texture
+                            let tmp_tex = self.device.create_texture(&wgpu::TextureDescriptor {
+                                label: None,
+                                size: wgpu::Extent3d { width: width as u32, height: height as u32, depth_or_array_layers: 1 },
+                                mip_level_count: 1,
+                                sample_count: 1,
+                                dimension: wgpu::TextureDimension::D2,
+                                format: wgpu::TextureFormat::Rgba8Unorm,
+                                usage: wgpu::TextureUsages::STORAGE_BINDING |
+                                       wgpu::TextureUsages::TEXTURE_BINDING |
+                                       wgpu::TextureUsages::RENDER_ATTACHMENT |
+                                       wgpu::TextureUsages::COPY_SRC,
+                                view_formats: &[]
+                            });
+
+                            lp::tonemap_and_fit_aspect(&self.device, &self.queue, &lp::TonemapDesc {
+                                resources: &self.tonemap_resources,
+                                hdr_texture: &self.output_textures[self.output_tex_front],
+                                render_target: &tmp_tex,
+                                tonemap_params: &self.tonemap_params,
+                            }, None);
+
+                            let res = lpl::save_texture_png(&self.device, &self.queue,
+                                                            &path,
+                                                            &tmp_tex);
+                            if let Err(err) = res {
+                                // TODO: popup
+                                println!("Failed to save texture: {}", err);
+                            }
                         }
                     }
                 }

@@ -521,14 +521,21 @@ pub fn load_hdr_texture_and_keep_cpu_copy(device: &wgpu::Device, queue: &wgpu::Q
     }, texture);
 }
 
-use half::*;
-
-fn rgba32f_to_rgba16f(image_rgba32f: &image::ImageBuffer<image::Rgba<f32>, Vec<f32>>) -> Vec<f16>
+fn rgba32f_to_rgba16f(image_rgba32f: &image::ImageBuffer<image::Rgba<f32>, Vec<f32>>) -> Vec<half::f16>
 {
     return image_rgba32f.pixels()
-                        .flat_map(|p| p.0.iter().map(|&f| f16::from_f32(f)))
-                        .collect();
+        .flat_map(|p| p.0.iter().map(|&f| half::f16::from_f32(f)))
+        .collect();
 }
+
+/*
+fn rgba16f_to_imagebuf(image_rgba16f: &Vec<half::f16>) -> image::ImageBuffer<image::Rgba<f32>, Vec<f32>>
+{
+    return image_rgba16f.iter()
+        .flat_map(|p| image::Rgba::<f32>(p.into()))
+        .collect();
+}
+*/
 
 fn push_asset<T>(vec: &mut Vec<T>, el: T) -> u32
 {
@@ -763,8 +770,8 @@ pub fn load_scene_json(path: &std::path::Path, device: &wgpu::Device, queue: &wg
                                     let full_path = parent_dir.join(path);
 
                                     let res = load_texture(device, queue, full_path.to_str().unwrap(), is_hdr);
-                                    if res.is_err() {
-                                        return Err(res.unwrap_err().into());
+                                    if let Err(err) = res {
+                                        return Err(err.into());
                                     }
                                     push_asset(&mut textures, res.unwrap());
                                 }
@@ -844,8 +851,8 @@ pub fn load_scene_json(path: &std::path::Path, device: &wgpu::Device, queue: &wg
                                         "ply" =>
                                         {
                                             let res = load_mesh_ply(&full_path, &mut verts_pos_array, &mut verts_array, &mut indices_array, &mut bvh_nodes_array, &mut mesh_aabbs);
-                                            if !res.is_ok() {
-                                                return Err(res.unwrap_err());
+                                            if let Err(err) = res {
+                                                return Err(err);
                                             }
                                         },
                                         "obj" =>
@@ -973,7 +980,7 @@ pub fn load_scene_json(path: &std::path::Path, device: &wgpu::Device, queue: &wg
     return Ok((scene, scene_cams));
 }
 
-// Utility functions used for parsing any simple textual format.
+// Utility functions used for parsing any simple ASCII textual format.
 struct Parser<'a>
 {
     pub buf: &'a [u8],
@@ -1714,7 +1721,8 @@ pub struct Buffer
     stride: usize,
 }
 
-pub struct Serializer<'a>
+// Used for binary serialization.
+struct Serializer<'a>
 {
     pub buf: &'a [u8]
 }
@@ -1771,11 +1779,136 @@ fn extract_f32(buf: &[u8], offset: usize) -> f32
 
 // Saving
 
-/*
-/// Assumes image to be letterboxed/pillarboxed inside of 'texture'.
-fn save_texture_png(device: &wgpu::Device, queue: &wgpu::Queue, path: &std::path::Path, texture: &wgpu::Texture, width: u32, height: u32)
+pub fn save_texture_png(device: &wgpu::Device, queue: &wgpu::Queue, path: &std::path::Path, texture: &wgpu::Texture) -> Result<(), image::ImageError>
 {
+    // TODO: Check texture format.
+
+    let width = texture.size().width;
+    let height = texture.size().height;
+
+    let bytes_per_pixel = 4; // R8G8B8A8 = 4 bytes
+    let unpadded_bytes_per_row = width * bytes_per_pixel;
+    let align = wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
+    let padded_bytes_per_row = ((unpadded_bytes_per_row + align - 1) / align) * align;
+    let buffer_size = (padded_bytes_per_row * height) as u64;
+
+    let output_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("Output Buffer"),
+        size: buffer_size,
+        usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+        mapped_at_creation: false,
+    });
+
+    // Copy texture into buffer
+    let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+        label: Some("Texture Copy Encoder"),
+    });
+    encoder.copy_texture_to_buffer(
+        texture.as_image_copy(),
+        wgpu::TexelCopyBufferInfo {
+            buffer: &output_buffer,
+            layout: wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(padded_bytes_per_row),
+                rows_per_image: Some(height),
+            },
+        },
+        wgpu::Extent3d {
+            width,
+            height,
+            depth_or_array_layers: 1,
+        },
+    );
+    queue.submit(Some(encoder.finish()));
+
+    // Map synchronously
+    let buffer_slice = output_buffer.slice(..);
+    buffer_slice.map_async(wgpu::MapMode::Read, |_| {});
+
+    // Wait until GPU work is done and buffer is ready
+    device.poll(wgpu::Maintain::Wait);
+
+    // Access mapped data
+    let data = buffer_slice.get_mapped_range();
+
+    // Save as .png file
+    let img = image::ImageBuffer::<image::Rgba<u8>, _>::from_raw(width, height, data)
+        .expect("Vec length does not match width * height * 4");
+    let res = img.save(path);
+    return res;
 }
 
-fn save_texture_hdr(
+/*
+fn save_texture_hdr(device: &wgpu::Device, queue: &wgpu::Queue, path: &std::path::Path, texture: &wgpu::Texture) -> Result<(), image::ImageError>
+{
+    // TODO: Check texture format.
+
+    let width = texture.size().width;
+    let height = texture.size().height;
+
+    let bytes_per_pixel = 16; // R32G32B32A32_FLOAT = 4 x f32
+    let unpadded_bytes_per_row = width * bytes_per_pixel;
+    let align = wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
+    let padded_bytes_per_row = ((unpadded_bytes_per_row + align - 1) / align) * align;
+    let buffer_size = (padded_bytes_per_row * height) as u64;
+
+    let output_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("Output Buffer"),
+        size: buffer_size,
+        usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+        mapped_at_creation: false,
+    });
+
+    // Copy texture into buffer
+    let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+        label: Some("Texture Copy Encoder"),
+    });
+    encoder.copy_texture_to_buffer(
+        texture.as_image_copy(),
+        wgpu::TexelCopyBufferInfo {
+            buffer: &output_buffer,
+            layout: wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(padded_bytes_per_row),
+                rows_per_image: Some(height),
+            },
+        },
+        wgpu::Extent3d {
+            width,
+            height,
+            depth_or_array_layers: 1,
+        },
+    );
+    queue.submit(Some(encoder.finish()));
+
+    // Map synchronously
+    let buffer_slice = output_buffer.slice(..);
+    buffer_slice.map_async(wgpu::MapMode::Read, |_| {});
+
+    // Wait until GPU work is done and buffer is ready
+    device.poll(wgpu::Maintain::Wait);
+
+    // Access mapped data
+    let data = buffer_slice.get_mapped_range();
+
+    // Convert to Vec<RGBE8Pixel>
+    /*
+    let mut pixels: Vec<RGBE8Pixel> = Vec::with_capacity((width * height) as usize);
+    for chunk in data.chunks(padded_bytes_per_row as usize) {
+        let row = &chunk[..unpadded_bytes_per_row as usize];
+        let floats: &[f32] = bytemuck::cast_slice(row);
+
+        for px in floats.chunks(4) {
+            let (r, g, b, _a) = (px[0], px[1], px[2], px[3]);
+            pixels.push(RGBE8Pixel::from_f32(r, g, b));
+        }
+    }
+    */
+
+    // Save as .hdr file
+    let img = image::ImageBuffer::<image::Rgba<u8>, _>::from_raw(width, height, data)
+        .expect("Vec length does not match width * height * 4");
+    let res = img.save(path);
+    return res;
+}
 */
