@@ -967,9 +967,9 @@ impl<'a> AppState<'a>
                             .add_filter("HDR Image", &["hdr"])
                             .save_file()
                         {
-                            let res = lpl::save_texture_png(self.device, self.queue,
-                                                            &path,
-                                                            &self.output_textures[self.output_tex_front]);
+                            let res = lpl::save_texture(self.device, self.queue,
+                                                        &path,
+                                                        &self.output_textures[self.output_tex_front]);
                             if let Err(err) = res {
                                 println!("Failed to save texture: {}", err);
                             }
@@ -1008,9 +1008,9 @@ impl<'a> AppState<'a>
                                 tonemap_params: &self.tonemap_params,
                             }, None);
 
-                            let res = lpl::save_texture_png(&self.device, &self.queue,
-                                                            &path,
-                                                            &tmp_tex);
+                            let res = lpl::save_texture(&self.device, &self.queue,
+                                                        &path,
+                                                        &tmp_tex);
                             if let Err(err) = res {
                                 // TODO: popup
                                 println!("Failed to save texture: {}", err);

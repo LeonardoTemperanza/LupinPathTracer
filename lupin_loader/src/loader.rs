@@ -1779,14 +1779,21 @@ fn extract_f32(buf: &[u8], offset: usize) -> f32
 
 // Saving
 
-pub fn save_texture_png(device: &wgpu::Device, queue: &wgpu::Queue, path: &std::path::Path, texture: &wgpu::Texture) -> Result<(), image::ImageError>
+/// Detects file format from its extension. Supports rgba8_unorm, rgba16f
+pub fn save_texture(device: &wgpu::Device, queue: &wgpu::Queue, path: &std::path::Path, texture: &wgpu::Texture) -> Result<(), image::ImageError>
 {
     // TODO: Check texture format.
+    let format = texture.format();
+    assert!(format == wgpu::TextureFormat::Rgba8Unorm || format == wgpu::TextureFormat::Rgba16Float);
 
     let width = texture.size().width;
     let height = texture.size().height;
 
-    let bytes_per_pixel = 4; // R8G8B8A8 = 4 bytes
+    let bytes_per_pixel = match format {
+        wgpu::TextureFormat::Rgba8Unorm => 4,
+        wgpu::TextureFormat::Rgba16Float => 8,
+        _ => { panic!("unsupported texture format"); }
+    };
     let unpadded_bytes_per_row = width * bytes_per_pixel;
     let align = wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
     let padded_bytes_per_row = ((unpadded_bytes_per_row + align - 1) / align) * align;
@@ -1832,10 +1839,34 @@ pub fn save_texture_png(device: &wgpu::Device, queue: &wgpu::Queue, path: &std::
     let data = buffer_slice.get_mapped_range();
 
     // Save as .png file
-    let img = image::ImageBuffer::<image::Rgba<u8>, _>::from_raw(width, height, data)
-        .expect("Vec length does not match width * height * 4");
-    let res = img.save(path);
-    return res;
+    match format
+    {
+        wgpu::TextureFormat::Rgba8Unorm =>
+        {
+            let img = image::ImageBuffer::<image::Rgba<u8>, _>::from_raw(width, height, data).unwrap();
+            let res = img.save(path);
+            return res;
+        },
+        wgpu::TextureFormat::Rgba16Float =>
+        {
+            assert!(data.len() % 2 == 0, "Data must be aligned to 2 bytes");
+            let data_f16: &[half::f16] = unsafe {
+                std::slice::from_raw_parts(data.as_ptr() as *const half::f16, data.len() / 2)
+            };
+
+            let mut data_f32_no_alpha = Vec::with_capacity((width * height * 3) as usize);
+            for px in data_f16.chunks_exact(4)
+            {
+                data_f32_no_alpha.push(f32::from(px[0]));
+                data_f32_no_alpha.push(f32::from(px[1]));
+                data_f32_no_alpha.push(f32::from(px[2]));
+            }
+            let img = image::ImageBuffer::<image::Rgb<f32>, _>::from_raw(width, height, data_f32_no_alpha).unwrap();
+            let res = img.save(path);
+            return res;
+        },
+        _ => { panic!("unsupported texture type"); }
+    }
 }
 
 /*
