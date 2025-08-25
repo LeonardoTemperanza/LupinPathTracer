@@ -964,7 +964,7 @@ impl<'a> AppState<'a>
                     {
                         if let Some(path) = rfd::FileDialog::new()
                             .set_title("Save HDR")
-                            .add_filter("HDR Image", &["hdr"])
+                            .add_filter("HDR Image", &["hdr", "exr"])
                             .save_file()
                         {
                             let res = lpl::save_texture(self.device, self.queue,
@@ -980,7 +980,7 @@ impl<'a> AppState<'a>
                     {
                         if let Some(path) = rfd::FileDialog::new()
                             .set_title("Save tonemapped")
-                            .add_filter("PNG Image", &["png"])
+                            .add_filter("LDR Image", &["png", "jpg", "jpeg"])
                             .save_file()
                         {
                             let width  = self.output_textures[self.output_tex_back].size().width;

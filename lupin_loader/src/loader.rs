@@ -1779,10 +1779,9 @@ fn extract_f32(buf: &[u8], offset: usize) -> f32
 
 // Saving
 
-/// Detects file format from its extension. Supports rgba8_unorm, rgba16f
+/// Detects file format from its extension. Supports rgba8_unorm, rgba16f. Drops alpha.
 pub fn save_texture(device: &wgpu::Device, queue: &wgpu::Queue, path: &std::path::Path, texture: &wgpu::Texture) -> Result<(), image::ImageError>
 {
-    // TODO: Check texture format.
     let format = texture.format();
     assert!(format == wgpu::TextureFormat::Rgba8Unorm || format == wgpu::TextureFormat::Rgba16Float);
 
@@ -1843,7 +1842,15 @@ pub fn save_texture(device: &wgpu::Device, queue: &wgpu::Queue, path: &std::path
     {
         wgpu::TextureFormat::Rgba8Unorm =>
         {
-            let img = image::ImageBuffer::<image::Rgba<u8>, _>::from_raw(width, height, data).unwrap();
+            let mut data_no_alpha = Vec::with_capacity((width * height * 3) as usize);
+            for px in data.chunks_exact(4)
+            {
+                data_no_alpha.push(px[0]);
+                data_no_alpha.push(px[1]);
+                data_no_alpha.push(px[2]);
+            }
+
+            let img = image::ImageBuffer::<image::Rgb<u8>, _>::from_raw(width, height, data_no_alpha).unwrap();
             let res = img.save(path);
             return res;
         },
@@ -1868,78 +1875,3 @@ pub fn save_texture(device: &wgpu::Device, queue: &wgpu::Queue, path: &std::path
         _ => { panic!("unsupported texture type"); }
     }
 }
-
-/*
-fn save_texture_hdr(device: &wgpu::Device, queue: &wgpu::Queue, path: &std::path::Path, texture: &wgpu::Texture) -> Result<(), image::ImageError>
-{
-    // TODO: Check texture format.
-
-    let width = texture.size().width;
-    let height = texture.size().height;
-
-    let bytes_per_pixel = 16; // R32G32B32A32_FLOAT = 4 x f32
-    let unpadded_bytes_per_row = width * bytes_per_pixel;
-    let align = wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
-    let padded_bytes_per_row = ((unpadded_bytes_per_row + align - 1) / align) * align;
-    let buffer_size = (padded_bytes_per_row * height) as u64;
-
-    let output_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("Output Buffer"),
-        size: buffer_size,
-        usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
-        mapped_at_creation: false,
-    });
-
-    // Copy texture into buffer
-    let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-        label: Some("Texture Copy Encoder"),
-    });
-    encoder.copy_texture_to_buffer(
-        texture.as_image_copy(),
-        wgpu::TexelCopyBufferInfo {
-            buffer: &output_buffer,
-            layout: wgpu::TexelCopyBufferLayout {
-                offset: 0,
-                bytes_per_row: Some(padded_bytes_per_row),
-                rows_per_image: Some(height),
-            },
-        },
-        wgpu::Extent3d {
-            width,
-            height,
-            depth_or_array_layers: 1,
-        },
-    );
-    queue.submit(Some(encoder.finish()));
-
-    // Map synchronously
-    let buffer_slice = output_buffer.slice(..);
-    buffer_slice.map_async(wgpu::MapMode::Read, |_| {});
-
-    // Wait until GPU work is done and buffer is ready
-    device.poll(wgpu::Maintain::Wait);
-
-    // Access mapped data
-    let data = buffer_slice.get_mapped_range();
-
-    // Convert to Vec<RGBE8Pixel>
-    /*
-    let mut pixels: Vec<RGBE8Pixel> = Vec::with_capacity((width * height) as usize);
-    for chunk in data.chunks(padded_bytes_per_row as usize) {
-        let row = &chunk[..unpadded_bytes_per_row as usize];
-        let floats: &[f32] = bytemuck::cast_slice(row);
-
-        for px in floats.chunks(4) {
-            let (r, g, b, _a) = (px[0], px[1], px[2], px[3]);
-            pixels.push(RGBE8Pixel::from_f32(r, g, b));
-        }
-    }
-    */
-
-    // Save as .hdr file
-    let img = image::ImageBuffer::<image::Rgba<u8>, _>::from_raw(width, height, data)
-        .expect("Vec length does not match width * height * 4");
-    let res = img.save(path);
-    return res;
-}
-*/
