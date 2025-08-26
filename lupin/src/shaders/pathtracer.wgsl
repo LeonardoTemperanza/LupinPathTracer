@@ -318,27 +318,6 @@ fn gbuffer_normals_main(@builtin(local_invocation_id) local_id: vec3u, @builtin(
     }
 }
 
-/*
-// Pixel offset is expected to be in the [-0.5, 0.5] range.
-fn compute_camera_ray(global_id: vec2u, output_dim: vec2u, pixel_offset: vec2f) -> Ray
-{
-    let frag_coord = vec2f(global_id.xy) + 0.5f;
-    let resolution = vec2f(output_dim);
-
-    var nudged_uv = frag_coord + pixel_offset;  // Move 0.5 to the left and right
-    nudged_uv = clamp(nudged_uv, vec2(0.0f), resolution.xy) / resolution;
-
-    let uv = frag_coord / resolution;
-    var coord = 2.0f * nudged_uv - 1.0f;
-    coord.y *= -f32(resolution.y) / f32(resolution.x);
-
-    let look_at = normalize(vec3(coord, 1.0f));
-
-    let res = Ray(vec3f(0.0f, 0.0f, 0.0f), look_at, 1.0f / look_at);
-    return transform_ray(res, constants.camera_transform);
-}
-*/
-
 // pixel_offset is expected to be in the [-0.5, 0.5] range.
 fn compute_camera_ray(global_id: vec2u, output_dim: vec2u, pixel_offset: vec2f) -> Ray
 {
@@ -432,7 +411,7 @@ fn pathtrace_naive(local_id: vec3u, start_ray: Ray) -> vec3f
         let normal = hit.normal;
         let outgoing = -ray.dir;
 
-        let material = MaterialPoint(mat.mat_type, emission, color.rgb, roughness, mat.metallic, mat.ior, density, mat.scattering.rgb, mat.sc_anisotropy, mat.tr_depth);
+        let material = clean_up_material(MaterialPoint(mat.mat_type, emission, color.rgb, roughness, mat.metallic, mat.ior, density, mat.scattering.rgb, mat.sc_anisotropy, mat.tr_depth));
 
         // Accumulate emission.
         radiance += weight * emission /** f32(dot(normal, outgoing) >= 0.0f)*/;
@@ -461,7 +440,7 @@ fn pathtrace_naive(local_id: vec3u, start_ray: Ray) -> vec3f
         ray.inv_dir = 1.0f / ray.dir;
 
         // Check weight.
-        if all(weight == vec3f(0.0f)) || !is_finite_vec3f(weight) { break; }
+        if all(weight == vec3f(0.0f)) || !vec3f_is_finite(weight) { break; }
 
         // Russian roulette.
         if bounce > 3
@@ -523,7 +502,7 @@ fn pathtrace(local_id: vec3u, start_ray: Ray) -> vec3f
         let outgoing = -ray.dir;
 
         // Accumulate emission.
-        radiance += weight * emission; /** f32(dot(normal, outgoing) >= 0.0f);*/
+        radiance += weight * emission /** f32(dot(normal, outgoing) >= 0.0f)*/;
 
         // Compute next direction.
         var incoming = vec3f();
@@ -562,7 +541,7 @@ fn pathtrace(local_id: vec3u, start_ray: Ray) -> vec3f
         ray.inv_dir = 1.0f / ray.dir;
 
         // Check weight.
-        if all(weight == vec3f(0.0f)) || !is_finite_vec3f(weight) { break; }
+        if all(weight == vec3f(0.0f)) || !vec3f_is_finite(weight) { break; }
 
         // Russian roulette.
         if bounce > 3
@@ -1277,7 +1256,7 @@ fn is_inf(x: f32) -> bool
     return (u32(x) & 0x7FFFFFFF) == 0x7F800000;
 }
 
-fn is_finite_vec3f(v: vec3f) -> bool
+fn vec3f_is_finite(v: vec3f) -> bool
 {
     return all((vec3u(v) & vec3u(0x7F800000)) != vec3u(0x7F800000));
 }
@@ -1968,7 +1947,7 @@ fn sample_lights_pdf(local_id: vec3u, pos: vec3f, incoming: vec3f) -> f32
             let cos_theta = abs(dot(light_normal, incoming));
 
             light_pdf += dist2 / (cos_theta * light.area);
-            next_pos = light_pos;
+            next_pos = light_pos + incoming;
         }
 
         pdf += light_pdf;
@@ -2019,9 +1998,12 @@ fn compute_dir_from_point_to_tri(instance_idx: u32, tri_idx: u32, uv: vec2f, p: 
 
     let local_tri_pos = v0*w + v1*uv.x + v2*uv.y;
 
-    let local_dir = normalize(local_tri_pos - local_p);
-    let normal_mat = transpose(mat3x3f(inv_trans[0].xyz, inv_trans[1].xyz, inv_trans[2].xyz));
-    return normalize(normal_mat * local_dir);
+    let world_tri_pos = (mat4f_inverse(inv_trans) * vec4f(local_tri_pos, 1.0f)).xyz;
+    return normalize(world_tri_pos - p);
+
+    //let local_dir = normalize(local_tri_pos - local_p);
+    //let normal_mat = transpose(mat3x3f(inv_trans[0].xyz, inv_trans[1].xyz, inv_trans[2].xyz));
+    //return normalize(normal_mat * local_dir);
 }
 
 fn compute_tri_normal(instance_idx: u32, tri_idx: u32, uv: vec2f) -> vec3f
@@ -2195,6 +2177,48 @@ fn get_heatmap_color(val: f32, min: f32, max: f32) -> vec3f
 
     color = pow(factor * color, vec3f(gamma));
     return color;
+}
+
+// Ideally should not be used, but useful for debugging.
+//https://gist.github.com/mattatz/86fff4b32d198d0928d0fa4ff32cf6fa
+fn mat4f_inverse(m: mat4x4f) -> mat4x4f
+{
+    let n11 = m[0][0]; let n12 = m[1][0]; let n13 = m[2][0]; let n14 = m[3][0];
+    let n21 = m[0][1]; let n22 = m[1][1]; let n23 = m[2][1]; let n24 = m[3][1];
+    let n31 = m[0][2]; let n32 = m[1][2]; let n33 = m[2][2]; let n34 = m[3][2];
+    let n41 = m[0][3]; let n42 = m[1][3]; let n43 = m[2][3]; let n44 = m[3][3];
+
+    let t11 = n23 * n34 * n42 - n24 * n33 * n42 + n24 * n32 * n43 - n22 * n34 * n43 - n23 * n32 * n44 + n22 * n33 * n44;
+    let t12 = n14 * n33 * n42 - n13 * n34 * n42 - n14 * n32 * n43 + n12 * n34 * n43 + n13 * n32 * n44 - n12 * n33 * n44;
+    let t13 = n13 * n24 * n42 - n14 * n23 * n42 + n14 * n22 * n43 - n12 * n24 * n43 - n13 * n22 * n44 + n12 * n23 * n44;
+    let t14 = n14 * n23 * n32 - n13 * n24 * n32 - n14 * n22 * n33 + n12 * n24 * n33 + n13 * n22 * n34 - n12 * n23 * n34;
+
+    let det = n11 * t11 + n21 * t12 + n31 * t13 + n41 * t14;
+    let idet = 1.0f / det;
+
+    var ret = mat4x4f();
+
+    ret[0][0] = t11 * idet;
+    ret[0][1] = (n24 * n33 * n41 - n23 * n34 * n41 - n24 * n31 * n43 + n21 * n34 * n43 + n23 * n31 * n44 - n21 * n33 * n44) * idet;
+    ret[0][2] = (n22 * n34 * n41 - n24 * n32 * n41 + n24 * n31 * n42 - n21 * n34 * n42 - n22 * n31 * n44 + n21 * n32 * n44) * idet;
+    ret[0][3] = (n23 * n32 * n41 - n22 * n33 * n41 - n23 * n31 * n42 + n21 * n33 * n42 + n22 * n31 * n43 - n21 * n32 * n43) * idet;
+
+    ret[1][0] = t12 * idet;
+    ret[1][1] = (n13 * n34 * n41 - n14 * n33 * n41 + n14 * n31 * n43 - n11 * n34 * n43 - n13 * n31 * n44 + n11 * n33 * n44) * idet;
+    ret[1][2] = (n14 * n32 * n41 - n12 * n34 * n41 - n14 * n31 * n42 + n11 * n34 * n42 + n12 * n31 * n44 - n11 * n32 * n44) * idet;
+    ret[1][3] = (n12 * n33 * n41 - n13 * n32 * n41 + n13 * n31 * n42 - n11 * n33 * n42 - n12 * n31 * n43 + n11 * n32 * n43) * idet;
+
+    ret[2][0] = t13 * idet;
+    ret[2][1] = (n14 * n23 * n41 - n13 * n24 * n41 - n14 * n21 * n43 + n11 * n24 * n43 + n13 * n21 * n44 - n11 * n23 * n44) * idet;
+    ret[2][2] = (n12 * n24 * n41 - n14 * n22 * n41 + n14 * n21 * n42 - n11 * n24 * n42 - n12 * n21 * n44 + n11 * n22 * n44) * idet;
+    ret[2][3] = (n13 * n22 * n41 - n12 * n23 * n41 - n13 * n21 * n42 + n11 * n23 * n42 + n12 * n21 * n43 - n11 * n22 * n43) * idet;
+
+    ret[3][0] = t14 * idet;
+    ret[3][1] = (n13 * n24 * n31 - n14 * n23 * n31 + n14 * n21 * n33 - n11 * n24 * n33 - n13 * n21 * n34 + n11 * n23 * n34) * idet;
+    ret[3][2] = (n14 * n22 * n31 - n12 * n24 * n31 - n14 * n21 * n32 + n11 * n24 * n32 + n12 * n21 * n34 - n11 * n22 * n34) * idet;
+    ret[3][3] = (n12 * n23 * n31 - n13 * n22 * n31 + n13 * n21 * n32 - n11 * n23 * n32 - n12 * n21 * n33 + n11 * n22 * n33) * idet;
+
+    return ret;
 }
 
 // For quick printf-like debugging.

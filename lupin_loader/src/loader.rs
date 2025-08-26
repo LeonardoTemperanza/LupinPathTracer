@@ -616,7 +616,7 @@ pub fn load_scene_json(path: &std::path::Path, device: &wgpu::Device, queue: &wg
     let mut bvh_nodes_array = Vec::<Vec::<lp::BvhNode>>::new();
     let mut mesh_aabbs = Vec::<lp::Aabb>::new();
     let mut materials = Vec::<lp::Material>::new();
-    let environments = Vec::<lp::Environment>::new();
+    let mut environments = Vec::<lp::Environment>::new();
 
     let mut textures = Vec::<wgpu::Texture>::new();
     let mut samplers = Vec::<wgpu::Sampler>::new();
@@ -709,6 +709,8 @@ pub fn load_scene_json(path: &std::path::Path, device: &wgpu::Device, queue: &wg
                 p.expect_char(':');
                 p.expect_char('[');
 
+                let mut env = lp::Environment::default();
+
                 let mut list_continue = true;
                 while list_continue
                 {
@@ -723,12 +725,12 @@ pub fn load_scene_json(path: &std::path::Path, device: &wgpu::Device, queue: &wg
                             "emission" =>
                             {
                                 p.expect_char(':');
-                                let emission = p.parse_vec3f();
+                                env.emission = p.parse_vec3f();
                             }
                             "emission_tex" =>
                             {
                                 p.expect_char(':');
-                                let emission_tex = p.parse_u32();
+                                env.emission_tex_idx = p.parse_u32();
                             }
                             _ => {}
                         }
@@ -737,6 +739,8 @@ pub fn load_scene_json(path: &std::path::Path, device: &wgpu::Device, queue: &wg
                     }
 
                     p.expect_char('}');
+                    environments.push(env);
+
                     list_continue = p.next_list_el();
                 }
 
@@ -1836,6 +1840,15 @@ fn extract_f32(buf: &[u8], offset: usize) -> f32
 }
 
 // Saving
+
+
+/// Transfers texture from GPU to CPU, into a buffer of uniform type (RGBAF32).
+/*
+pub fn download_texture(device: &wgpu::Device, queue: &wgpu::Queue, texture: &wgpu::Texture) -> Vec<Vec4>
+{
+
+}
+*/
 
 /// Detects file format from its extension. Supports rgba8_unorm, rgba16f. Drops alpha.
 pub fn save_texture(device: &wgpu::Device, queue: &wgpu::Queue, path: &std::path::Path, texture: &wgpu::Texture) -> Result<(), image::ImageError>
