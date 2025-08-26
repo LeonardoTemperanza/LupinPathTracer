@@ -435,7 +435,7 @@ fn pathtrace_naive(local_id: vec3u, start_ray: Ray) -> vec3f
         let material = MaterialPoint(mat.mat_type, emission, color.rgb, roughness, mat.metallic, mat.ior, density, mat.scattering.rgb, mat.sc_anisotropy, mat.tr_depth);
 
         // Accumulate emission.
-        radiance += weight * emission * f32(dot(normal, outgoing) >= 0.0f);
+        radiance += weight * emission /** f32(dot(normal, outgoing) >= 0.0f)*/;
 
         // Compute next direction.
         var incoming = vec3f();
@@ -523,7 +523,7 @@ fn pathtrace(local_id: vec3u, start_ray: Ray) -> vec3f
         let outgoing = -ray.dir;
 
         // Accumulate emission.
-        radiance += weight * emission * f32(dot(normal, outgoing) >= 0.0f);
+        radiance += weight * emission; /** f32(dot(normal, outgoing) >= 0.0f);*/
 
         // Compute next direction.
         var incoming = vec3f();

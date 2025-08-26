@@ -120,7 +120,7 @@ fn tonemap_filmic_uc2_default(color: vec3f) -> vec3f
 
 fn tonemap_aces(color: vec3f) -> vec3f
 {
-    //return color;
+    return color;
 
     // https://knarkowicz.wordpress.com/2016/01/06/aces-filmic-tone-mapping-curve/
     /*
@@ -130,7 +130,7 @@ fn tonemap_aces(color: vec3f) -> vec3f
     return max(vec3f(0.0f), ldr);
     */
 
-
+    /*
 
     // https://github.com/TheRealMJP/BakingLab/blob/master/BakingLab/ACES.hlsl
     // sRGB => XYZ => D65_2_D60 => AP1 => RRT_SAT
@@ -156,6 +156,7 @@ fn tonemap_aces(color: vec3f) -> vec3f
     return max(vec3f(0, 0, 0), ldr);
 
 
+    */
 
     // OLD ACES IMPL
 

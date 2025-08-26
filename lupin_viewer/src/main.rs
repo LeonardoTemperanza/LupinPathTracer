@@ -234,7 +234,8 @@ impl<'a> AppState<'a>
                 usage: wgpu::TextureUsages::STORAGE_BINDING |
                        wgpu::TextureUsages::TEXTURE_BINDING |
                        wgpu::TextureUsages::COPY_SRC |
-                       wgpu::TextureUsages::COPY_DST,
+                       wgpu::TextureUsages::COPY_DST |
+                       wgpu::TextureUsages::RENDER_ATTACHMENT,
                 view_formats: &[]
             }),
             device.create_texture(&wgpu::TextureDescriptor {
@@ -247,7 +248,8 @@ impl<'a> AppState<'a>
                 usage: wgpu::TextureUsages::STORAGE_BINDING |
                        wgpu::TextureUsages::TEXTURE_BINDING |
                        wgpu::TextureUsages::COPY_SRC |
-                       wgpu::TextureUsages::COPY_DST,
+                       wgpu::TextureUsages::COPY_DST |
+                       wgpu::TextureUsages::RENDER_ATTACHMENT,
                 view_formats: &[]
             })
         ];
@@ -476,7 +478,6 @@ impl<'a> AppState<'a>
             }
             RenderType::Pathtrace =>
             {
-
                 if self.controlling_camera
                 {
                     if self.show_normals_when_moving
@@ -556,6 +557,16 @@ impl<'a> AppState<'a>
                         let tmp = self.output_tex_back;
                         self.output_tex_back  = self.output_tex_front;
                         self.output_tex_front = tmp;
+
+                        // Copy the contents of the front buffer onto the back buffer,
+                        // so that when we swap buffers it won't be as jarring.
+                        let blitter = wgpu::util::TextureBlitter::new(self.device, wgpu::TextureFormat::Rgba16Float);
+                        let mut encoder = self.device.create_command_encoder(&Default::default());
+                        let src = self.output_textures[self.output_tex_back ].create_view(&Default::default());
+                        let dst = self.output_textures[self.output_tex_front].create_view(&Default::default());
+                        blitter.copy(self.device, &mut encoder, &src, &dst);
+                        self.queue.submit(Some(encoder.finish()));
+
                         self.accum_counter = (self.accum_counter + 1).min(self.max_accums);
                     }
                 }

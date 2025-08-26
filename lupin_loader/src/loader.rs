@@ -318,7 +318,8 @@ pub fn build_scene(device: &wgpu::Device, queue: &wgpu::Queue) -> lp::Scene
     return lp::upload_scene_to_gpu(device, queue, &scene_cpu, textures, samplers, &[env_map_cpu]);
 }
 
-// Useful for library testing more than anything else.
+/// Builds an empty scene, which should show up as a black texture in a render.
+/// Useful for library testing more than anything else.
 pub fn build_scene_empty(device: &wgpu::Device, queue: &wgpu::Queue) -> lp::Scene
 {
     let scene_cpu = lp::SceneCPU {
@@ -334,7 +335,6 @@ pub fn build_scene_empty(device: &wgpu::Device, queue: &wgpu::Queue) -> lp::Scen
     };
 
     lp::validate_scene(&scene_cpu, 0, 0);
-
     return lp::upload_scene_to_gpu(device, queue, &scene_cpu, vec![], vec![], &[]);
 }
 
@@ -1374,6 +1374,64 @@ impl<'a> Parser<'a>
         return mat;
     }
 
+    fn ensure_whitespace(&mut self)
+    {
+
+    }
+
+    fn json_ignore_value(&mut self)
+    {
+        self.eat_whitespace();
+        if self.buf.is_empty() { self.found_error = true; return; }
+
+        if self.buf[0] == b'{'  // Object
+        {
+            self.buf = &self.buf[1..];
+
+            let parens = 1;
+            while parens > 0
+            {
+
+            }
+
+            // Skip until the next '}'
+        }
+        else if self.buf[0] == b'['  // Array
+        {
+            self.buf = &self.buf[1..];
+
+            let parens = 1;
+            while parens > 0
+            {
+
+            }
+
+            // Skip until the next ']'
+        }
+        else if u8::is_ascii_digit(&self.buf[0])  // Number
+        {
+
+        }
+        else
+        {
+            if self.buf.starts_with(b"true")
+            {
+                self.buf = &self.buf[4..];
+            }
+            else if self.buf.starts_with(b"true")
+            {
+
+            }
+            else if self.buf.starts_with(b"false")
+            {
+
+            }
+            else if self.buf.starts_with(b"null")
+            {
+
+            }
+        }
+    }
 }
 
 // .PLY Format
@@ -1686,7 +1744,7 @@ fn ply_fill_missing_info(verts_pos: &mut Vec<lp::VertexPos>, verts: &mut Vec<lp:
         let mut v1 = verts[indices[i+1] as usize];
         let mut v2 = verts[indices[i+2] as usize];
 
-        let geom_normal = lp::normalize_vec3(lp::cross_vec3(vp1.v - vp0.v, vp2.v - vp1.v));
+        let geom_normal = lp::normalize_vec3(lp::cross_vec3(vp1.v - vp0.v, vp2.v - vp0.v));
         v0.normal = geom_normal;
         v1.normal = geom_normal;
         v2.normal = geom_normal;
@@ -1783,7 +1841,8 @@ fn extract_f32(buf: &[u8], offset: usize) -> f32
 pub fn save_texture(device: &wgpu::Device, queue: &wgpu::Queue, path: &std::path::Path, texture: &wgpu::Texture) -> Result<(), image::ImageError>
 {
     let format = texture.format();
-    assert!(format == wgpu::TextureFormat::Rgba8Unorm || format == wgpu::TextureFormat::Rgba16Float);
+    assert!(format == wgpu::TextureFormat::Rgba8Unorm || format == wgpu::TextureFormat::Rgba16Float,
+            "Unsupported texture format for save_texture!");
 
     let width = texture.size().width;
     let height = texture.size().height;
@@ -1856,7 +1915,7 @@ pub fn save_texture(device: &wgpu::Device, queue: &wgpu::Queue, path: &std::path
         },
         wgpu::TextureFormat::Rgba16Float =>
         {
-            assert!(data.len() % 2 == 0, "Data must be aligned to 2 bytes");
+            assert!(data.len() % 2 == 0, "Data must be aligned to 2 bytes!");
             let data_f16: &[half::f16] = unsafe {
                 std::slice::from_raw_parts(data.as_ptr() as *const half::f16, data.len() / 2)
             };
