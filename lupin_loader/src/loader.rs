@@ -45,7 +45,7 @@ pub fn build_scene(device: &wgpu::Device, queue: &wgpu::Queue) -> lp::Scene
         0.0,                                // depth
         1,                                  // Color tex
         0,                                  // Emission tex
-        0,                                  // Roughness tex
+        lp::SENTINEL_IDX,                                  // Roughness tex
         0,                                  // Scattering tex
         0,                                  // Normal tex
     ));
@@ -606,7 +606,7 @@ pub struct SceneCamera
     pub params: lp::CameraParams,
 }
 
-pub fn load_scene_json(path: &std::path::Path, device: &wgpu::Device, queue: &wgpu::Queue) -> Result<(lp::Scene, Vec<SceneCamera>), LoadError>
+pub fn load_scene_yoctogl_v24(path: &std::path::Path, device: &wgpu::Device, queue: &wgpu::Queue) -> Result<(lp::Scene, Vec<SceneCamera>), LoadError>
 {
     let parent_dir = path.parent().unwrap_or(std::path::Path::new(""));
 
@@ -966,6 +966,17 @@ pub fn load_scene_json(path: &std::path::Path, device: &wgpu::Device, queue: &wg
 
     let tlas_nodes = lp::build_tlas(instances.as_slice(), &mesh_aabbs);
 
+    let mut environment_infos = Vec::<lp::EnvMapInfo>::with_capacity(environments.len());
+    for env in &environments
+    {
+        let mut info = lp::EnvMapInfo::default();
+        let tex = &textures[env.emission_tex_idx as usize];
+        info.data = download_texture(device, queue, tex);
+        info.width = tex.size().width;
+        info.height = tex.size().height;
+        environment_infos.push(info);
+    }
+
     let scene_cpu = lp::SceneCPU {
         verts_pos_array,
         verts_array,
@@ -980,7 +991,7 @@ pub fn load_scene_json(path: &std::path::Path, device: &wgpu::Device, queue: &wg
 
     lp::validate_scene(&scene_cpu, textures.len() as u32, samplers.len() as u32);
 
-    let scene = lp::upload_scene_to_gpu(device, queue, &scene_cpu, textures, samplers, &[/*env_map_cpu*/]);
+    let scene = lp::upload_scene_to_gpu(device, queue, &scene_cpu, textures, samplers, &environment_infos);
     return Ok((scene, scene_cams));
 }
 
@@ -1841,14 +1852,111 @@ fn extract_f32(buf: &[u8], offset: usize) -> f32
 
 // Saving
 
-
 /// Transfers texture from GPU to CPU, into a buffer of uniform type (RGBAF32).
-/*
-pub fn download_texture(device: &wgpu::Device, queue: &wgpu::Queue, texture: &wgpu::Texture) -> Vec<Vec4>
+/// Supports rgba8_unorm, rgba16f.
+pub fn download_texture(device: &wgpu::Device, queue: &wgpu::Queue, texture: &wgpu::Texture) -> Vec<lp::Vec4>
 {
+    let width = texture.size().width;
+    let height = texture.size().height;
+    let format = texture.format();
 
+    // How many bytes per pixel?
+    let bytes_per_pixel = match format {
+        wgpu::TextureFormat::Rgba8Unorm |
+        wgpu::TextureFormat::Rgba8UnormSrgb => 4,   // u8 * 4
+        wgpu::TextureFormat::Rgba16Float => 8,      // f16 * 4
+        wgpu::TextureFormat::Rgba32Float => 16,     // f32 * 4
+        _ => panic!("Unsupported texture format: {:?}", format),
+    };
+
+    // Bytes per row must be padded to 256 bytes for GPU copy
+    let unpadded_bytes_per_row = bytes_per_pixel * width as usize;
+    let align = wgpu::COPY_BYTES_PER_ROW_ALIGNMENT as usize;
+    let padded_bytes_per_row = ((unpadded_bytes_per_row + align - 1) / align) * align;
+
+    // Create readback buffer
+    let buffer_size = padded_bytes_per_row as u64 * height as u64;
+    let buffer = device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("download buffer"),
+        size: buffer_size,
+        usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+        mapped_at_creation: false,
+    });
+
+    // Encode copy from texture -> buffer
+    let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+        label: Some("download encoder"),
+    });
+    encoder.copy_texture_to_buffer(
+        texture.as_image_copy(),
+        wgpu::TexelCopyBufferInfo {
+            buffer: &buffer,
+            layout: wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(padded_bytes_per_row as u32),
+                rows_per_image: Some(height),
+            },
+        },
+        wgpu::Extent3d {
+            width: width,
+            height: height,
+            depth_or_array_layers: 1,
+        },
+    );
+    queue.submit(Some(encoder.finish()));
+
+    // Map and block until ready (synchronous style)
+    {
+        let buffer_slice = buffer.slice(..);
+        let (tx, rx) = std::sync::mpsc::channel();
+        buffer_slice.map_async(wgpu::MapMode::Read, move |res| tx.send(res).unwrap());
+        device.poll(wgpu::Maintain::Wait);
+        rx.recv().unwrap().unwrap();
+    }
+
+    // Read the data
+    let view = buffer.slice(..).get_mapped_range();
+    let mut pixels = Vec::with_capacity((width * height) as usize);
+
+    for y in 0..height as usize {
+        let row = &view[y * padded_bytes_per_row..y * padded_bytes_per_row + unpadded_bytes_per_row];
+        match format {
+            wgpu::TextureFormat::Rgba8Unorm | wgpu::TextureFormat::Rgba8UnormSrgb => {
+                for px in row.chunks_exact(4) {
+                    let r = px[0] as f32 / 255.0;
+                    let g = px[1] as f32 / 255.0;
+                    let b = px[2] as f32 / 255.0;
+                    let a = px[3] as f32 / 255.0;
+                    pixels.push(lp::Vec4 { x: r, y: g, z: b, w: a });
+                }
+            }
+            wgpu::TextureFormat::Rgba16Float => {
+                for px in row.chunks_exact(8) {
+                    let r = half::f16::from_bits(u16::from_le_bytes([px[0], px[1]])).to_f32();
+                    let g = half::f16::from_bits(u16::from_le_bytes([px[2], px[3]])).to_f32();
+                    let b = half::f16::from_bits(u16::from_le_bytes([px[4], px[5]])).to_f32();
+                    let a = half::f16::from_bits(u16::from_le_bytes([px[6], px[7]])).to_f32();
+                    pixels.push(lp::Vec4 { x: r, y: g, z: b, w: a });
+                }
+            }
+            wgpu::TextureFormat::Rgba32Float => {
+                for px in row.chunks_exact(16) {
+                    let r = f32::from_le_bytes([px[0], px[1], px[2], px[3]]);
+                    let g = f32::from_le_bytes([px[4], px[5], px[6], px[7]]);
+                    let b = f32::from_le_bytes([px[8], px[9], px[10], px[11]]);
+                    let a = f32::from_le_bytes([px[12], px[13], px[14], px[15]]);
+                    pixels.push(lp::Vec4 { x: r, y: g, z: b, w: a });
+                }
+            }
+            _ => unreachable!(),
+        }
+    }
+
+    drop(view);
+    buffer.unmap();
+
+    return pixels;
 }
-*/
 
 /// Detects file format from its extension. Supports rgba8_unorm, rgba16f. Drops alpha.
 pub fn save_texture(device: &wgpu::Device, queue: &wgpu::Queue, path: &std::path::Path, texture: &wgpu::Texture) -> Result<(), image::ImageError>

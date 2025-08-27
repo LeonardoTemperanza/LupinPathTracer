@@ -57,6 +57,7 @@ override DEBUG: bool = false;  // Relying on dead code elimination for good perf
 // Constants
 const WORKGROUP_SIZE_X: u32 = 4;
 const WORKGROUP_SIZE_Y: u32 = 4;
+const SENTINEL_IDX: u32 = U32_MAX;
 
 // We need these wrappers, or we get a weird
 // compilation error, for some reason...
@@ -372,7 +373,7 @@ fn pathtrace_naive(local_id: vec3u, start_ray: Ray) -> vec3f
     var ray = start_ray;
     var weight = vec3f(1.0f);  // Multiplicative terms.
     var radiance = vec3f(0.0f);
-    var op_bounce: u32 = 0;
+    var opacity_bounce: u32 = 0;
     for(var bounce = 0u; bounce <= MAX_BOUNCES; bounce++)
     {
         let hit = ray_scene_intersection(local_id, ray);
@@ -387,52 +388,44 @@ fn pathtrace_naive(local_id: vec3u, start_ray: Ray) -> vec3f
             DEBUG_NUM_BOUNCES++;
         }
 
-        let mat = materials[hit.mat_idx];
-        const mat_sampler_idx: u32 = 0;  // TODO!
-
-        let color = textureSampleLevel(textures[mat.color_tex_idx], samplers[mat_sampler_idx], hit.tex_coords, 0.0f) * mat.color;
-
         let hit_pos = ray.ori + ray.dir * hit.dst;
+        let outgoing = -ray.dir;
+
+        let mat_point = get_material_point(materials[hit.mat_idx], hit.tex_coords);
 
         // TODO: No caustics param.
 
         // Handle coverage.
-        if color.a < 1.0f && random_f32() >= color.a
+        if mat_point.opacity < 1.0f && random_f32() >= mat_point.opacity
         {
-            op_bounce++;
-            if op_bounce > 128 { break; }
+            opacity_bounce++;
+            if opacity_bounce > 128 { break; }
             bounce -= 1;
             continue;
         }
 
-        let emission = textureSampleLevel(textures[mat.emission_tex_idx], samplers[mat_sampler_idx], hit.tex_coords, 0.0f).rgb * mat.emission.rgb;
-        let roughness = textureSampleLevel(textures[mat.roughness_tex_idx], samplers[mat_sampler_idx], hit.tex_coords, 0.0f).r * mat.roughness;
-        let density = select(vec3f(0.0f), -log(clamp(color.rgb, vec3f(0.0001f), vec3f(1.0f))) / mat.tr_depth, mat.mat_type == MAT_TYPE_REFRACTIVE || mat.mat_type == MAT_TYPE_VOLUMETRIC || mat.mat_type == MAT_TYPE_SUBSURFACE);
         let normal = hit.normal;
-        let outgoing = -ray.dir;
-
-        let material = clean_up_material(MaterialPoint(mat.mat_type, emission, color.rgb, roughness, mat.metallic, mat.ior, density, mat.scattering.rgb, mat.sc_anisotropy, mat.tr_depth));
 
         // Accumulate emission.
-        radiance += weight * emission /** f32(dot(normal, outgoing) >= 0.0f)*/;
+        radiance += weight * mat_point.emission /** f32(dot(normal, outgoing) >= 0.0f)*/;
 
         // Compute next direction.
         var incoming = vec3f();
-        if !is_mat_delta(mat)
+        if !is_mat_delta(mat_point)
         {
             let rnd0 = random_f32();
             let rnd1 = random_vec2f();
-            incoming = sample_bsdfcos(material, normal, outgoing, rnd0, rnd1);
+            incoming = sample_bsdfcos(mat_point, normal, outgoing, rnd0, rnd1);
             if all(incoming == vec3f(0.0f)) { break; }
 
-            weight *= eval_bsdfcos(material, normal, outgoing, incoming) / sample_bsdfcos_pdf(material, normal, outgoing, incoming);
+            weight *= eval_bsdfcos(mat_point, normal, outgoing, incoming) / sample_bsdfcos_pdf(mat_point, normal, outgoing, incoming);
         }
         else
         {
-            incoming = sample_delta(material, normal, outgoing, random_f32());
+            incoming = sample_delta(mat_point, normal, outgoing, random_f32());
             if all(incoming == vec3f(0.0f)) { break; }
 
-            weight *= eval_delta(material, normal, outgoing, incoming) / sample_delta_pdf(material, normal, outgoing, incoming);
+            weight *= eval_delta(mat_point, normal, outgoing, incoming) / sample_delta_pdf(mat_point, normal, outgoing, incoming);
         }
 
         ray.ori = hit_pos;
@@ -459,7 +452,7 @@ fn pathtrace(local_id: vec3u, start_ray: Ray) -> vec3f
     var ray = start_ray;
     var weight = vec3f(1.0f);  // Multiplicative terms.
     var radiance = vec3f(0.0f);
-    var op_bounce: u32 = 0;
+    var opacity_bounce: u32 = 0;
     for(var bounce = 0u; bounce <= MAX_BOUNCES; bounce++)
     {
         let hit = ray_scene_intersection(local_id, ray);
@@ -474,39 +467,28 @@ fn pathtrace(local_id: vec3u, start_ray: Ray) -> vec3f
             DEBUG_NUM_BOUNCES++;
         }
 
-        let mat = materials[hit.mat_idx];
-        const mat_sampler_idx: u32 = 0;  // TODO!
-
-        let color = textureSampleLevel(textures[mat.color_tex_idx], samplers[mat_sampler_idx], hit.tex_coords, 0.0f) * mat.color;
-
         let hit_pos = ray.ori + ray.dir * hit.dst;
+        let outgoing = -ray.dir;
 
-        // TODO: No caustics param.
+        let mat_point = get_material_point(materials[hit.mat_idx], hit.tex_coords);
 
         // Handle coverage.
-        if color.a < 1.0f && random_f32() >= color.a
+        if mat_point.opacity < 1.0f && random_f32() >= mat_point.opacity
         {
-            op_bounce++;
-            if op_bounce > 128 { break; }
+            opacity_bounce++;
+            if opacity_bounce > 128 { break; }
             bounce -= 1;
             continue;
         }
 
-        let emission = textureSampleLevel(textures[mat.emission_tex_idx], samplers[mat_sampler_idx], hit.tex_coords, 0.0f).rgb * mat.emission.rgb;
-        let roughness = textureSampleLevel(textures[mat.roughness_tex_idx], samplers[mat_sampler_idx], hit.tex_coords, 0.0f).r * mat.roughness;
-        let density = select(vec3f(0.0f), -log(clamp(color.rgb, vec3f(0.0001f), vec3f(1.0f))) / mat.tr_depth, mat.mat_type == MAT_TYPE_REFRACTIVE || mat.mat_type == MAT_TYPE_VOLUMETRIC || mat.mat_type == MAT_TYPE_SUBSURFACE);
         let normal = hit.normal;
 
-        let material = clean_up_material(MaterialPoint(mat.mat_type, emission, color.rgb, roughness, mat.metallic, mat.ior, density, mat.scattering.rgb, mat.sc_anisotropy, mat.tr_depth));
-
-        let outgoing = -ray.dir;
-
         // Accumulate emission.
-        radiance += weight * emission /** f32(dot(normal, outgoing) >= 0.0f)*/;
+        radiance += weight * mat_point.emission /** f32(dot(normal, outgoing) >= 0.0f)*/;
 
         // Compute next direction.
         var incoming = vec3f();
-        if !is_mat_delta(mat)
+        if !is_mat_delta(mat_point)
         {
             const light_prob = 0.5f;
             const bsdf_prob = 1.0f - light_prob;
@@ -514,7 +496,7 @@ fn pathtrace(local_id: vec3u, start_ray: Ray) -> vec3f
             {
                 let rnd0 = random_f32();
                 let rnd1 = random_vec2f();
-                incoming = sample_bsdfcos(material, normal, outgoing, rnd0, rnd1);
+                incoming = sample_bsdfcos(mat_point, normal, outgoing, rnd0, rnd1);
             }
             else
             {
@@ -523,17 +505,17 @@ fn pathtrace(local_id: vec3u, start_ray: Ray) -> vec3f
 
             if all(incoming == vec3f(0.0f)) { break; }
 
-            let prob = bsdf_prob  * sample_bsdfcos_pdf(material, normal, outgoing, incoming) +
+            let prob = bsdf_prob  * sample_bsdfcos_pdf(mat_point, normal, outgoing, incoming) +
                        light_prob * sample_lights_pdf(local_id, hit_pos, incoming);
-            weight *= eval_bsdfcos(material, normal, outgoing, incoming) / prob;
+            weight *= eval_bsdfcos(mat_point, normal, outgoing, incoming) / prob;
         }
         else
         {
-            incoming = sample_delta(material, normal, outgoing, random_f32());
+            incoming = sample_delta(mat_point, normal, outgoing, random_f32());
             if all(incoming == vec3f(0.0f)) { break; }
 
-            weight *= eval_delta(material, normal, outgoing, incoming) /
-                      sample_delta_pdf(material, normal, outgoing, incoming);
+            weight *= eval_delta(mat_point, normal, outgoing, incoming) /
+                      sample_delta_pdf(mat_point, normal, outgoing, incoming);
         }
 
         ray.ori = hit_pos;
@@ -560,33 +542,57 @@ struct MaterialPoint
     mat_type: u32,
     emission: vec3f,
     color: vec3f,
+    opacity: f32,
     roughness: f32,
     metallic: f32,
     ior: f32,
     density: vec3f,
     scattering: vec3f,
-    scanisotropy: f32,
-    trdepth: f32,
+    sc_anisotropy: f32,
+    tr_depth: f32,
 }
 
 const MIN_ROUGHNESS: f32 = 0.03f * 0.03f;
 
-fn clean_up_material(mat: MaterialPoint) -> MaterialPoint
+fn get_material_point(mat: Material, uv: vec2f) -> MaterialPoint
 {
-    var res = mat;
+    var res = MaterialPoint();
+    res.mat_type = mat.mat_type;
 
-    res.roughness *= res.roughness;
+    const mat_sampler_idx: u32 = 0;  // TODO!
 
-    // Clean up density
-    if res.mat_type == MAT_TYPE_REFRACTIVE ||
-       res.mat_type == MAT_TYPE_VOLUMETRIC ||
-       res.mat_type == MAT_TYPE_SUBSURFACE {
-        res.density = -log(clamp(res.color, vec3f(0.0001f), vec3f(1.0f))) / res.trdepth;
-    } else {
-        res.density = vec3f(0.0f);
+    // Sample textures.
+    var color_sample = vec4f(1.0f);
+    if mat.color_tex_idx != SENTINEL_IDX {
+        color_sample = textureSampleLevel(textures[mat.color_tex_idx], samplers[mat_sampler_idx], uv, 0.0f);
+    }
+    var emission_sample = vec3f(1.0f);
+    if mat.emission_tex_idx != SENTINEL_IDX {
+        emission_sample = textureSampleLevel(textures[mat.emission_tex_idx], samplers[mat_sampler_idx], uv, 0.0f).rgb;
+    }
+    var roughness_sample = 1.0f;
+    if mat.roughness_tex_idx != SENTINEL_IDX {
+        roughness_sample = textureSampleLevel(textures[mat.roughness_tex_idx], samplers[mat_sampler_idx], uv, 0.0f).r;
     }
 
-    // Clean up roughness.
+    // Fill in material.
+    res.color = color_sample.rgb * mat.color.rgb;
+    res.opacity = color_sample.a * mat.color.a;
+    res.emission = emission_sample * mat.emission.rgb;
+    res.roughness = roughness_sample * mat.roughness;
+    res.roughness *= res.roughness;
+    res.density = vec3f(0.0f);
+    if mat.mat_type == MAT_TYPE_REFRACTIVE ||
+       mat.mat_type == MAT_TYPE_VOLUMETRIC ||
+       mat.mat_type == MAT_TYPE_SUBSURFACE {
+        res.density = -log(clamp(res.color.rgb, vec3f(0.0001f), vec3f(1.0f))) / mat.tr_depth;
+    }
+    res.ior = mat.ior;
+    res.scattering = mat.scattering.xyz; /* * scattering_tex */;
+    res.sc_anisotropy = mat.sc_anisotropy;
+    res.tr_depth = mat.tr_depth;
+
+    // Clean up values.
     if res.mat_type == MAT_TYPE_MATTE   ||
        res.mat_type == MAT_TYPE_GLTFPBR ||
        res.mat_type == MAT_TYPE_GLOSSY {
@@ -621,7 +627,7 @@ fn sample_environment(dir: vec3f, env_idx: u32) -> vec3f
     return env.emission.rgb * textureSampleLevel(textures[env.emission_tex_idx], samplers[sampler_idx], uv, 0.0f).rgb;
 }
 
-fn is_mat_delta(mat: Material) -> bool
+fn is_mat_delta(mat: MaterialPoint) -> bool
 {
     return (mat.mat_type == MAT_TYPE_REFLECTIVE  && mat.roughness == 0) ||
            (mat.mat_type == MAT_TYPE_REFRACTIVE  && mat.roughness == 0) ||
@@ -1194,6 +1200,7 @@ fn ray_instance_intersection(local_id: vec3u, ray: Ray, cur_min_hit_dst: f32, in
 //////////////////////////////////////////////
 
 const F32_MAX: f32 = 0x1.fffffep+127;  // WGSL does not yet have a "max(f32)"
+const U32_MAX: u32 = 4294967295;
 const PI: f32 = 3.14159265358979323846264338327950288;
 
 fn transform_point(p: vec3f, transform: mat4x4f)->vec3f

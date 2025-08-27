@@ -3,6 +3,7 @@ use crate::base::*;
 use crate::wgpu_utils::*;
 use crate::renderer::*;
 
+#[derive(Default, Debug)]
 pub struct EnvMapInfo
 {
     pub data: Vec::<Vec4>,
@@ -683,7 +684,7 @@ pub fn validate_scene(scene: &SceneCPU, num_textures: u32, num_samplers: u32)
     {
         assert!(mat.color_tex_idx < num_textures);
         assert!(mat.emission_tex_idx < num_textures);
-        assert!(mat.roughness_tex_idx < num_textures);
+        assert!(mat.roughness_tex_idx < num_textures || mat.roughness_tex_idx == SENTINEL_IDX);
         assert!(mat.scattering_tex_idx < num_textures);
         assert!(mat.normal_tex_idx < num_textures);
     }
@@ -708,6 +709,13 @@ mod tests
             0.2, 0.1, 0.05, 0.8, 1.2, 5.0, 0.1, 0.2, 0.3, 1.0, 1.0, 0.3, 0.35, 0.0,
         ];
 
+        test_alias_table_any(&weights);
+    }
+
+    #[test]
+    fn test_alias_table_white()
+    {
+        let weights = [ 1.0, 1.0, 1.0, 1.0, 1.0, 1.0 ];
         test_alias_table_any(&weights);
     }
 

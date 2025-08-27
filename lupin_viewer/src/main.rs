@@ -905,7 +905,7 @@ impl<'a> AppState<'a>
                             .add_filter("json", &["json"])
                             .pick_file()
                         {
-                            if let Ok(res) = lpl::load_scene_json(&path, self.device, self.queue)
+                            if let Ok(res) = lpl::load_scene_yoctogl_v24(&path, self.device, self.queue)
                             {
                                 (self.scene, self.scene_cameras) = res;
                                 self.reset_accumulation();

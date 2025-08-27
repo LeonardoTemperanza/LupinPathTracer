@@ -5,6 +5,7 @@ use crate::wgpu_utils::*;
 use wgpu::util::DeviceExt;  // For some extra device traits.
 
 pub static DEFAULT_PATHTRACER_SRC: &str = include_str!("shaders/pathtracer.wgsl");
+pub static SENTINEL_IDX: u32 = u32::MAX;
 
 macro_rules! static_assert {
     ($($tt:tt)*) => {
@@ -127,11 +128,11 @@ impl Default for Material
             ior: 1.5,
             sc_anisotropy: 0.0,
             tr_depth: 0.01,
-            color_tex_idx: 0,
-            emission_tex_idx: 0,
-            roughness_tex_idx: 0,
-            scattering_tex_idx: 0,
-            normal_tex_idx: 0,
+            color_tex_idx: SENTINEL_IDX,
+            emission_tex_idx: SENTINEL_IDX,
+            roughness_tex_idx: SENTINEL_IDX,
+            scattering_tex_idx: SENTINEL_IDX,
+            normal_tex_idx: SENTINEL_IDX,
             padding0: 0,
         };
     }
