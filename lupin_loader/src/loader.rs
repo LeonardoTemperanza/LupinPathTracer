@@ -619,7 +619,7 @@ fn grow_vec<T: Default + Clone>(v: &mut Vec<T>, size: usize)
 // the usage of said texture. Here we do need the context
 // because we create a different texture for color vs normals,
 // (also using different compression settings)
-#[derive(Default, Clone)]
+#[derive(Default, Clone, Debug)]
 struct TextureLoadInfo
 {
     path: String,
@@ -656,7 +656,7 @@ pub fn load_scene_yoctogl_v24(path: &std::path::Path, device: &wgpu::Device, que
     assert!(default_tex == 0);
     let base_tex_id = 1;
 
-    let default_mat = lp::Material::default();  // Default texture is 0 which is what we want
+    let default_mat = lp::Material::default();
 
     // Conversion matrix to Lupin's coordinate system, which is left-handed.
     let mut conversion = lp::Mat4::IDENTITY;
@@ -835,7 +835,7 @@ pub fn load_scene_yoctogl_v24(path: &std::path::Path, device: &wgpu::Device, que
                     let mut dict_continue = true;
                     while dict_continue
                     {
-                        let mat = parse_material_yocto_v24(&mut p, &mut tex_load_infos, base_tex_id, default_mat);
+                        let mat = parse_material_yocto_v24(&mut p, &mut tex_load_infos);
                         push_asset(&mut materials, mat);
 
                         dict_continue = p.next_list_el();
@@ -989,6 +989,7 @@ pub fn load_scene_yoctogl_v24(path: &std::path::Path, device: &wgpu::Device, que
     // Load textures.
     for info in tex_load_infos
     {
+        println!("{:#?}", info);
         let mut uses = 0;
         if info.used_for_color { uses += 1; }
         if info.used_for_data  { uses += 1; }
@@ -1031,9 +1032,9 @@ pub fn load_scene_yoctogl_v24(path: &std::path::Path, device: &wgpu::Device, que
     return Ok((scene, scene_cams));
 }
 
-fn parse_material_yocto_v24(p: &mut Parser, tex_load_infos: &mut Vec<TextureLoadInfo>, base_tex_idx: u32, default_mat: lp::Material) -> lp::Material
+fn parse_material_yocto_v24(p: &mut Parser, tex_load_infos: &mut Vec<TextureLoadInfo>) -> lp::Material
 {
-    let mut mat = default_mat;
+    let mut mat = lp::Material::default();
 
     let mut dict_continue = true;
     while dict_continue
@@ -1118,35 +1119,35 @@ fn parse_material_yocto_v24(p: &mut Parser, tex_load_infos: &mut Vec<TextureLoad
             "color_tex" =>
             {
                 p.expect_char(':');
-                mat.color_tex_idx = p.parse_u32() + base_tex_idx;
+                mat.color_tex_idx = p.parse_u32();
                 grow_vec(tex_load_infos, mat.color_tex_idx as usize + 1);
                 tex_load_infos[mat.color_tex_idx as usize].used_for_color = true;
             },
             "emission_tex" =>
             {
                 p.expect_char(':');
-                mat.emission_tex_idx = p.parse_u32() + base_tex_idx;
+                mat.emission_tex_idx = p.parse_u32();
                 grow_vec(tex_load_infos, mat.color_tex_idx as usize + 1);
                 tex_load_infos[mat.color_tex_idx as usize].used_for_color = true;
             },
             "roughness_tex" =>
             {
                 p.expect_char(':');
-                mat.roughness_tex_idx = p.parse_u32() + base_tex_idx;
+                mat.roughness_tex_idx = p.parse_u32();
                 grow_vec(tex_load_infos, mat.color_tex_idx as usize + 1);
                 tex_load_infos[mat.color_tex_idx as usize].used_for_data = true;
             },
             "scattering_tex" =>
             {
                 p.expect_char(':');
-                mat.scattering_tex_idx = p.parse_u32() + base_tex_idx;
+                mat.scattering_tex_idx = p.parse_u32();
                 grow_vec(tex_load_infos, mat.color_tex_idx as usize + 1);
                 tex_load_infos[mat.color_tex_idx as usize].used_for_data = true;
             },
             "normal_tex" =>
             {
                 p.expect_char(':');
-                mat.normal_tex_idx = p.parse_u32() + base_tex_idx;
+                mat.normal_tex_idx = p.parse_u32();
                 grow_vec(tex_load_infos, mat.color_tex_idx as usize + 1);
                 tex_load_infos[mat.color_tex_idx as usize].used_for_data = true;
             },
