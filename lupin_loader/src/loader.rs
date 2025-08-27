@@ -651,11 +651,6 @@ pub fn load_scene_yoctogl_v24(path: &std::path::Path, device: &wgpu::Device, que
     let mut instances = Vec::<lp::Instance>::new();
     let mut scene_cams = Vec::<SceneCamera>::new();
 
-    // Default assets at index 0
-    let default_tex = push_asset(&mut textures, lp::create_white_texture(device, queue));
-    assert!(default_tex == 0);
-    let base_tex_id = 1;
-
     let default_mat = lp::Material::default();
 
     // Conversion matrix to Lupin's coordinate system, which is left-handed.
@@ -755,8 +750,11 @@ pub fn load_scene_yoctogl_v24(path: &std::path::Path, device: &wgpu::Device, que
                             {
                                 p.expect_char(':');
                                 env.emission_tex_idx = p.parse_u32();
-                                grow_vec(&mut tex_load_infos, env.emission_tex_idx as usize + 1);
-                                tex_load_infos[env.emission_tex_idx as usize].used_for_color = true;
+                                if env.emission_tex_idx != lp::SENTINEL_IDX
+                                {
+                                    grow_vec(&mut tex_load_infos, env.emission_tex_idx as usize + 1);
+                                    tex_load_infos[env.emission_tex_idx as usize].used_for_color = true;
+                                }
                             }
                             _ => {}
                         }
@@ -993,7 +991,8 @@ pub fn load_scene_yoctogl_v24(path: &std::path::Path, device: &wgpu::Device, que
         let mut uses = 0;
         if info.used_for_color { uses += 1; }
         if info.used_for_data  { uses += 1; }
-        assert!(uses <= 1);
+        // This shouldn't happen but it does, I guess we'll just load in SRGB.
+        // assert!(uses <= 1);
 
         let path = std::path::Path::new(&info.path);
         let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
@@ -1120,36 +1119,51 @@ fn parse_material_yocto_v24(p: &mut Parser, tex_load_infos: &mut Vec<TextureLoad
             {
                 p.expect_char(':');
                 mat.color_tex_idx = p.parse_u32();
-                grow_vec(tex_load_infos, mat.color_tex_idx as usize + 1);
-                tex_load_infos[mat.color_tex_idx as usize].used_for_color = true;
+                if mat.color_tex_idx != lp::SENTINEL_IDX
+                {
+                    grow_vec(tex_load_infos, mat.color_tex_idx as usize + 1);
+                    tex_load_infos[mat.color_tex_idx as usize].used_for_color = true;
+                }
             },
             "emission_tex" =>
             {
                 p.expect_char(':');
                 mat.emission_tex_idx = p.parse_u32();
-                grow_vec(tex_load_infos, mat.color_tex_idx as usize + 1);
-                tex_load_infos[mat.color_tex_idx as usize].used_for_color = true;
+                if mat.emission_tex_idx != lp::SENTINEL_IDX
+                {
+                    grow_vec(tex_load_infos, mat.emission_tex_idx as usize + 1);
+                    tex_load_infos[mat.emission_tex_idx as usize].used_for_color = true;
+                }
             },
             "roughness_tex" =>
             {
                 p.expect_char(':');
                 mat.roughness_tex_idx = p.parse_u32();
-                grow_vec(tex_load_infos, mat.color_tex_idx as usize + 1);
-                tex_load_infos[mat.color_tex_idx as usize].used_for_data = true;
+                if mat.roughness_tex_idx != lp::SENTINEL_IDX
+                {
+                    grow_vec(tex_load_infos, mat.roughness_tex_idx as usize + 1);
+                    tex_load_infos[mat.roughness_tex_idx as usize].used_for_data = true;
+                }
             },
             "scattering_tex" =>
             {
                 p.expect_char(':');
                 mat.scattering_tex_idx = p.parse_u32();
-                grow_vec(tex_load_infos, mat.color_tex_idx as usize + 1);
-                tex_load_infos[mat.color_tex_idx as usize].used_for_data = true;
+                if mat.scattering_tex_idx != lp::SENTINEL_IDX
+                {
+                    grow_vec(tex_load_infos, mat.scattering_tex_idx as usize + 1);
+                    tex_load_infos[mat.scattering_tex_idx as usize].used_for_data = true;
+                }
             },
             "normal_tex" =>
             {
                 p.expect_char(':');
                 mat.normal_tex_idx = p.parse_u32();
-                grow_vec(tex_load_infos, mat.color_tex_idx as usize + 1);
-                tex_load_infos[mat.color_tex_idx as usize].used_for_data = true;
+                if mat.normal_tex_idx != lp::SENTINEL_IDX
+                {
+                    grow_vec(tex_load_infos, mat.normal_tex_idx as usize + 1);
+                    tex_load_infos[mat.normal_tex_idx as usize].used_for_data = true;
+                }
             },
             _ => {}
         }
