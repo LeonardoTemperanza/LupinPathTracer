@@ -656,6 +656,8 @@ pub fn upload_scene_to_gpu(device: &wgpu::Device, queue: &wgpu::Queue, scene: &S
     };
 }
 
+/// Used to verify if a scene has been built correctly. It's best to call it
+/// right before upload_scene_to_gpu.
 pub fn validate_scene(scene: &SceneCPU, num_textures: u32, num_samplers: u32)
 {
     assert!(scene.verts_pos_array.len() == scene.verts_array.len());
@@ -682,17 +684,17 @@ pub fn validate_scene(scene: &SceneCPU, num_textures: u32, num_samplers: u32)
     // TODO: Fill in other stuff in material
     for mat in &scene.materials
     {
-        assert!(mat.color_tex_idx < num_textures);
-        assert!(mat.emission_tex_idx < num_textures);
-        assert!(mat.roughness_tex_idx < num_textures || mat.roughness_tex_idx == SENTINEL_IDX);
-        assert!(mat.scattering_tex_idx < num_textures);
-        assert!(mat.normal_tex_idx < num_textures);
+        assert!(mat.color_tex_idx < num_textures      || mat.color_tex_idx == SENTINEL_IDX);
+        assert!(mat.emission_tex_idx < num_textures   || mat.emission_tex_idx == SENTINEL_IDX);
+        assert!(mat.roughness_tex_idx < num_textures  || mat.roughness_tex_idx == SENTINEL_IDX);
+        assert!(mat.scattering_tex_idx < num_textures || mat.scattering_tex_idx == SENTINEL_IDX);
+        assert!(mat.normal_tex_idx < num_textures     || mat.normal_tex_idx == SENTINEL_IDX);
     }
 
     for env in &scene.environments
     {
         assert!(env.emission.x >= 0.0 && env.emission.y >= 0.0 && env.emission.z >= 0.0);
-        assert!(env.emission_tex_idx < num_textures);
+        assert!(env.emission_tex_idx < num_textures || env.emission_tex_idx == SENTINEL_IDX);
     }
 }
 
@@ -708,7 +710,6 @@ mod tests
         let weights = [
             0.2, 0.1, 0.05, 0.8, 1.2, 5.0, 0.1, 0.2, 0.3, 1.0, 1.0, 0.3, 0.35, 0.0,
         ];
-
         test_alias_table_any(&weights);
     }
 
@@ -716,6 +717,13 @@ mod tests
     fn test_alias_table_white()
     {
         let weights = [ 1.0, 1.0, 1.0, 1.0, 1.0, 1.0 ];
+        test_alias_table_any(&weights);
+    }
+
+    #[test]
+    fn test_alias_table_single()
+    {
+        let weights = [ 1.0 ];
         test_alias_table_any(&weights);
     }
 

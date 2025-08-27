@@ -624,14 +624,19 @@ fn sample_environment(dir: vec3f, env_idx: u32) -> vec3f
     let uv = dir_to_env_uv(dir);
     let env = environments[env_idx];
     const sampler_idx = 0u;  // TODO
-    return env.emission.rgb * textureSampleLevel(textures[env.emission_tex_idx], samplers[sampler_idx], uv, 0.0f).rgb;
+
+    var res = env.emission.rgb;
+    if env.emission_tex_idx != SENTINEL_IDX {
+        res *= textureSampleLevel(textures[env.emission_tex_idx], samplers[sampler_idx], uv, 0.0f).rgb;
+    }
+    return res;
 }
 
 fn is_mat_delta(mat: MaterialPoint) -> bool
 {
-    return (mat.mat_type == MAT_TYPE_REFLECTIVE  && mat.roughness == 0) ||
-           (mat.mat_type == MAT_TYPE_REFRACTIVE  && mat.roughness == 0) ||
-           (mat.mat_type == MAT_TYPE_TRANSPARENT && mat.roughness == 0) ||
+    return (mat.mat_type == MAT_TYPE_REFLECTIVE  && mat.roughness == 0.0f) ||
+           (mat.mat_type == MAT_TYPE_REFRACTIVE  && mat.roughness == 0.0f) ||
+           (mat.mat_type == MAT_TYPE_TRANSPARENT && mat.roughness == 0.0f) ||
            (mat.mat_type == MAT_TYPE_VOLUMETRIC);
 }
 

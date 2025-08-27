@@ -17,7 +17,7 @@ pub fn build_scene(device: &wgpu::Device, queue: &wgpu::Queue) -> lp::Scene
 
     // Textures
     let white_tex = push_asset(&mut textures, lp::create_white_texture(device, queue));
-    let bunny_color = push_asset(&mut textures, load_texture(device, queue, "bunny_color.png", false).unwrap());
+    let bunny_color = push_asset(&mut textures, load_texture(device, queue, "bunny_color.png", false, true).unwrap());
     //let (env_map_cpu, env_map_gpu) = load_hdr_texture_and_keep_cpu_copy(device, queue, "poly_haven_studio_1k.hdr");
     let (env_map_cpu, env_map_gpu) = load_hdr_texture_and_keep_cpu_copy(device, queue, "sky.hdr");
     let env_map = push_asset(&mut textures, env_map_gpu);
@@ -45,7 +45,7 @@ pub fn build_scene(device: &wgpu::Device, queue: &wgpu::Queue) -> lp::Scene
         0.0,                                // depth
         1,                                  // Color tex
         0,                                  // Emission tex
-        lp::SENTINEL_IDX,                                  // Roughness tex
+        lp::SENTINEL_IDX,                   // Roughness tex
         0,                                  // Scattering tex
         0,                                  // Normal tex
     ));
@@ -319,7 +319,7 @@ pub fn build_scene(device: &wgpu::Device, queue: &wgpu::Queue) -> lp::Scene
 }
 
 /// Builds an empty scene, which should show up as a black texture in a render.
-/// Useful for library testing more than anything else.
+/// Useful for testing of this library, more than anything else, really.
 pub fn build_scene_empty(device: &wgpu::Device, queue: &wgpu::Queue) -> lp::Scene
 {
     let scene_cpu = lp::SceneCPU {
@@ -393,7 +393,7 @@ pub fn build_scene_cornell_box(device: &wgpu::Device, queue: &wgpu::Queue) -> lp
 }
 */
 
-pub fn load_texture(device: &wgpu::Device, queue: &wgpu::Queue, path: &str, hdr: bool) -> Result<wgpu::Texture, image::ImageError>
+pub fn load_texture(device: &wgpu::Device, queue: &wgpu::Queue, path: &str, hdr: bool, srgb: bool) -> Result<wgpu::Texture, image::ImageError>
 {
     use image::GenericImageView;
 
@@ -406,13 +406,21 @@ pub fn load_texture(device: &wgpu::Device, queue: &wgpu::Queue, path: &str, hdr:
         depth_or_array_layers: 1
     };
 
+    let format = if hdr {
+        wgpu::TextureFormat::Rgba16Float
+    } else if srgb {
+        wgpu::TextureFormat::Rgba8UnormSrgb
+    } else {
+        wgpu::TextureFormat::Rgba8Unorm
+    };
+
     let texture = device.create_texture(&wgpu::TextureDescriptor {
         label: None,
         size: size,
         mip_level_count: 1,
         sample_count: 1,
         dimension: wgpu::TextureDimension::D2,
-        format: if hdr { wgpu::TextureFormat::Rgba16Float } else { wgpu::TextureFormat::Rgba8UnormSrgb },
+        format: format,
         usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
         view_formats: &[]
     });
@@ -528,15 +536,6 @@ fn rgba32f_to_rgba16f(image_rgba32f: &image::ImageBuffer<image::Rgba<f32>, Vec<f
         .collect();
 }
 
-/*
-fn rgba16f_to_imagebuf(image_rgba16f: &Vec<half::f16>) -> image::ImageBuffer<image::Rgba<f32>, Vec<f32>>
-{
-    return image_rgba16f.iter()
-        .flat_map(|p| image::Rgba::<f32>(p.into()))
-        .collect();
-}
-*/
-
 fn push_asset<T>(vec: &mut Vec<T>, el: T) -> u32
 {
     vec.push(el);
@@ -599,6 +598,8 @@ fn load_mesh_obj<P: AsRef<std::path::Path>>(path: P, verts_pos: &mut Vec<Vec<lp:
     return (verts.len() - 1) as u32;
 }
 
+/// Camera that has been placed into the scene.
+/// A scene can contain many cameras.
 #[derive(Default)]
 pub struct SceneCamera
 {
@@ -606,6 +607,27 @@ pub struct SceneCamera
     pub params: lp::CameraParams,
 }
 
+fn grow_vec<T: Default + Clone>(v: &mut Vec<T>, size: usize)
+{
+    if size <= v.len() { return; }
+    v.resize(size, Default::default());
+}
+
+// Info saved from the first pass of json parsing.
+// NOTE: This is needed because in the yoctogl format,
+// the textures themselves don't contain information about
+// the usage of said texture. Here we do need the context
+// because we create a different texture for color vs normals,
+// (also using different compression settings)
+#[derive(Default, Clone)]
+struct TextureLoadInfo
+{
+    path: String,
+    used_for_color: bool,
+    used_for_data: bool,
+}
+
+/// Load a scene in the format used by the yoctogl library, version 2.4.
 pub fn load_scene_yoctogl_v24(path: &std::path::Path, device: &wgpu::Device, queue: &wgpu::Queue) -> Result<(lp::Scene, Vec<SceneCamera>), LoadError>
 {
     let parent_dir = path.parent().unwrap_or(std::path::Path::new(""));
@@ -621,10 +643,12 @@ pub fn load_scene_yoctogl_v24(path: &std::path::Path, device: &wgpu::Device, que
     let mut textures = Vec::<wgpu::Texture>::new();
     let mut samplers = Vec::<wgpu::Sampler>::new();
 
+    let mut tex_load_infos = Vec::<TextureLoadInfo>::new();
+    let mut num_parsed_textures = 0;
+
     let linear_sampler = push_asset(&mut samplers, lp::create_linear_sampler(device));
 
     let mut instances = Vec::<lp::Instance>::new();
-
     let mut scene_cams = Vec::<SceneCamera>::new();
 
     // Default assets at index 0
@@ -638,7 +662,7 @@ pub fn load_scene_yoctogl_v24(path: &std::path::Path, device: &wgpu::Device, que
     let mut conversion = lp::Mat4::IDENTITY;
     conversion.m[2][2] *= -1.0;
 
-    // Parse json
+    // Parse json.
     let json = std::fs::read(&path)?;
     let mut p = Parser::new(&json[..]);
     p.expect_char('{');
@@ -731,6 +755,8 @@ pub fn load_scene_yoctogl_v24(path: &std::path::Path, device: &wgpu::Device, que
                             {
                                 p.expect_char(':');
                                 env.emission_tex_idx = p.parse_u32();
+                                grow_vec(&mut tex_load_infos, env.emission_tex_idx as usize + 1);
+                                tex_load_infos[env.emission_tex_idx as usize].used_for_color = true;
                             }
                             _ => {}
                         }
@@ -773,11 +799,8 @@ pub fn load_scene_yoctogl_v24(path: &std::path::Path, device: &wgpu::Device, que
                                     let is_hdr = matches!(ext.to_lowercase().as_str(), "hdr" | "exr");
                                     let full_path = parent_dir.join(path);
 
-                                    let res = load_texture(device, queue, full_path.to_str().unwrap(), is_hdr);
-                                    if let Err(err) = res {
-                                        return Err(err.into());
-                                    }
-                                    push_asset(&mut textures, res.unwrap());
+                                    grow_vec(&mut tex_load_infos, num_parsed_textures + 1);
+                                    tex_load_infos[num_parsed_textures].path = String::from(full_path.to_str().unwrap());
                                 }
                             }
                             "name" =>
@@ -793,6 +816,7 @@ pub fn load_scene_yoctogl_v24(path: &std::path::Path, device: &wgpu::Device, que
 
                     p.expect_char('}');
 
+                    num_parsed_textures += 1;
                     list_continue = p.next_list_el();
                 }
 
@@ -811,7 +835,7 @@ pub fn load_scene_yoctogl_v24(path: &std::path::Path, device: &wgpu::Device, que
                     let mut dict_continue = true;
                     while dict_continue
                     {
-                        let mat = p.parse_material(base_tex_id, default_mat);
+                        let mat = parse_material_yocto_v24(&mut p, &mut tex_load_infos, base_tex_id, default_mat);
                         push_asset(&mut materials, mat);
 
                         dict_continue = p.next_list_el();
@@ -858,10 +882,6 @@ pub fn load_scene_yoctogl_v24(path: &std::path::Path, device: &wgpu::Device, que
                                             if let Err(err) = res {
                                                 return Err(err);
                                             }
-                                        },
-                                        "obj" =>
-                                        {
-                                            load_mesh_obj(&full_path, &mut verts_pos_array, &mut verts_array, &mut indices_array, &mut bvh_nodes_array, &mut mesh_aabbs);
                                         },
                                         _ =>
                                         {
@@ -966,15 +986,31 @@ pub fn load_scene_yoctogl_v24(path: &std::path::Path, device: &wgpu::Device, que
 
     let tlas_nodes = lp::build_tlas(instances.as_slice(), &mesh_aabbs);
 
+    // Load textures.
+    for info in tex_load_infos
+    {
+        let mut uses = 0;
+        if info.used_for_color { uses += 1; }
+        if info.used_for_data  { uses += 1; }
+        assert!(uses <= 1);
+
+        let path = std::path::Path::new(&info.path);
+        let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
+        let is_hdr = matches!(ext.to_lowercase().as_str(), "hdr" | "exr");
+        let res = load_texture(device, queue, &info.path, is_hdr, info.used_for_color);
+        if let Err(err) = res {
+            return Err(err.into());
+        }
+
+        textures.push(res.unwrap());
+    }
+
+    // Fill in environment data.
     let mut environment_infos = Vec::<lp::EnvMapInfo>::with_capacity(environments.len());
     for env in &environments
     {
-        let mut info = lp::EnvMapInfo::default();
-        let tex = &textures[env.emission_tex_idx as usize];
-        info.data = download_texture(device, queue, tex);
-        info.width = tex.size().width;
-        info.height = tex.size().height;
-        environment_infos.push(info);
+        // Load texture again from disk
+        //environment_infos.push(info);
     }
 
     let scene_cpu = lp::SceneCPU {
@@ -993,6 +1029,134 @@ pub fn load_scene_yoctogl_v24(path: &std::path::Path, device: &wgpu::Device, que
 
     let scene = lp::upload_scene_to_gpu(device, queue, &scene_cpu, textures, samplers, &environment_infos);
     return Ok((scene, scene_cams));
+}
+
+fn parse_material_yocto_v24(p: &mut Parser, tex_load_infos: &mut Vec<TextureLoadInfo>, base_tex_idx: u32, default_mat: lp::Material) -> lp::Material
+{
+    let mut mat = default_mat;
+
+    let mut dict_continue = true;
+    while dict_continue
+    {
+        let strlit = p.next_strlit();
+        match strlit
+        {
+            "name" =>
+            {
+                p.expect_char(':');
+                let name = p.next_strlit();
+            }
+            "color" =>
+            {
+                p.expect_char(':');
+
+                let color = p.parse_vec3f();
+                mat.color = lp::Vec4 { x: color.x, y: color.y, z: color.z, w: mat.color.w };
+                mat.color.w = 1.0;
+            },
+            "emission" =>
+            {
+                p.expect_char(':');
+
+                let color = p.parse_vec3f();
+                mat.emission = lp::Vec4 { x: color.x, y: color.y, z: color.z, w: mat.emission.w };
+            },
+            "scattering" =>
+            {
+                p.expect_char(':');
+
+                let color = p.parse_vec3f();
+                mat.scattering = lp::Vec4 { x: color.x, y: color.y, z: color.z, w: mat.scattering.w }
+            },
+            "roughness" =>
+            {
+                p.expect_char(':');
+                mat.roughness = p.parse_f32();
+            },
+            "metallic" =>
+            {
+                p.expect_char(':');
+                mat.metallic = p.parse_f32();
+            },
+            "ior" =>
+            {
+                p.expect_char(':');
+                mat.ior = p.parse_f32();
+            },
+            "scanisotropy" =>
+            {
+                p.expect_char(':');
+                mat.sc_anisotropy = p.parse_f32();
+            },
+            "trdepth" =>
+            {
+                p.expect_char(':');
+                mat.tr_depth = p.parse_f32();
+            },
+            "opacity" =>
+            {
+                p.expect_char(':');
+                mat.color.w = p.parse_f32();
+            },
+            "type" =>
+            {
+                p.expect_char(':');
+                let mat_type_str = p.next_strlit();
+                match mat_type_str
+                {
+                    "matte" => mat.mat_type = lp::MaterialType::Matte,
+                    "glossy" => mat.mat_type = lp::MaterialType::Glossy,
+                    "reflective" => mat.mat_type = lp::MaterialType::Reflective,
+                    "transparent" => mat.mat_type = lp::MaterialType::Transparent,
+                    "refractive" => mat.mat_type = lp::MaterialType::Refractive,
+                    "subsurface" => mat.mat_type = lp::MaterialType::Subsurface,
+                    "volumetric" => mat.mat_type = lp::MaterialType::Volumetric,
+                    "gltfpbr" => mat.mat_type = lp::MaterialType::GltfPbr,
+                    _ => {}
+                }
+            },
+            "color_tex" =>
+            {
+                p.expect_char(':');
+                mat.color_tex_idx = p.parse_u32() + base_tex_idx;
+                grow_vec(tex_load_infos, mat.color_tex_idx as usize + 1);
+                tex_load_infos[mat.color_tex_idx as usize].used_for_color = true;
+            },
+            "emission_tex" =>
+            {
+                p.expect_char(':');
+                mat.emission_tex_idx = p.parse_u32() + base_tex_idx;
+                grow_vec(tex_load_infos, mat.color_tex_idx as usize + 1);
+                tex_load_infos[mat.color_tex_idx as usize].used_for_color = true;
+            },
+            "roughness_tex" =>
+            {
+                p.expect_char(':');
+                mat.roughness_tex_idx = p.parse_u32() + base_tex_idx;
+                grow_vec(tex_load_infos, mat.color_tex_idx as usize + 1);
+                tex_load_infos[mat.color_tex_idx as usize].used_for_data = true;
+            },
+            "scattering_tex" =>
+            {
+                p.expect_char(':');
+                mat.scattering_tex_idx = p.parse_u32() + base_tex_idx;
+                grow_vec(tex_load_infos, mat.color_tex_idx as usize + 1);
+                tex_load_infos[mat.color_tex_idx as usize].used_for_data = true;
+            },
+            "normal_tex" =>
+            {
+                p.expect_char(':');
+                mat.normal_tex_idx = p.parse_u32() + base_tex_idx;
+                grow_vec(tex_load_infos, mat.color_tex_idx as usize + 1);
+                tex_load_infos[mat.color_tex_idx as usize].used_for_data = true;
+            },
+            _ => {}
+        }
+
+        dict_continue = p.next_list_el();
+    }
+
+    return mat;
 }
 
 // Utility functions used for parsing any simple ASCII textual format.
@@ -1271,124 +1435,6 @@ impl<'a> Parser<'a>
         };
     }
 
-    fn parse_material(&mut self, base_tex_idx: u32, default_mat: lp::Material) -> lp::Material
-    {
-        let mut mat = default_mat;
-
-        let mut dict_continue = true;
-        while dict_continue
-        {
-            let strlit = self.next_strlit();
-            match strlit
-            {
-                "name" =>
-                {
-                    self.expect_char(':');
-                    let name = self.next_strlit();
-                }
-                "color" =>
-                {
-                    self.expect_char(':');
-
-                    let color = self.parse_vec3f();
-                    mat.color = lp::Vec4 { x: color.x, y: color.y, z: color.z, w: mat.color.w };
-                    mat.color.w = 1.0;
-                },
-                "emission" =>
-                {
-                    self.expect_char(':');
-
-                    let color = self.parse_vec3f();
-                    mat.emission = lp::Vec4 { x: color.x, y: color.y, z: color.z, w: mat.emission.w };
-                },
-                "scattering" =>
-                {
-                    self.expect_char(':');
-
-                    let color = self.parse_vec3f();
-                    mat.scattering = lp::Vec4 { x: color.x, y: color.y, z: color.z, w: mat.scattering.w }
-                },
-                "roughness" =>
-                {
-                    self.expect_char(':');
-                    mat.roughness = self.parse_f32();
-                },
-                "metallic" =>
-                {
-                    self.expect_char(':');
-                    mat.metallic = self.parse_f32();
-                },
-                "ior" =>
-                {
-                    self.expect_char(':');
-                    mat.ior = self.parse_f32();
-                },
-                "scanisotropy" =>
-                {
-                    self.expect_char(':');
-                    mat.sc_anisotropy = self.parse_f32();
-                },
-                "trdepth" =>
-                {
-                    self.expect_char(':');
-                    mat.tr_depth = self.parse_f32();
-                },
-                "opacity" =>
-                {
-                    self.expect_char(':');
-                    mat.color.w = self.parse_f32();
-                },
-                "type" =>
-                {
-                    self.expect_char(':');
-                    let mat_type_str = self.next_strlit();
-                    match mat_type_str
-                    {
-                        "matte" => mat.mat_type = lp::MaterialType::Matte,
-                        "glossy" => mat.mat_type = lp::MaterialType::Glossy,
-                        "reflective" => mat.mat_type = lp::MaterialType::Reflective,
-                        "transparent" => mat.mat_type = lp::MaterialType::Transparent,
-                        "refractive" => mat.mat_type = lp::MaterialType::Refractive,
-                        "subsurface" => mat.mat_type = lp::MaterialType::Subsurface,
-                        "volumetric" => mat.mat_type = lp::MaterialType::Volumetric,
-                        "gltfpbr" => mat.mat_type = lp::MaterialType::GltfPbr,
-                        _ => {}
-                    }
-                },
-                "color_tex" =>
-                {
-                    self.expect_char(':');
-                    mat.color_tex_idx = self.parse_u32() + base_tex_idx;
-                },
-                "emission_tex" =>
-                {
-                    self.expect_char(':');
-                    mat.emission_tex_idx = self.parse_u32() + base_tex_idx;
-                },
-                "roughness_tex" =>
-                {
-                    self.expect_char(':');
-                    mat.roughness_tex_idx = self.parse_u32() + base_tex_idx;
-                },
-                "scattering_tex" =>
-                {
-                    self.expect_char(':');
-                    mat.scattering_tex_idx = self.parse_u32() + base_tex_idx;
-                },
-                "normal_tex" =>
-                {
-                    self.expect_char(':');
-                    mat.normal_tex_idx = self.parse_u32() + base_tex_idx;
-                },
-                _ => {}
-            }
-
-            dict_continue = self.next_list_el();
-        }
-
-        return mat;
-    }
-
     fn ensure_whitespace(&mut self)
     {
 
@@ -1476,6 +1522,8 @@ impl From<image::ImageError> for LoadError
     }
 }
 
+// NOTE: Not a complete ply parser, it parses/uses only the features
+// that are expected to be used from the yoctogl 2.4 format.
 fn load_mesh_ply(path: &std::path::Path, mesh_verts_pos: &mut Vec<Vec<lp::VertexPos>>, mesh_verts: &mut Vec<Vec<lp::Vertex>>, mesh_indices: &mut Vec<Vec<u32>>, bvh_nodes: &mut Vec<Vec<lp::BvhNode>>, aabbs: &mut Vec<lp::Aabb>) -> Result<u32, LoadError>
 {
     assert!(mesh_verts_pos.len() == mesh_verts.len() && mesh_verts.len() == mesh_indices.len() && mesh_indices.len() == aabbs.len() && aabbs.len() == bvh_nodes.len());
@@ -1958,7 +2006,8 @@ pub fn download_texture(device: &wgpu::Device, queue: &wgpu::Queue, texture: &wg
     return pixels;
 }
 
-/// Detects file format from its extension. Supports rgba8_unorm, rgba16f. Drops alpha.
+/// Detects file format from its extension. Supports rgba8_unorm, rgba16f.
+/// NOTE: Currently drops alpha.
 pub fn save_texture(device: &wgpu::Device, queue: &wgpu::Queue, path: &std::path::Path, texture: &wgpu::Texture) -> Result<(), image::ImageError>
 {
     let format = texture.format();
@@ -1985,7 +2034,7 @@ pub fn save_texture(device: &wgpu::Device, queue: &wgpu::Queue, path: &std::path
         mapped_at_creation: false,
     });
 
-    // Copy texture into buffer
+    // Copy texture into transfer buffer.
     let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
         label: Some("Texture Copy Encoder"),
     });
@@ -2007,17 +2056,13 @@ pub fn save_texture(device: &wgpu::Device, queue: &wgpu::Queue, path: &std::path
     );
     queue.submit(Some(encoder.finish()));
 
-    // Map synchronously
+    // Map synchronously.
     let buffer_slice = output_buffer.slice(..);
     buffer_slice.map_async(wgpu::MapMode::Read, |_| {});
-
-    // Wait until GPU work is done and buffer is ready
     device.poll(wgpu::Maintain::Wait);
 
-    // Access mapped data
     let data = buffer_slice.get_mapped_range();
 
-    // Save as .png file
     match format
     {
         wgpu::TextureFormat::Rgba8Unorm =>

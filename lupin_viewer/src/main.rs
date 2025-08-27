@@ -881,21 +881,6 @@ impl<'a> AppState<'a>
                 ui.separator();
                 ui.add_space(12.0);
 
-                ui.heading("Tonemapping:");
-                ui.add_space(4.0);
-                {
-                    self.ui_tonemap_operator(ui);
-
-                    ui.horizontal(|ui| {
-                        ui.add(egui::DragValue::new(&mut self.tonemap_params.exposure).speed(0.05));
-                        ui.label("Exposure");
-                    });
-                }
-
-                ui.add_space(12.0);
-                ui.separator();
-                ui.add_space(12.0);
-
                 ui.heading("Scene:");
                 ui.add_space(4.0);
                 {
@@ -931,6 +916,21 @@ impl<'a> AppState<'a>
 
                     egui::CollapsingHeader::new("Stats").id_salt("stats_scene").show(ui, |ui| {
                         ui.label(format!("Num instances: {:?}", self.scene.instances.size() as usize / std::mem::size_of::<lp::Instance>()));
+                    });
+                }
+
+                ui.add_space(12.0);
+                ui.separator();
+                ui.add_space(12.0);
+
+                ui.heading("Tonemapping:");
+                ui.add_space(4.0);
+                {
+                    self.ui_tonemap_operator(ui);
+
+                    ui.horizontal(|ui| {
+                        ui.add(egui::DragValue::new(&mut self.tonemap_params.exposure).speed(0.05));
+                        ui.label("Exposure");
                     });
                 }
 
