@@ -469,6 +469,7 @@ pub fn load_texture(device: &wgpu::Device, queue: &wgpu::Queue, path: &str, hdr:
     return Ok(texture);
 }
 
+// TODO: Return result here.
 pub fn load_hdr_texture_and_keep_cpu_copy(device: &wgpu::Device, queue: &wgpu::Queue, path: &str) -> (lp::EnvMapInfo, wgpu::Texture)
 {
     use image::GenericImageView;
@@ -985,9 +986,8 @@ pub fn load_scene_yoctogl_v24(path: &std::path::Path, device: &wgpu::Device, que
     let tlas_nodes = lp::build_tlas(instances.as_slice(), &mesh_aabbs);
 
     // Load textures.
-    for info in tex_load_infos
+    for info in &tex_load_infos
     {
-        println!("{:#?}", info);
         let mut uses = 0;
         if info.used_for_color { uses += 1; }
         if info.used_for_data  { uses += 1; }
@@ -1009,8 +1009,30 @@ pub fn load_scene_yoctogl_v24(path: &std::path::Path, device: &wgpu::Device, que
     let mut environment_infos = Vec::<lp::EnvMapInfo>::with_capacity(environments.len());
     for env in &environments
     {
-        // Load texture again from disk
-        //environment_infos.push(info);
+        if env.emission_tex_idx == lp::SENTINEL_IDX { continue; }
+        let info = &tex_load_infos[env.emission_tex_idx as usize];
+
+        let mut uses = 0;
+        if info.used_for_color { uses += 1; }
+        if info.used_for_data  { uses += 1; }
+        // This shouldn't happen but it does, I guess we'll just load in SRGB.
+        // assert!(uses <= 1);
+
+        let path = std::path::Path::new(&info.path);
+        let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
+        let is_hdr = matches!(ext.to_lowercase().as_str(), "hdr" | "exr");
+        let res = load_texture_cpu(&path);
+        if let Err(err) = res {
+            return Err(err.into());
+        }
+
+        if let Ok(tex_cpu) = res {
+            environment_infos.push(lp::EnvMapInfo {
+                data: tex_cpu.data,
+                width: tex_cpu.width,
+                height: tex_cpu.height,
+            });
+        }
     }
 
     let scene_cpu = lp::SceneCPU {
@@ -2019,6 +2041,39 @@ pub fn download_texture(device: &wgpu::Device, queue: &wgpu::Queue, texture: &wg
     buffer.unmap();
 
     return pixels;
+}
+
+struct TextureCPU
+{
+    pub data: Vec::<lp::Vec4>,
+    pub width: u32,
+    pub height: u32
+}
+pub fn load_texture_cpu(path: &std::path::Path) -> Result<TextureCPU, image::ImageError>
+{
+    use image::GenericImageView;
+
+    let img = image::open(path).expect("Failed to load image");
+    let dimensions = img.dimensions();
+
+    let rgba_f32 = img.to_rgba32f();
+    let rgba = rgba32f_to_rgba16f(&rgba_f32);
+
+    let vec4_data: Vec<lp::Vec4> = rgba_f32
+        .chunks_exact(4)
+        .map(|chunk| lp::Vec4 {
+            x: chunk[0],
+            y: chunk[1],
+            z: chunk[2],
+            w: chunk[3],
+        })
+        .collect();
+
+    return Ok(TextureCPU {
+        data: vec4_data,
+        width: rgba_f32.width(),
+        height: rgba_f32.height(),
+    });
 }
 
 /// Detects file format from its extension. Supports rgba8_unorm, rgba16f.
