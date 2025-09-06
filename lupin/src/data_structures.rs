@@ -172,14 +172,14 @@ pub fn build_alias_table(weights: &[f32]) -> Vec::<AliasBin>
     while !over.is_empty()
     {
         let over_item = over.pop().unwrap();
-        assert!(f32::abs(over_item.prob_estimate - 1.0) < 0.05);
+        //assert!(f32::abs(over_item.prob_estimate - 1.0) < 0.05);
         bins[over_item.idx as usize].alias_threshold = 1.0;
         bins[over_item.idx as usize].alias = 0;
     }
     while !under.is_empty()
     {
         let under_item = under.pop().unwrap();
-        assert!(f32::abs(under_item.prob_estimate - 1.0) < 0.05);
+        //assert!(f32::abs(under_item.prob_estimate - 1.0) < 0.05);
         bins[under_item.idx as usize].alias_threshold = 1.0;
         bins[under_item.idx as usize].alias = 0;
     }

@@ -271,6 +271,8 @@ fn gbuffer_albedo_main(@builtin(local_invocation_id) local_id: vec3u, @builtin(g
             {
                 let mat_point = get_material_point(materials[hit.mat_idx], hit.tex_coords);
                 color += mat_point.color.rgb;
+                //color += vec3f(mat_point.roughness);
+                //color += vec3f(mat_point.metallic);
             }
         }
     }
@@ -568,8 +570,11 @@ fn get_material_point(mat: Material, uv: vec2f) -> MaterialPoint
         emission_sample = textureSampleLevel(textures[mat.emission_tex_idx], samplers[mat_sampler_idx], uv, 0.0f).rgb;
     }
     var roughness_sample = 1.0f;
+    var metallic_sample = 1.0f;
     if mat.roughness_tex_idx != SENTINEL_IDX {
-        roughness_sample = textureSampleLevel(textures[mat.roughness_tex_idx], samplers[mat_sampler_idx], uv, 0.0f).r;
+        let tex_sample = textureSampleLevel(textures[mat.roughness_tex_idx], samplers[mat_sampler_idx], uv, 0.0f).rgb;
+        roughness_sample = tex_sample.g;
+        metallic_sample = tex_sample.b;
     }
     var scattering_sample = vec3f(1.0f);
     if mat.scattering_tex_idx != SENTINEL_IDX {
@@ -589,9 +594,10 @@ fn get_material_point(mat: Material, uv: vec2f) -> MaterialPoint
         res.density = -log(clamp(res.color.rgb, vec3f(0.0001f), vec3f(1.0f))) / mat.tr_depth;
     }
     res.ior = mat.ior;
-    res.scattering = mat.scattering.xyz * scattering_sample;
+    res.scattering = scattering_sample * mat.scattering.xyz;
     res.sc_anisotropy = mat.sc_anisotropy;
     res.tr_depth = mat.tr_depth;
+    res.metallic = metallic_sample * mat.metallic;
 
     // Clean up values.
     if res.mat_type == MAT_TYPE_MATTE   ||

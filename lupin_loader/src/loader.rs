@@ -652,8 +652,6 @@ pub fn load_scene_yoctogl_v24(path: &std::path::Path, device: &wgpu::Device, que
     let mut instances = Vec::<lp::Instance>::new();
     let mut scene_cams = Vec::<SceneCamera>::new();
 
-    let default_mat = lp::Material::default();
-
     // Conversion matrix to Lupin's coordinate system, which is left-handed.
     let mut conversion = lp::Mat4::IDENTITY;
     conversion.m[2][2] *= -1.0;
