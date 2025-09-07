@@ -179,6 +179,7 @@ pub fn build_scene(device: &wgpu::Device, queue: &wgpu::Queue) -> lp::Scene
     let env = push_asset(&mut environments, lp::Environment {
         emission: lp::Vec3 { x: 1.0, y: 1.0, z: 1.0 },
         emission_tex_idx: env_map,
+        transform: lp::Mat4::IDENTITY,
     });
 
     let env_map_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
@@ -618,6 +619,7 @@ pub fn load_scene_yoctogl_v24(path: &std::path::Path, device: &wgpu::Device, que
                 p.expect_char('[');
 
                 let mut env = lp::Environment::default();
+                env.transform = conversion * lp::Mat4::IDENTITY;
 
                 let mut list_continue = true;
                 while list_continue
@@ -648,7 +650,7 @@ pub fn load_scene_yoctogl_v24(path: &std::path::Path, device: &wgpu::Device, que
                             "frame" =>
                             {
                                 p.expect_char(':');
-                                p.parse_mat3x4f();
+                                env.transform = conversion * p.parse_mat3x4f();
                             }
                             _ => {}
                         }

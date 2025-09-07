@@ -138,27 +138,13 @@ impl Default for Material
     }
 }
 
-impl Material
-{
-    pub fn new(mat_type: MaterialType, color: Vec4, emission: Vec4, scattering: Vec4,
-               roughness: f32, metallic: f32, ior: f32, sc_anisotropy: f32, tr_depth: f32,
-               color_tex_idx: u32, emission_tex_idx: u32, roughness_tex_idx: u32, scattering_tex_idx: u32,
-               normal_tex_idx: u32) -> Self
-    {
-        return Self {
-            mat_type, color, emission, scattering, roughness, metallic, ior, sc_anisotropy, tr_depth,
-            color_tex_idx, emission_tex_idx, roughness_tex_idx, scattering_tex_idx, normal_tex_idx,
-            padding0: 0
-        }
-    }
-}
-
 #[derive(Default, Clone, Copy, Debug)]
 #[repr(C)]
 pub struct Environment
 {
     pub emission: Vec3,
     pub emission_tex_idx: u32,
+    pub transform: Mat4,
 }
 
 #[derive(Default, Clone, Copy, Debug)]

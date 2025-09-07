@@ -124,6 +124,7 @@ struct Environment
 {
     emission: vec3f,
     emission_tex_idx: u32,
+    transform: mat4x4f,
 }
 
 struct Light
@@ -663,8 +664,8 @@ fn sample_environments(dir: vec3f) -> vec3f
 
 fn sample_environment(dir: vec3f, env_idx: u32) -> vec3f
 {
-    let uv = dir_to_env_uv(dir);
     let env = environments[env_idx];
+    let uv = dir_to_env_uv(dir, env_idx);
     const sampler_idx = 0u;  // TODO
 
     var res = env.emission.rgb;
@@ -1992,7 +1993,7 @@ fn dir_to_env_coords(dir: vec3f, env: u32) -> vec2u
     let env_tex_idx = environments[env].emission_tex_idx;
     let env_tex_size = textureDimensions(textures[env_tex_idx]);
 
-    let uv = dir_to_env_uv(dir);
+    let uv = dir_to_env_uv(dir, env);
     return vec2u(clamp(u32(uv.x * f32(env_tex_size.x)), 0u, env_tex_size.x - 1),
                  clamp(u32(uv.y * f32(env_tex_size.y)), 0u, env_tex_size.y - 1));
 }
@@ -2061,9 +2062,11 @@ fn tri_area(instance_idx: u32, tri_idx: u32) -> f32
 }
 
 // Safely wraps values in the [0, 1] range.
-fn dir_to_env_uv(dir: vec3f) -> vec2f
+fn dir_to_env_uv(dir: vec3f, env_idx: u32) -> vec2f
 {
-    var uv = vec2f(atan2(dir.z, dir.x) / (2.0f * PI), acos(clamp(dir.y, -1.0f, 1.0f)) / PI);
+    let env = environments[env_idx];
+    let trans_dir = transform_direction_inverse(mat3x3f(env.transform[0].xyz, env.transform[1].xyz, env.transform[2].xyz), dir);
+    var uv = vec2f(atan2(trans_dir.z, trans_dir.x) / (2.0f * PI), acos(clamp(trans_dir.y, -1.0f, 1.0f)) / PI);
     if uv.x < 0.0f { uv.x += 1.0f; }
     if uv.x > 1.0f { uv.x -= 1.0f; }
     return uv;
@@ -2076,15 +2079,15 @@ fn env_idx_to_dir(idx: u32, env: u32) -> vec3f
 
     let coords = vec2u(idx % env_tex_size.x, idx / env_tex_size.x);
     let uv = (vec2f(coords) + 0.5f) / vec2f(env_tex_size);
-    return env_uv_to_dir(uv);
+    return env_uv_to_dir(uv, env);
 }
 
-fn env_uv_to_dir(uv: vec2f) -> vec3f
+fn env_uv_to_dir(uv: vec2f, env: u32) -> vec3f
 {
     let dir = vec3f(cos(uv.x * 2.0f * PI) * sin(uv.y * PI),
                     cos(uv.y * PI),
                     sin(uv.x * 2.0f * PI) * sin(uv.y * PI));
-    return dir;
+    return transform_dir(dir, environments[env].transform);
 }
 
 // As far as I know you need an extra extension to pass
@@ -2168,7 +2171,7 @@ fn same_hemisphere(normal: vec3f, outgoing: vec3f, incoming: vec3f) -> bool
 }
 
 // Ideally should not be used, but useful for debugging.
-//https://gist.github.com/mattatz/86fff4b32d198d0928d0fa4ff32cf6fa
+// https://gist.github.com/mattatz/86fff4b32d198d0928d0fa4ff32cf6fa
 fn mat4f_inverse(m: mat4x4f) -> mat4x4f
 {
     let n11 = m[0][0]; let n12 = m[1][0]; let n13 = m[2][0]; let n14 = m[3][0];
@@ -2253,6 +2256,18 @@ fn vec3f_is_finite(v: vec3f) -> bool
 fn orthonormalize(a: vec3f, b: vec3f) -> vec3f
 {
     return normalize(a - b * dot(a, b));
+}
+
+// TODO: refactor
+fn transform_vector_inverse(a: mat3x3f, b: vec3f) -> vec3f
+{
+    return vec3f(dot(a[0], b), dot(a[1], b), dot(a[2], b));
+}
+
+// TODO: refactor
+fn transform_direction_inverse(a: mat3x3f, b: vec3f) -> vec3f
+{
+    return normalize(transform_vector_inverse(a, b));
 }
 
 // Debug visualization

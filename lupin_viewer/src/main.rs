@@ -795,7 +795,7 @@ impl<'a> AppState<'a>
                     }
 
                     ui.horizontal(|ui| {
-                        ui.add(egui::DragValue::new(&mut self.cam_speed_multiplier).range(0.1..=10.0).speed(0.01));
+                        ui.add(egui::DragValue::new(&mut self.cam_speed_multiplier).range(0.1..=1000.0).speed(0.01));
                         ui.label("Camera speed multiplier");
                     });
                 }
