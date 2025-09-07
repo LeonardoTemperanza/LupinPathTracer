@@ -272,6 +272,7 @@ fn gbuffer_albedo_main(@builtin(local_invocation_id) local_id: vec3u, @builtin(g
             {
                 let mat_point = get_material_point(materials[hit.mat_idx], hit.tex_coords, hit.color);
                 color += mat_point.color.rgb;
+                //color += vec3f(mat_point.opacity);
                 //color += hit.normal * 0.5f + 0.5f;
                 //color += vec3f(mat_point.roughness);
                 //color += vec3f(mat_point.metallic);
@@ -402,7 +403,8 @@ fn pathtrace_naive(local_id: vec3u, start_ray: Ray) -> vec3f
         {
             opacity_bounce++;
             if opacity_bounce > 128 { break; }
-            bounce -= 1;
+            ray.ori = hit_pos;
+            bounce--;
             continue;
         }
 
@@ -479,7 +481,8 @@ fn pathtrace(local_id: vec3u, start_ray: Ray) -> vec3f
         {
             opacity_bounce++;
             if opacity_bounce > 128 { break; }
-            bounce -= 1;
+            ray.ori = hit_pos;
+            bounce--;
             continue;
         }
 
@@ -2215,6 +2218,7 @@ fn srgb_to_linear(srgb: f32) -> f32
     }
 }
 
+// TODO: @speed, use vec3b and lerp instead.
 fn vec3f_srgb_to_linear(srgb: vec3f) -> vec3f
 {
     return vec3f(srgb_to_linear(srgb.x), srgb_to_linear(srgb.y), srgb_to_linear(srgb.z));

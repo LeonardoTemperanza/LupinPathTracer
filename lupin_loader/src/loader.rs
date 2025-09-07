@@ -33,6 +33,14 @@ pub fn build_scene(device: &wgpu::Device, queue: &wgpu::Queue) -> lp::Scene
     let ply_test = load_mesh_ply(std::path::Path::new("C:/work/LupinPathTracer/assets/yocto-scenes/coffee/shapes/shape22.ply"), &mut verts_pos_array, &mut verts_array, &mut indices_array, &mut bvh_nodes_array, &mut mesh_aabbs).unwrap();
 
     // Materials
+    let alpha = push_asset(&mut materials, {
+        let mut mat = lp::Material::default();
+        mat.mat_type = lp::MaterialType::Matte;
+        mat.color = lp::Vec4 { x: 1.0, y: 1.0, z: 1.0, w: 0.3 };
+        mat.color_tex_idx = bunny_color;
+        mat
+    });
+
     let bunny_matte = push_asset(&mut materials, {
         let mut mat = lp::Material::default();
         mat.mat_type = lp::MaterialType::Matte;
@@ -142,6 +150,7 @@ pub fn build_scene(device: &wgpu::Device, queue: &wgpu::Queue) -> lp::Scene
     // Instances
     let instances = vec![
         lp::Instance { inv_transform: lp::mat4_inverse(lp::xform_to_matrix(lp::Vec3 { x: 0.0, y: 0.0, z: 0.0 }, lp::Quat::default(), lp::Vec3::ones())), mesh_idx: 0, mat_idx: bunny_matte, padding0: 0.0, padding1: 0.0 },
+        lp::Instance { inv_transform: lp::mat4_inverse(lp::xform_to_matrix(lp::Vec3 { x: 0.0, y: 0.0, z: -4.0 }, lp::Quat::default(), lp::Vec3::ones())), mesh_idx: 0, mat_idx: alpha, padding0: 0.0, padding1: 0.0 },
         lp::Instance { inv_transform: lp::mat4_inverse(lp::xform_to_matrix(lp::Vec3 { x: -2.0, y: 0.0, z: 0.0 }, lp::angle_axis(lp::Vec3::RIGHT, 45.0 * 3.1415 / 180.0), lp::Vec3::ones())), mesh_idx: 0, mat_idx: glossy, padding0: 0.0, padding1: 0.0},
         lp::Instance { inv_transform: lp::mat4_inverse(lp::xform_to_matrix(lp::Vec3 { x: -2.0, y: 0.0, z: -2.0 }, lp::angle_axis(lp::Vec3::UP, 90.0 * 3.1415 / 180.0), lp::Vec3 { x: 0.2, y: 1.0, z: 1.0 })), mesh_idx: 0, mat_idx: glossy, padding0: 0.0, padding1: 0. },
         lp::Instance { inv_transform: lp::mat4_inverse(lp::xform_to_matrix(lp::Vec3 { x: 2.0, y: 0.0, z: 0.0 }, lp::Quat::default(), lp::Vec3 { x: 1.0, y: 1.0, z: 1.0 })), mesh_idx: 0, mat_idx: reflective, padding0: 0.0, padding1: 0.0 },
