@@ -270,8 +270,8 @@ fn gbuffer_albedo_main(@builtin(local_invocation_id) local_id: vec3u, @builtin(g
             if hit.dst != F32_MAX
             {
                 let mat_point = get_material_point(materials[hit.mat_idx], hit.tex_coords);
-                //color += mat_point.color.rgb;
-                color += hit.normal * 0.5f + 0.5f;
+                color += mat_point.color.rgb;
+                //color += hit.normal * 0.5f + 0.5f;
                 //color += vec3f(mat_point.roughness);
                 //color += vec3f(mat_point.metallic);
             }
