@@ -828,6 +828,9 @@ impl<'a> AppState<'a>
                         ui.label(format!("Iteration: {:?}", self.accum_counter));
                         ui.label(format!("Tile: {:?}", self.tile_idx));
                     });
+
+                    ui.add(egui::ProgressBar::new(self.accum_counter as f32 / self.max_accums as f32)
+                        .text(format!("{}/{}", self.accum_counter, self.max_accums)));
                 }
 
                 ui.add_space(12.0);
