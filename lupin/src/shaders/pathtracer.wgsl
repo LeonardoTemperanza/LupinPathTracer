@@ -306,7 +306,8 @@ fn gbuffer_normals_main(@builtin(local_invocation_id) local_id: vec3u, @builtin(
             let hit = ray_scene_intersection(local_id, camera_ray);
             if hit.dst != F32_MAX
             {
-                color += hit.normal;
+                let normal = get_shading_normal(materials[hit.mat_idx], hit.normal, hit.tex_coords);
+                color += normal;
             }
         }
     }
@@ -403,7 +404,7 @@ fn pathtrace_naive(local_id: vec3u, start_ray: Ray) -> vec3f
             continue;
         }
 
-        let normal = hit.normal;
+        let normal = get_shading_normal(materials[hit.mat_idx], hit.normal, hit.tex_coords);
 
         // Accumulate emission.
         radiance += weight * mat_point.emission /** f32(dot(normal, outgoing) >= 0.0f)*/;
@@ -480,7 +481,7 @@ fn pathtrace(local_id: vec3u, start_ray: Ray) -> vec3f
             continue;
         }
 
-        let normal = hit.normal;
+        let normal = get_shading_normal(materials[hit.mat_idx], hit.normal, hit.tex_coords);
 
         // Accumulate emission.
         radiance += weight * mat_point.emission /** f32(dot(normal, outgoing) >= 0.0f)*/;
@@ -564,6 +565,7 @@ fn get_material_point(mat: Material, uv: vec2f) -> MaterialPoint
     var color_sample = vec4f(1.0f);
     if mat.color_tex_idx != SENTINEL_IDX {
         color_sample = textureSampleLevel(textures[mat.color_tex_idx], samplers[mat_sampler_idx], uv, 0.0f);
+        color_sample = vec4f(vec3f_srgb_to_linear(color_sample.rgb), color_sample.a);
     }
     var emission_sample = vec3f(1.0f);
     if mat.emission_tex_idx != SENTINEL_IDX {
@@ -573,12 +575,13 @@ fn get_material_point(mat: Material, uv: vec2f) -> MaterialPoint
     var metallic_sample = 1.0f;
     if mat.roughness_tex_idx != SENTINEL_IDX {
         let tex_sample = textureSampleLevel(textures[mat.roughness_tex_idx], samplers[mat_sampler_idx], uv, 0.0f).rgb;
-        roughness_sample = tex_sample.g;
-        metallic_sample = tex_sample.b;
+        let sample_linear = vec3f_srgb_to_linear(tex_sample);
+        roughness_sample = sample_linear.g;
+        metallic_sample = sample_linear.b;
     }
     var scattering_sample = vec3f(1.0f);
     if mat.scattering_tex_idx != SENTINEL_IDX {
-        scattering_sample = textureSampleLevel(textures[mat.roughness_tex_idx], samplers[mat_sampler_idx], uv, 0.0f).rgb;
+        scattering_sample = textureSampleLevel(textures[mat.scattering_tex_idx], samplers[mat_sampler_idx], uv, 0.0f).rgb;
     }
 
     // Fill in material.
@@ -608,6 +611,33 @@ fn get_material_point(mat: Material, uv: vec2f) -> MaterialPoint
         res.roughness = 0.0f;
     } else {
         if res.roughness < MIN_ROUGHNESS { res.roughness = 0.0f; }
+    }
+
+    return res;
+}
+
+fn get_shading_normal(mat: Material, hit_normal: vec3f, uv: vec2f) -> vec3f
+{
+    var res = hit_normal;
+
+    // Sample normalmap.
+    if mat.normal_tex_idx != SENTINEL_IDX
+    {
+        const mat_sampler_idx: u32 = 0;  // TODO!
+
+        let normalmap_sample = textureSampleLevel(textures[mat.normal_tex_idx], samplers[mat_sampler_idx], uv, 0.0f).rgb;
+        res = normalmap_sample;
+
+        /*
+        auto  normalmap  = -1 + 2 * xyz(eval_texture(normal_tex, texcoord, false));
+        auto  tuv        = eval_element_tangents(scene, instance, element);
+        auto  frame      = frame3f{tuv.first, tuv.second, normal, {0, 0, 0}};
+        frame.x          = orthonormalize(frame.x, frame.z);
+        frame.y          = normalize(cross(frame.z, frame.x));
+        auto flip_v      = dot(frame.y, tuv.second) < 0;
+        normalmap.y *= flip_v ? 1 : -1;  // flip vertical axis
+        normal = transform_normal(frame, normalmap);
+        */
     }
 
     return res;
@@ -1208,86 +1238,8 @@ fn ray_instance_intersection(local_id: vec3u, ray: Ray, cur_min_hit_dst: f32, in
 }
 
 //////////////////////////////////////////////
-// Utils and constants
+// Sampling functions
 //////////////////////////////////////////////
-
-const F32_MAX: f32 = 0x1.fffffep+127;  // WGSL does not yet have a "max(f32)"
-const U32_MAX: u32 = 4294967295;
-const PI: f32 = 3.14159265358979323846264338327950288;
-
-fn transform_point(p: vec3f, transform: mat4x4f)->vec3f
-{
-    let p_vec4 = vec4f(p, 1.0f);
-    let transformed = transform * p_vec4;
-    return transformed.xyz;
-    //return (transformed / transformed.w).xyz;
-}
-
-fn transform_dir(dir: vec3f, transform: mat4x4f)->vec3f
-{
-    let dir_vec4 = vec4f(dir, 0.0f);
-    return normalize((transform * dir_vec4).xyz);
-}
-
-fn transform_ray(ray: Ray, transform: mat4x4f) -> Ray
-{
-    var res = ray;
-    res.ori = transform_point(res.ori, transform);
-    res.dir = transform_dir(res.dir, transform);
-    res.inv_dir = 1.0f / res.dir;
-    return res;
-}
-
-fn transform_ray_without_normalizing_direction(ray: Ray, transform: mat4x4f) -> Ray
-{
-    var res = ray;
-    res.ori = transform_point(res.ori, transform);
-
-    let dir_vec4 = vec4f(res.dir, 0.0f);
-    res.dir = (transform * dir_vec4).xyz;
-    res.inv_dir = 1.0f / res.dir;
-    return res;
-}
-
-fn same_hemisphere(normal: vec3f, outgoing: vec3f, incoming: vec3f) -> bool
-{
-    return dot(normal, outgoing) * dot(normal, incoming) >= 0;
-}
-
-// From: https://twitter.com/_Humus_
-fn is_finite(x: f32) -> bool
-{
-    return (u32(x) & 0x7F800000) != 0x7F800000;
-}
-
-fn is_positive_finite(x: f32) -> bool
-{
-    return u32(x) < 0x7F800000;
-}
-
-fn is_nan(x: f32) -> bool
-{
-    return (u32(x) & 0x7FFFFFFF) > 0x7F800000;
-}
-
-fn is_inf(x: f32) -> bool
-{
-    return (u32(x) & 0x7FFFFFFF) == 0x7F800000;
-}
-
-fn vec3f_is_finite(v: vec3f) -> bool
-{
-    return all((vec3u(v) & vec3u(0x7F800000)) != vec3u(0x7F800000));
-}
-
-
-
-/////////////////////////////////////////////////////////////////////////////////////
-// SAMPLING FUNCTIONS (temporary)
-
-
-
-
 
 fn sample_bsdfcos(material: MaterialPoint, normal: vec3f, outgoing: vec3f, rnl: f32, rn: vec2f) -> vec3f
 {
@@ -2126,6 +2078,135 @@ fn sample_instance_alias_table(light_idx: u32) -> u32
     }
 }
 
+//////////////////////////////////////////////
+// Utils and constants
+//////////////////////////////////////////////
+
+const F32_MAX: f32 = 0x1.fffffep+127;  // WGSL does not yet have a "max(f32)"
+const U32_MAX: u32 = 4294967295;
+const PI: f32 = 3.14159265358979323846264338327950288;
+
+fn transform_point(p: vec3f, transform: mat4x4f)->vec3f
+{
+    let p_vec4 = vec4f(p, 1.0f);
+    let transformed = transform * p_vec4;
+    return transformed.xyz;
+    //return (transformed / transformed.w).xyz;
+}
+
+fn transform_dir(dir: vec3f, transform: mat4x4f)->vec3f
+{
+    let dir_vec4 = vec4f(dir, 0.0f);
+    return normalize((transform * dir_vec4).xyz);
+}
+
+fn transform_ray(ray: Ray, transform: mat4x4f) -> Ray
+{
+    var res = ray;
+    res.ori = transform_point(res.ori, transform);
+    res.dir = transform_dir(res.dir, transform);
+    res.inv_dir = 1.0f / res.dir;
+    return res;
+}
+
+fn transform_ray_without_normalizing_direction(ray: Ray, transform: mat4x4f) -> Ray
+{
+    var res = ray;
+    res.ori = transform_point(res.ori, transform);
+
+    let dir_vec4 = vec4f(res.dir, 0.0f);
+    res.dir = (transform * dir_vec4).xyz;
+    res.inv_dir = 1.0f / res.dir;
+    return res;
+}
+
+fn same_hemisphere(normal: vec3f, outgoing: vec3f, incoming: vec3f) -> bool
+{
+    return dot(normal, outgoing) * dot(normal, incoming) >= 0;
+}
+
+// Ideally should not be used, but useful for debugging.
+//https://gist.github.com/mattatz/86fff4b32d198d0928d0fa4ff32cf6fa
+fn mat4f_inverse(m: mat4x4f) -> mat4x4f
+{
+    let n11 = m[0][0]; let n12 = m[1][0]; let n13 = m[2][0]; let n14 = m[3][0];
+    let n21 = m[0][1]; let n22 = m[1][1]; let n23 = m[2][1]; let n24 = m[3][1];
+    let n31 = m[0][2]; let n32 = m[1][2]; let n33 = m[2][2]; let n34 = m[3][2];
+    let n41 = m[0][3]; let n42 = m[1][3]; let n43 = m[2][3]; let n44 = m[3][3];
+
+    let t11 = n23 * n34 * n42 - n24 * n33 * n42 + n24 * n32 * n43 - n22 * n34 * n43 - n23 * n32 * n44 + n22 * n33 * n44;
+    let t12 = n14 * n33 * n42 - n13 * n34 * n42 - n14 * n32 * n43 + n12 * n34 * n43 + n13 * n32 * n44 - n12 * n33 * n44;
+    let t13 = n13 * n24 * n42 - n14 * n23 * n42 + n14 * n22 * n43 - n12 * n24 * n43 - n13 * n22 * n44 + n12 * n23 * n44;
+    let t14 = n14 * n23 * n32 - n13 * n24 * n32 - n14 * n22 * n33 + n12 * n24 * n33 + n13 * n22 * n34 - n12 * n23 * n34;
+
+    let det = n11 * t11 + n21 * t12 + n31 * t13 + n41 * t14;
+    let idet = 1.0f / det;
+
+    var ret = mat4x4f();
+
+    ret[0][0] = t11 * idet;
+    ret[0][1] = (n24 * n33 * n41 - n23 * n34 * n41 - n24 * n31 * n43 + n21 * n34 * n43 + n23 * n31 * n44 - n21 * n33 * n44) * idet;
+    ret[0][2] = (n22 * n34 * n41 - n24 * n32 * n41 + n24 * n31 * n42 - n21 * n34 * n42 - n22 * n31 * n44 + n21 * n32 * n44) * idet;
+    ret[0][3] = (n23 * n32 * n41 - n22 * n33 * n41 - n23 * n31 * n42 + n21 * n33 * n42 + n22 * n31 * n43 - n21 * n32 * n43) * idet;
+
+    ret[1][0] = t12 * idet;
+    ret[1][1] = (n13 * n34 * n41 - n14 * n33 * n41 + n14 * n31 * n43 - n11 * n34 * n43 - n13 * n31 * n44 + n11 * n33 * n44) * idet;
+    ret[1][2] = (n14 * n32 * n41 - n12 * n34 * n41 - n14 * n31 * n42 + n11 * n34 * n42 + n12 * n31 * n44 - n11 * n32 * n44) * idet;
+    ret[1][3] = (n12 * n33 * n41 - n13 * n32 * n41 + n13 * n31 * n42 - n11 * n33 * n42 - n12 * n31 * n43 + n11 * n32 * n43) * idet;
+
+    ret[2][0] = t13 * idet;
+    ret[2][1] = (n14 * n23 * n41 - n13 * n24 * n41 - n14 * n21 * n43 + n11 * n24 * n43 + n13 * n21 * n44 - n11 * n23 * n44) * idet;
+    ret[2][2] = (n12 * n24 * n41 - n14 * n22 * n41 + n14 * n21 * n42 - n11 * n24 * n42 - n12 * n21 * n44 + n11 * n22 * n44) * idet;
+    ret[2][3] = (n13 * n22 * n41 - n12 * n23 * n41 - n13 * n21 * n42 + n11 * n23 * n42 + n12 * n21 * n43 - n11 * n22 * n43) * idet;
+
+    ret[3][0] = t14 * idet;
+    ret[3][1] = (n13 * n24 * n31 - n14 * n23 * n31 + n14 * n21 * n33 - n11 * n24 * n33 - n13 * n21 * n34 + n11 * n23 * n34) * idet;
+    ret[3][2] = (n14 * n22 * n31 - n12 * n24 * n31 - n14 * n21 * n32 + n11 * n24 * n32 + n12 * n21 * n34 - n11 * n22 * n34) * idet;
+    ret[3][3] = (n12 * n23 * n31 - n13 * n22 * n31 + n13 * n21 * n32 - n11 * n23 * n32 - n12 * n21 * n33 + n11 * n22 * n33) * idet;
+
+    return ret;
+}
+
+fn srgb_to_linear(srgb: f32) -> f32
+{
+    if srgb <= 0.04045 {
+        return srgb / 12.92f;
+    } else {
+        return pow((srgb + 0.055f) / (1.0f + 0.055f), 2.4f);
+    }
+}
+
+fn vec3f_srgb_to_linear(srgb: vec3f) -> vec3f
+{
+    return vec3f(srgb_to_linear(srgb.x), srgb_to_linear(srgb.y), srgb_to_linear(srgb.z));
+}
+
+// From: https://twitter.com/_Humus_
+fn is_finite(x: f32) -> bool
+{
+    return (u32(x) & 0x7F800000) != 0x7F800000;
+}
+
+fn is_positive_finite(x: f32) -> bool
+{
+    return u32(x) < 0x7F800000;
+}
+
+fn is_nan(x: f32) -> bool
+{
+    return (u32(x) & 0x7FFFFFFF) > 0x7F800000;
+}
+
+fn is_inf(x: f32) -> bool
+{
+    return (u32(x) & 0x7FFFFFFF) == 0x7F800000;
+}
+
+fn vec3f_is_finite(v: vec3f) -> bool
+{
+    return all((vec3u(v) & vec3u(0x7F800000)) != vec3u(0x7F800000));
+}
+
 // Debug visualization
 
 fn get_heatmap_color(val: f32, min: f32, max: f32) -> vec3f
@@ -2196,48 +2277,6 @@ fn get_heatmap_color(val: f32, min: f32, max: f32) -> vec3f
 
     color = pow(factor * color, vec3f(gamma));
     return color;
-}
-
-// Ideally should not be used, but useful for debugging.
-//https://gist.github.com/mattatz/86fff4b32d198d0928d0fa4ff32cf6fa
-fn mat4f_inverse(m: mat4x4f) -> mat4x4f
-{
-    let n11 = m[0][0]; let n12 = m[1][0]; let n13 = m[2][0]; let n14 = m[3][0];
-    let n21 = m[0][1]; let n22 = m[1][1]; let n23 = m[2][1]; let n24 = m[3][1];
-    let n31 = m[0][2]; let n32 = m[1][2]; let n33 = m[2][2]; let n34 = m[3][2];
-    let n41 = m[0][3]; let n42 = m[1][3]; let n43 = m[2][3]; let n44 = m[3][3];
-
-    let t11 = n23 * n34 * n42 - n24 * n33 * n42 + n24 * n32 * n43 - n22 * n34 * n43 - n23 * n32 * n44 + n22 * n33 * n44;
-    let t12 = n14 * n33 * n42 - n13 * n34 * n42 - n14 * n32 * n43 + n12 * n34 * n43 + n13 * n32 * n44 - n12 * n33 * n44;
-    let t13 = n13 * n24 * n42 - n14 * n23 * n42 + n14 * n22 * n43 - n12 * n24 * n43 - n13 * n22 * n44 + n12 * n23 * n44;
-    let t14 = n14 * n23 * n32 - n13 * n24 * n32 - n14 * n22 * n33 + n12 * n24 * n33 + n13 * n22 * n34 - n12 * n23 * n34;
-
-    let det = n11 * t11 + n21 * t12 + n31 * t13 + n41 * t14;
-    let idet = 1.0f / det;
-
-    var ret = mat4x4f();
-
-    ret[0][0] = t11 * idet;
-    ret[0][1] = (n24 * n33 * n41 - n23 * n34 * n41 - n24 * n31 * n43 + n21 * n34 * n43 + n23 * n31 * n44 - n21 * n33 * n44) * idet;
-    ret[0][2] = (n22 * n34 * n41 - n24 * n32 * n41 + n24 * n31 * n42 - n21 * n34 * n42 - n22 * n31 * n44 + n21 * n32 * n44) * idet;
-    ret[0][3] = (n23 * n32 * n41 - n22 * n33 * n41 - n23 * n31 * n42 + n21 * n33 * n42 + n22 * n31 * n43 - n21 * n32 * n43) * idet;
-
-    ret[1][0] = t12 * idet;
-    ret[1][1] = (n13 * n34 * n41 - n14 * n33 * n41 + n14 * n31 * n43 - n11 * n34 * n43 - n13 * n31 * n44 + n11 * n33 * n44) * idet;
-    ret[1][2] = (n14 * n32 * n41 - n12 * n34 * n41 - n14 * n31 * n42 + n11 * n34 * n42 + n12 * n31 * n44 - n11 * n32 * n44) * idet;
-    ret[1][3] = (n12 * n33 * n41 - n13 * n32 * n41 + n13 * n31 * n42 - n11 * n33 * n42 - n12 * n31 * n43 + n11 * n32 * n43) * idet;
-
-    ret[2][0] = t13 * idet;
-    ret[2][1] = (n14 * n23 * n41 - n13 * n24 * n41 - n14 * n21 * n43 + n11 * n24 * n43 + n13 * n21 * n44 - n11 * n23 * n44) * idet;
-    ret[2][2] = (n12 * n24 * n41 - n14 * n22 * n41 + n14 * n21 * n42 - n11 * n24 * n42 - n12 * n21 * n44 + n11 * n22 * n44) * idet;
-    ret[2][3] = (n13 * n22 * n41 - n12 * n23 * n41 - n13 * n21 * n42 + n11 * n23 * n42 + n12 * n21 * n43 - n11 * n22 * n43) * idet;
-
-    ret[3][0] = t14 * idet;
-    ret[3][1] = (n13 * n24 * n31 - n14 * n23 * n31 + n14 * n21 * n33 - n11 * n24 * n33 - n13 * n21 * n34 + n11 * n23 * n34) * idet;
-    ret[3][2] = (n14 * n22 * n31 - n12 * n24 * n31 - n14 * n21 * n32 + n11 * n24 * n32 + n12 * n21 * n34 - n11 * n22 * n34) * idet;
-    ret[3][3] = (n12 * n23 * n31 - n13 * n22 * n31 + n13 * n21 * n32 - n11 * n23 * n32 - n12 * n21 * n33 + n11 * n22 * n33) * idet;
-
-    return ret;
 }
 
 // For quick printf-like debugging.
