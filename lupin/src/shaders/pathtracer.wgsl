@@ -75,6 +75,7 @@ struct AliasTable { data: array<AliasBin> }
 // stored in a separate buffer for cache-locality.
 struct Vertex
 {
+    color: vec4f,
     normal: vec3f,
     // 4 bytes padding
     tex_coords: vec2f
@@ -269,7 +270,7 @@ fn gbuffer_albedo_main(@builtin(local_invocation_id) local_id: vec3u, @builtin(g
             let hit = ray_scene_intersection(local_id, camera_ray);
             if hit.dst != F32_MAX
             {
-                let mat_point = get_material_point(materials[hit.mat_idx], hit.tex_coords);
+                let mat_point = get_material_point(materials[hit.mat_idx], hit.tex_coords, hit.color);
                 color += mat_point.color.rgb;
                 //color += hit.normal * 0.5f + 0.5f;
                 //color += vec3f(mat_point.roughness);
@@ -392,7 +393,7 @@ fn pathtrace_naive(local_id: vec3u, start_ray: Ray) -> vec3f
         let hit_pos = ray.ori + ray.dir * hit.dst;
         let outgoing = -ray.dir;
 
-        let mat_point = get_material_point(materials[hit.mat_idx], hit.tex_coords);
+        let mat_point = get_material_point(materials[hit.mat_idx], hit.tex_coords, hit.color);
 
         // TODO: No caustics param.
 
@@ -471,7 +472,7 @@ fn pathtrace(local_id: vec3u, start_ray: Ray) -> vec3f
         let hit_pos = ray.ori + ray.dir * hit.dst;
         let outgoing = -ray.dir;
 
-        let mat_point = get_material_point(materials[hit.mat_idx], hit.tex_coords);
+        let mat_point = get_material_point(materials[hit.mat_idx], hit.tex_coords, hit.color);
 
         // Handle coverage.
         if mat_point.opacity < 1.0f && random_f32() >= mat_point.opacity
@@ -555,7 +556,7 @@ struct MaterialPoint
 
 const MIN_ROUGHNESS: f32 = 0.03f * 0.03f;
 
-fn get_material_point(mat: Material, uv: vec2f) -> MaterialPoint
+fn get_material_point(mat: Material, uv: vec2f, hit_color: vec4f) -> MaterialPoint
 {
     var res = MaterialPoint();
     res.mat_type = mat.mat_type;
@@ -586,8 +587,8 @@ fn get_material_point(mat: Material, uv: vec2f) -> MaterialPoint
     }
 
     // Fill in material.
-    res.color = color_sample.rgb * mat.color.rgb;
-    res.opacity = color_sample.a * mat.color.a;
+    res.color = color_sample.rgb * mat.color.rgb * hit_color.rgb;
+    res.opacity = color_sample.a * mat.color.a * hit_color.a;
     res.emission = emission_sample * mat.emission.rgb;
     res.roughness = roughness_sample * mat.roughness;
     res.roughness *= res.roughness;
@@ -1117,7 +1118,7 @@ fn ray_scene_intersection(local_id: vec3u, ray: Ray)->HitInfo
         hit_info.mat_idx = mat_idx;
 
         hit_info.normal = normalize(normal_mat * normal_local);
-        hit_info.color = vec4f(1.0f);
+        hit_info.color = v0.color*w + v1.color*u + v2.color*v;
         hit_info.tex_coords = v0.tex_coords*w + v1.tex_coords*u + v2.tex_coords*v;
 
         // Tangent and bitangent from uv.

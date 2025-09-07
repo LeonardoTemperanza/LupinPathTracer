@@ -465,8 +465,9 @@ fn load_mesh_obj<P: AsRef<std::path::Path>>(path: P, verts_pos: &mut Vec<Vec<lp:
             tex_coords.y = 1.0 - mesh.texcoords[vert_idx*2+1];
         };
 
-        let vert = lp::Vertex { normal: normal, _padding0: 0.0, tex_coords: tex_coords, _padding1: 0.0, _padding2: 0.0 };
-
+        let mut vert = lp::Vertex::default();
+        vert.normal = normal;
+        vert.tex_coords = tex_coords;
         mesh_verts.push(vert);
     }
 
@@ -634,6 +635,11 @@ pub fn load_scene_yoctogl_v24(path: &std::path::Path, device: &wgpu::Device, que
                                     grow_vec(&mut tex_load_infos, env.emission_tex_idx as usize + 1);
                                     tex_load_infos[env.emission_tex_idx as usize].used_for_color = true;
                                 }
+                            }
+                            "frame" =>
+                            {
+                                p.expect_char(':');
+                                p.parse_mat3x4f();
                             }
                             _ => {}
                         }
@@ -1447,14 +1453,18 @@ fn load_mesh_ply(path: &std::path::Path, mesh_verts_pos: &mut Vec<Vec<lp::Vertex
     let mut p = Parser::new(&ply);
     let header_continue = true;
 
-    let mut x_buf = Buffer::default();
-    let mut y_buf = Buffer::default();
-    let mut z_buf = Buffer::default();
+    let mut x_buf  = Buffer::default();
+    let mut y_buf  = Buffer::default();
+    let mut z_buf  = Buffer::default();
     let mut nx_buf = Buffer::default();
     let mut ny_buf = Buffer::default();
     let mut nz_buf = Buffer::default();
-    let mut u_buf = Buffer::default();
-    let mut v_buf = Buffer::default();
+    let mut u_buf  = Buffer::default();
+    let mut v_buf  = Buffer::default();
+    let mut r_buf  = Buffer::default();
+    let mut g_buf  = Buffer::default();
+    let mut b_buf  = Buffer::default();
+    let mut a_buf  = Buffer::default();
     let indices = Vec::<u32>::default();
     let mut num_verts = 0;
     let mut num_faces = 0;
@@ -1515,6 +1525,10 @@ fn load_mesh_ply(path: &std::path::Path, mesh_verts_pos: &mut Vec<Vec<lp::Vertex
                             "nz" => { nz_buf.present = true; nz_buf.offset = offset; },
                             "u"  => { u_buf.present  = true; u_buf.offset  = offset; },
                             "v"  => { v_buf.present  = true; v_buf.offset  = offset; },
+                            "red"   => { r_buf.present = true; r_buf.offset = offset; },
+                            "green" => { g_buf.present = true; g_buf.offset = offset; },
+                            "blue"  => { b_buf.present = true; b_buf.offset = offset; },
+                            "alpha" => { a_buf.present = true; a_buf.offset = offset; },
                             _    => {},
                         }
 
@@ -1530,6 +1544,10 @@ fn load_mesh_ply(path: &std::path::Path, mesh_verts_pos: &mut Vec<Vec<lp::Vertex
                     nz_buf.stride = total_size;
                     u_buf.stride = total_size;
                     v_buf.stride = total_size;
+                    r_buf.stride = total_size;
+                    g_buf.stride = total_size;
+                    b_buf.stride = total_size;
+                    a_buf.stride = total_size;
                     vert_size = total_size;
                 }
                 else if el_name == "face"
@@ -1555,7 +1573,12 @@ fn load_mesh_ply(path: &std::path::Path, mesh_verts_pos: &mut Vec<Vec<lp::Vertex
         return Err(LoadError::InvalidPly);
     }
 
-    let (mut verts_pos, mut verts) = ply_extract_verts(p.buf, &x_buf, &y_buf, &z_buf, &nx_buf, &ny_buf, &nz_buf, &u_buf, &v_buf, num_verts);
+    let (mut verts_pos, mut verts) = ply_extract_verts(p.buf,
+                                                       &x_buf, &y_buf, &z_buf,
+                                                       &nx_buf, &ny_buf, &nz_buf,
+                                                       &u_buf, &v_buf,
+                                                       &r_buf, &g_buf, &b_buf, &a_buf,
+                                                       num_verts);
     assert!(verts_pos.len() == verts.len());
 
     let mut indices = ply_extract_indices(&p.buf[(num_verts * vert_size as u32) as usize..], num_faces);
@@ -1598,7 +1621,12 @@ fn load_mesh_ply(path: &std::path::Path, mesh_verts_pos: &mut Vec<Vec<lp::Vertex
     return Ok((mesh_verts.len() - 1) as u32);
 }
 
-fn ply_extract_verts(buf: &[u8], x: &Buffer, y: &Buffer, z: &Buffer, nx: &Buffer, ny: &Buffer, nz: &Buffer, u: &Buffer, v: &Buffer, num_verts: u32) -> (Vec<lp::VertexPos>, Vec<lp::Vertex>)
+fn ply_extract_verts(buf: &[u8],
+                     x: &Buffer, y: &Buffer, z: &Buffer,
+                     nx: &Buffer, ny: &Buffer, nz: &Buffer,
+                     u: &Buffer, v: &Buffer,
+                     r: &Buffer, g: &Buffer, b: &Buffer, a: &Buffer,
+                     num_verts: u32) -> (Vec<lp::VertexPos>, Vec<lp::Vertex>)
 {
     let mut verts_pos = vec![lp::VertexPos::default(); num_verts as usize];
     let mut verts = vec![lp::Vertex::default(); num_verts as usize];
@@ -1665,6 +1693,38 @@ fn ply_extract_verts(buf: &[u8], x: &Buffer, y: &Buffer, z: &Buffer, nx: &Buffer
         {
             let offset = v.offset + i * v.stride;
             verts[i].tex_coords.y = extract_f32(buf, offset);
+        }
+    }
+    if r.present
+    {
+        for i in 0..num_verts as usize
+        {
+            let offset = r.offset + i * r.stride;
+            verts[i].color.x = extract_f32(buf, offset);
+        }
+    }
+    if g.present
+    {
+        for i in 0..num_verts as usize
+        {
+            let offset = g.offset + i * g.stride;
+            verts[i].color.y = extract_f32(buf, offset);
+        }
+    }
+    if b.present
+    {
+        for i in 0..num_verts as usize
+        {
+            let offset = b.offset + i * b.stride;
+            verts[i].color.z = extract_f32(buf, offset);
+        }
+    }
+    if a.present
+    {
+        for i in 0..num_verts as usize
+        {
+            let offset = a.offset + i * a.stride;
+            verts[i].color.w = extract_f32(buf, offset);
         }
     }
 

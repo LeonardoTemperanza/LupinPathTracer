@@ -180,15 +180,31 @@ pub struct AliasBin
 
 // This doesn't include positions, as that
 // is stored in a separate buffer for locality
-#[derive(Default, Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug)]
 #[repr(C)]
 pub struct Vertex
 {
+    pub color: Vec4,
     pub normal: Vec3,
     pub _padding0: f32,
     pub tex_coords: Vec2,
     pub _padding1: f32,
     pub _padding2: f32,
+}
+
+impl Default for Vertex
+{
+    fn default() -> Self
+    {
+        return Self {
+            color: Vec4 { x: 1.0, y: 1.0, z: 1.0, w: 1.0 },
+            normal: Default::default(),
+            _padding0: 0.0,
+            tex_coords: Default::default(),
+            _padding1: 0.0,
+            _padding2: 0.0,
+        };
+    }
 }
 
 #[derive(Default, Clone, Copy, Debug)]

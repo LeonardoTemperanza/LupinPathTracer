@@ -207,7 +207,7 @@ impl<'a> AppState<'a>
     pub fn new(device: &'a wgpu::Device, queue: &'a wgpu::Queue, window: &'a winit::window::Window) -> Self
     {
         const DEFAULT_SAMPLES_PER_PIXEL: u32 = 5;
-        const DEFAULT_MAX_BOUNCES: u32 = 10;
+        const DEFAULT_MAX_BOUNCES: u32 = 8;
 
         let pathtrace_resources = lp::build_pathtrace_resources(&device, &lp::BakedPathtraceParams {
             with_runtime_checks: true,
