@@ -270,7 +270,8 @@ fn gbuffer_albedo_main(@builtin(local_invocation_id) local_id: vec3u, @builtin(g
             if hit.dst != F32_MAX
             {
                 let mat_point = get_material_point(materials[hit.mat_idx], hit.tex_coords);
-                color += mat_point.color.rgb;
+                //color += mat_point.color.rgb;
+                color += hit.normal * 0.5f + 0.5f;
                 //color += vec3f(mat_point.roughness);
                 //color += vec3f(mat_point.metallic);
             }
@@ -306,8 +307,8 @@ fn gbuffer_normals_main(@builtin(local_invocation_id) local_id: vec3u, @builtin(
             let hit = ray_scene_intersection(local_id, camera_ray);
             if hit.dst != F32_MAX
             {
-                let normal = get_shading_normal(materials[hit.mat_idx], hit.normal, hit.tex_coords);
-                color += normal;
+                let normal = get_shading_normal(hit);
+                color += normal * 0.5f + 0.5f;
             }
         }
     }
@@ -315,7 +316,7 @@ fn gbuffer_normals_main(@builtin(local_invocation_id) local_id: vec3u, @builtin(
     color = clamp(color, vec3f(-1.0f), vec3f(1.0f));
 
     if all(global_id < output_dim) {
-        textureStore(output_rgba8snorm, global_id.xy, vec4f(color * 0.5f + 0.5f, 1.0f));
+        textureStore(output_rgba8snorm, global_id.xy, vec4f(color, 1.0f));
     }
 }
 
@@ -404,7 +405,7 @@ fn pathtrace_naive(local_id: vec3u, start_ray: Ray) -> vec3f
             continue;
         }
 
-        let normal = get_shading_normal(materials[hit.mat_idx], hit.normal, hit.tex_coords);
+        let normal = get_shading_normal(hit);
 
         // Accumulate emission.
         radiance += weight * mat_point.emission /** f32(dot(normal, outgoing) >= 0.0f)*/;
@@ -481,7 +482,7 @@ fn pathtrace(local_id: vec3u, start_ray: Ray) -> vec3f
             continue;
         }
 
-        let normal = get_shading_normal(materials[hit.mat_idx], hit.normal, hit.tex_coords);
+        let normal = get_shading_normal(hit);
 
         // Accumulate emission.
         radiance += weight * mat_point.emission /** f32(dot(normal, outgoing) >= 0.0f)*/;
@@ -616,28 +617,28 @@ fn get_material_point(mat: Material, uv: vec2f) -> MaterialPoint
     return res;
 }
 
-fn get_shading_normal(mat: Material, hit_normal: vec3f, uv: vec2f) -> vec3f
+fn get_shading_normal(hit: HitInfo) -> vec3f
 {
-    var res = hit_normal;
+    let mat = materials[hit.mat_idx];
+    let uv = hit.tex_coords;
+
+    var res = hit.normal;
 
     // Sample normalmap.
     if mat.normal_tex_idx != SENTINEL_IDX
     {
         const mat_sampler_idx: u32 = 0;  // TODO!
 
-        let normalmap_sample = textureSampleLevel(textures[mat.normal_tex_idx], samplers[mat_sampler_idx], uv, 0.0f).rgb;
-        res = normalmap_sample;
+        let normalmap_sample = textureSampleLevel(textures[mat.normal_tex_idx], samplers[mat_sampler_idx], uv, 0.0f).xyz;
+        var normal_local = -1.0 + 2.0 * normalmap_sample;
+        var frame = mat3x3f(hit.tangent, hit.bitangent, res);
+        frame[0] = orthonormalize(frame[0], frame[2]);
+        frame[1] = normalize(cross(frame[2], frame[0]));
 
-        /*
-        auto  normalmap  = -1 + 2 * xyz(eval_texture(normal_tex, texcoord, false));
-        auto  tuv        = eval_element_tangents(scene, instance, element);
-        auto  frame      = frame3f{tuv.first, tuv.second, normal, {0, 0, 0}};
-        frame.x          = orthonormalize(frame.x, frame.z);
-        frame.y          = normalize(cross(frame.z, frame.x));
-        auto flip_v      = dot(frame.y, tuv.second) < 0;
-        normalmap.y *= flip_v ? 1 : -1;  // flip vertical axis
-        normal = transform_normal(frame, normalmap);
-        */
+        let should_flip_v = dot(frame[1], hit.bitangent) < 0.0f;
+        if should_flip_v { normal_local *= -1.0f; }
+
+        res = normalize(frame * normal_local);
     }
 
     return res;
@@ -989,11 +990,14 @@ struct HitInfo
 {
     normal: vec3f,
     dst: f32,
-    tex_coords: vec2f,
+    tangent: vec3f,
     mat_idx: u32,
+    bitangent: vec3f,
+    color: vec4f,
+    tex_coords: vec2f,
 }
 
-const invalid_hit: HitInfo = HitInfo(vec3f(), F32_MAX, vec2f(), 0);
+const invalid_hit: HitInfo = HitInfo(vec3f(), F32_MAX, vec3f(), 0, vec3f(), vec4f(), vec2f());
 
 const MAX_TLAS_DEPTH: u32 = 20;  // This supports 2^MAX_TLAS_DEPTH objects.
 const TLAS_STACK_SIZE: u32 = (MAX_TLAS_DEPTH + 1) * 8 * 8;  // shared memory
@@ -1106,13 +1110,47 @@ fn ray_scene_intersection(local_id: vec3u, ray: Ray)->HitInfo
         let v = min_hit.z;
         let w = 1.0 - u - v;
 
-        let local_normal = normalize(v0.normal*w + v1.normal*u + v2.normal*v);
+        let normal_local = normalize(v0.normal*w + v1.normal*u + v2.normal*v);
         let normal_mat = transpose(mat3x3f(inv_trans[0].xyz, inv_trans[1].xyz, inv_trans[2].xyz));
 
         hit_info.dst = min_hit.x;
-        hit_info.normal = normalize(normal_mat * local_normal);
-        hit_info.tex_coords = v0.tex_coords*w + v1.tex_coords*u + v2.tex_coords*v;
         hit_info.mat_idx = mat_idx;
+
+        hit_info.normal = normalize(normal_mat * normal_local);
+        hit_info.color = vec4f(1.0f);
+        hit_info.tex_coords = v0.tex_coords*w + v1.tex_coords*u + v2.tex_coords*v;
+
+        // Tangent and bitangent from uv.
+        {
+            let p0 = verts_pos_array[mesh_idx].data[indices_array[mesh_idx].data[tri_idx*3 + 0]];
+            let p1 = verts_pos_array[mesh_idx].data[indices_array[mesh_idx].data[tri_idx*3 + 1]];
+            let p2 = verts_pos_array[mesh_idx].data[indices_array[mesh_idx].data[tri_idx*3 + 2]];
+
+            // From YoctoGL.
+            // Follows the definition in http://www.terathon.com/code/tangent.html and
+            // https://gist.github.com/aras-p/2843984
+            // normal points up from texture space
+            let p   = p1 - p0;
+            let q   = p2 - p0;
+            let s   = vec2f(v1.tex_coords.x - v0.tex_coords.x, v2.tex_coords.x - v0.tex_coords.x);
+            let t   = vec2f(v1.tex_coords.y - v0.tex_coords.y, v2.tex_coords.y - v0.tex_coords.y);
+            let div = s.x * t.y - s.y * t.x;
+
+            var tangent_local   = vec3f(1.0f, 0.0f, 0.0f);
+            var bitangent_local = vec3f(0.0f, 1.0f, 0.0f);
+            if (div != 0)
+            {
+                tangent_local   = vec3f(t.y * p.x - t.x * q.x,
+                                        t.y * p.y - t.x * q.y,
+                                        t.y * p.z - t.x * q.z) / div;
+                bitangent_local = vec3f(s.x * q.x - s.y * p.x,
+                                        s.x * q.y - s.y * p.y,
+                                        s.x * q.z - s.y * p.z) / div;
+            }
+
+            hit_info.tangent = normalize(normal_mat * tangent_local);
+            hit_info.bitangent = normalize(normal_mat * bitangent_local);
+        }
     }
 
     return hit_info;
@@ -2205,6 +2243,11 @@ fn is_inf(x: f32) -> bool
 fn vec3f_is_finite(v: vec3f) -> bool
 {
     return all((vec3u(v) & vec3u(0x7F800000)) != vec3u(0x7F800000));
+}
+
+fn orthonormalize(a: vec3f, b: vec3f) -> vec3f
+{
+    return normalize(a - b * dot(a, b));
 }
 
 // Debug visualization
