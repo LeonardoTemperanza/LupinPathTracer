@@ -766,7 +766,7 @@ fn microfacet_distribution(roughness: f32, normal: vec3f, halfway: vec3f, ggx: b
     if cosine <= 0.0f { return 0.0f; }
     let roughness2 = roughness * roughness;
     let cosine2    = cosine * cosine;
-    if (ggx) {
+    if ggx {
         return roughness2 / (PI * (cosine2 * roughness2 + 1 - cosine2) * (cosine2 * roughness2 + 1 - cosine2));
     } else {
         return exp((cosine2 - 1) / (roughness2 * cosine2)) / (PI * roughness2 * cosine2 * cosine2);
@@ -1143,7 +1143,7 @@ fn ray_scene_intersection(local_id: vec3u, ray: Ray)->HitInfo
 
             var tangent_local   = vec3f(1.0f, 0.0f, 0.0f);
             var bitangent_local = vec3f(0.0f, 1.0f, 0.0f);
-            if (div != 0)
+            if div != 0
             {
                 tangent_local   = vec3f(t.y * p.x - t.x * q.x,
                                         t.y * p.y - t.x * q.y,
@@ -1288,166 +1288,162 @@ fn sample_bsdfcos(material: MaterialPoint, normal: vec3f, outgoing: vec3f, rnl: 
 {
     if material.roughness == 0.0f { return vec3f(); }
 
-    if (material.mat_type == MAT_TYPE_MATTE) {
-        return sample_matte(material.color, normal, outgoing, rn);
-    } else if (material.mat_type == MAT_TYPE_GLOSSY) {
-        return sample_glossy(material.color, material.ior, material.roughness,
-          normal, outgoing, rnl, rn);
-    } else if (material.mat_type == MAT_TYPE_REFLECTIVE) {
-        return sample_reflective(
-          material.color, material.roughness, normal, outgoing, rn);
-    } else if (material.mat_type == MAT_TYPE_TRANSPARENT) {
-        return sample_transparent(material.color, material.ior, material.roughness,
-          normal, outgoing, rnl, rn);
-    } else if (material.mat_type == MAT_TYPE_REFRACTIVE) {
-        return sample_refractive(material.color, material.ior, material.roughness,
-          normal, outgoing, rnl, rn);
-    } else if (material.mat_type == MAT_TYPE_SUBSURFACE) {
-        return sample_refractive(material.color, material.ior, material.roughness,
-          normal, outgoing, rnl, rn);
-    } else if (material.mat_type == MAT_TYPE_GLTFPBR) {
-        return sample_gltfpbr(material.color, material.ior, material.roughness,
-          material.metallic, normal, outgoing, rnl, rn);
-    } else {
-        return vec3f();
+    switch material.mat_type
+    {
+        case MAT_TYPE_MATTE:       { return sample_matte(material.color, normal, outgoing, rn); }
+        case MAT_TYPE_GLOSSY:      { return sample_glossy(material.color, material.ior, material.roughness, normal, outgoing, rnl, rn); }
+        case MAT_TYPE_REFLECTIVE:  { return sample_reflective(material.color, material.roughness, normal, outgoing, rn); }
+        case MAT_TYPE_TRANSPARENT: { return sample_transparent(material.color, material.ior, material.roughness, normal, outgoing, rnl, rn); }
+        case MAT_TYPE_REFRACTIVE:  { return sample_refractive(material.color, material.ior, material.roughness, normal, outgoing, rnl, rn); }
+        case MAT_TYPE_SUBSURFACE:  { return sample_refractive(material.color, material.ior, material.roughness, normal, outgoing, rnl, rn); }
+        case MAT_TYPE_GLTFPBR:     { return sample_gltfpbr(material.color, material.ior, material.roughness, material.metallic, normal, outgoing, rnl, rn); }
+        default: { return vec3f(); }
     }
 
     return vec3f();
 }
 
-fn sample_matte(color: vec3f, normal: vec3f,
-    outgoing: vec3f, rn: vec2f) -> vec3f {
+fn sample_matte(color: vec3f, normal: vec3f, outgoing: vec3f, rn: vec2f) -> vec3f
+{
     let up_normal = select(normal, -normal, dot(normal, outgoing) <= 0.0f);
     return sample_hemisphere_cos(up_normal, rn);
 }
 
-fn sample_glossy(color: vec3f, ior: f32, roughness: f32,
-    normal: vec3f, outgoing: vec3f, rnl: f32, rn: vec2f) -> vec3f {
+fn sample_glossy(color: vec3f, ior: f32, roughness: f32, normal: vec3f, outgoing: vec3f,
+                 rnl: f32, rn: vec2f) -> vec3f
+{
     let up_normal = select(normal, -normal, dot(normal, outgoing) <= 0.0f);
-    if (rnl < fresnel_dielectric(ior, up_normal, outgoing)) {
+    if rnl < fresnel_dielectric(ior, up_normal, outgoing)
+    {
         let halfway  = sample_microfacet(roughness, up_normal, rn, true);
         let incoming = reflect_(outgoing, halfway);
-        if (!same_hemisphere(up_normal, outgoing, incoming)) { return vec3f(); }
+        if !same_hemisphere(up_normal, outgoing, incoming) { return vec3f(); }
         return incoming;
-    } else {
+    }
+    else
+    {
         return sample_hemisphere_cos(up_normal, rn);
     }
 }
 
-fn sample_reflective(color: vec3f, roughness: f32,
-    normal: vec3f, outgoing: vec3f, rn: vec2f) -> vec3f {
+fn sample_reflective(color: vec3f, roughness: f32, normal: vec3f, outgoing: vec3f,
+                     rn: vec2f) -> vec3f
+{
     let up_normal = select(normal, -normal, dot(normal, outgoing) <= 0.0f);
     let halfway   = sample_microfacet(roughness, up_normal, rn, true);
     let incoming  = reflect_(outgoing, halfway);
-    if (!same_hemisphere(up_normal, outgoing, incoming)) { return vec3f(); }
+    if !same_hemisphere(up_normal, outgoing, incoming) { return vec3f(); }
     return incoming;
 }
 
-fn sample_transparent(color: vec3f, ior: f32, roughness: f32,
-    normal: vec3f, outgoing: vec3f, rnl: f32, rn: vec2f) -> vec3f {
+fn sample_transparent(color: vec3f, ior: f32, roughness: f32, normal: vec3f, outgoing: vec3f,
+                      rnl: f32, rn: vec2f) -> vec3f
+{
     let up_normal = select(normal, -normal, dot(normal, outgoing) <= 0.0f);
     let halfway   = sample_microfacet(roughness, up_normal, rn, true);
-    if (rnl < fresnel_dielectric(ior, halfway, outgoing)) {
-      let incoming = reflect_(outgoing, halfway);
-      if (!same_hemisphere(up_normal, outgoing, incoming)) { return vec3f(); }
-      return incoming;
-    } else {
-      let reflected = reflect_(outgoing, halfway);
-      let incoming  = -reflect_(reflected, up_normal);
-      if (same_hemisphere(up_normal, outgoing, incoming)) { return vec3f(); }
-      return incoming;
+    if rnl < fresnel_dielectric(ior, halfway, outgoing)
+    {
+        let incoming = reflect_(outgoing, halfway);
+        if !same_hemisphere(up_normal, outgoing, incoming) { return vec3f(); }
+        return incoming;
+    }
+    else
+    {
+        let reflected = reflect_(outgoing, halfway);
+        let incoming  = -reflect_(reflected, up_normal);
+        if same_hemisphere(up_normal, outgoing, incoming) { return vec3f(); }
+        return incoming;
     }
 }
 
-fn sample_refractive(color: vec3f, ior: f32, roughness: f32,
-    normal: vec3f, outgoing: vec3f, rnl: f32, rn: vec2f) -> vec3f {
+fn sample_refractive(color: vec3f, ior: f32, roughness: f32, normal: vec3f, outgoing: vec3f,
+                     rnl: f32, rn: vec2f) -> vec3f
+{
     let entering  = dot(normal, outgoing) >= 0;
     let up_normal = select(normal, -normal, dot(normal, outgoing) <= 0.0f);
     let halfway   = sample_microfacet(roughness, up_normal, rn, true);
     // let halfway = sample_microfacet(roughness, up_normal, outgoing, rn, true);
-    if (rnl < fresnel_dielectric(select(1.0f / ior, ior, entering), halfway, outgoing)) {
+    if rnl < fresnel_dielectric(select(1.0f / ior, ior, entering), halfway, outgoing)
+    {
         let incoming = reflect_(outgoing, halfway);
-        if (!same_hemisphere(up_normal, outgoing, incoming)) { return vec3f(); }
+        if !same_hemisphere(up_normal, outgoing, incoming) { return vec3f(); }
         return incoming;
-    } else {
+    }
+    else
+    {
         let incoming = refract_(outgoing, halfway, select(ior, 1.0f / ior, entering));
-        if (same_hemisphere(up_normal, outgoing, incoming)) { return vec3f(); }
+        if same_hemisphere(up_normal, outgoing, incoming) { return vec3f(); }
         return incoming;
     }
 }
 
 fn sample_gltfpbr(color: vec3f, ior: f32, roughness: f32,
-    metallic: f32, normal: vec3f, outgoing: vec3f, rnl: f32,
-    rn: vec2f) -> vec3f {
+                  metallic: f32, normal: vec3f, outgoing: vec3f,
+                  rnl: f32, rn: vec2f) -> vec3f
+{
     let up_normal = select(normal, -normal, dot(normal, outgoing) <= 0.0f);
-    let reflectivity = mix(
-        eta_to_reflectivity(vec3f(ior)), color, metallic);
+    let reflectivity = mix(eta_to_reflectivity(vec3f(ior)), color, metallic);
     let fresnel_schlick = fresnel_schlick_vec3f(reflectivity, up_normal, outgoing);
-    if (rnl < (fresnel_schlick.x + fresnel_schlick.y + fresnel_schlick.z) / 3.0f) {
+    if rnl < (fresnel_schlick.x + fresnel_schlick.y + fresnel_schlick.z) / 3.0f
+    {
         let halfway  = sample_microfacet(roughness, up_normal, rn, true);
         let incoming = reflect_(outgoing, halfway);
-        if (!same_hemisphere(up_normal, outgoing, incoming)) { return vec3f(); }
+        if !same_hemisphere(up_normal, outgoing, incoming) { return vec3f(); }
         return incoming;
-    } else {
+    }
+    else
+    {
         return sample_hemisphere_cos(up_normal, rn);
     }
 }
 
-fn sample_microfacet(
-    roughness: f32, normal: vec3f, rn: vec2f, ggx: bool) -> vec3f {
+fn sample_microfacet(roughness: f32, normal: vec3f, rn: vec2f, ggx: bool) -> vec3f
+{
     let phi   = 2.0f * PI * rn.x;
     var theta = 0.0f;
-    if (ggx) {
+    if ggx
+    {
         theta = atan(roughness * sqrt(rn.y / (1 - rn.y)));
-    } else {
+    }
+    else
+    {
         let roughness2 = roughness * roughness;
         theta           = atan(sqrt(-roughness2 * log(1 - rn.y)));
     }
-    let local_half_vector = vec3f(
-        cos(phi) * sin(theta), sin(phi) * sin(theta), cos(theta));
+
+    let local_half_vector = vec3f(cos(phi) * sin(theta), sin(phi) * sin(theta), cos(theta));
     return normalize(basis_fromz(normal) * local_half_vector);
 }
 
-fn eval_bsdfcos(material: MaterialPoint, normal: vec3f,
-    outgoing: vec3f, incoming: vec3f) -> vec3f {
-    if (material.roughness == 0) { return vec3f(); }
+fn eval_bsdfcos(material: MaterialPoint, normal: vec3f, outgoing: vec3f, incoming: vec3f) -> vec3f
+{
+    if material.roughness == 0.0f { return vec3f(); }
 
-    if (material.mat_type == MAT_TYPE_MATTE) {
-        return eval_matte(material.color, normal, outgoing, incoming);
-    } else if (material.mat_type == MAT_TYPE_GLOSSY) {
-        return eval_glossy(material.color, material.ior, material.roughness, normal,
-            outgoing, incoming);
-    } else if (material.mat_type == MAT_TYPE_REFLECTIVE) {
-        return eval_reflective(
-            material.color, material.roughness, normal, outgoing, incoming);
-    } else if (material.mat_type == MAT_TYPE_TRANSPARENT) {
-        return eval_transparent(material.color, material.ior, material.roughness,
-            normal, outgoing, incoming);
-    } else if (material.mat_type == MAT_TYPE_REFRACTIVE) {
-        return eval_refractive(material.color, material.ior, material.roughness,
-            normal, outgoing, incoming);
-    } else if (material.mat_type == MAT_TYPE_SUBSURFACE) {
-        return eval_refractive(material.color, material.ior, material.roughness,
-            normal, outgoing, incoming);
-    } else if (material.mat_type == MAT_TYPE_GLTFPBR) {
-        return eval_gltfpbr(material.color, material.ior, material.roughness,
-            material.metallic, normal, outgoing, incoming);
-    } else {
-        return vec3f();
+    switch material.mat_type
+    {
+        case MAT_TYPE_MATTE:       { return eval_matte(material.color, normal, outgoing, incoming); }
+        case MAT_TYPE_GLOSSY:      { return eval_glossy(material.color, material.ior, material.roughness, normal, outgoing, incoming); }
+        case MAT_TYPE_REFLECTIVE:  { return eval_reflective(material.color, material.roughness, normal, outgoing, incoming); }
+        case MAT_TYPE_TRANSPARENT: { return eval_transparent(material.color, material.ior, material.roughness, normal, outgoing, incoming); }
+        case MAT_TYPE_REFRACTIVE:  { return eval_refractive(material.color, material.ior, material.roughness, normal, outgoing, incoming); }
+        case MAT_TYPE_SUBSURFACE:  { return eval_refractive(material.color, material.ior, material.roughness, normal, outgoing, incoming); }
+        case MAT_TYPE_GLTFPBR:     { return eval_gltfpbr(material.color, material.ior, material.roughness, material.metallic, normal, outgoing, incoming); }
+        default: { return vec3f(); }
     }
 
-  return vec3f(0.0f);
+    return vec3f(0.0f);
 }
 
-fn eval_matte(color: vec3f, normal: vec3f,
-    outgoing: vec3f, incoming: vec3f) -> vec3f {
-    if (dot(normal, incoming) * dot(normal, outgoing) <= 0) { return vec3f(); }
+fn eval_matte(color: vec3f, normal: vec3f, outgoing: vec3f, incoming: vec3f) -> vec3f
+{
+    if dot(normal, incoming) * dot(normal, outgoing) <= 0 { return vec3f(); }
     return color / PI * abs(dot(normal, incoming));
 }
 
-fn eval_glossy(color: vec3f, ior: f32, roughness: f32,
-    normal: vec3f, outgoing: vec3f, incoming: vec3f) -> vec3f {
-    if (dot(normal, incoming) * dot(normal, outgoing) <= 0) { return vec3f(); }
+fn eval_glossy(color: vec3f, ior: f32, roughness: f32, normal: vec3f,
+               outgoing: vec3f, incoming: vec3f) -> vec3f
+{
+    if dot(normal, incoming) * dot(normal, outgoing) <= 0 { return vec3f(); }
     let up_normal = select(normal, -normal, dot(normal, outgoing) <= 0);
     let F1        = fresnel_dielectric(ior, up_normal, outgoing);
     let halfway   = normalize(incoming + outgoing);
@@ -1461,9 +1457,10 @@ fn eval_glossy(color: vec3f, ior: f32, roughness: f32,
                abs(dot(up_normal, incoming));
 }
 
-fn eval_reflective(color: vec3f, roughness: f32,
-    normal: vec3f, outgoing: vec3f, incoming: vec3f) -> vec3f {
-    if (dot(normal, incoming) * dot(normal, outgoing) <= 0) { return vec3f(); };
+fn eval_reflective(color: vec3f, roughness: f32, normal: vec3f,
+                   outgoing: vec3f, incoming: vec3f) -> vec3f
+{
+    if dot(normal, incoming) * dot(normal, outgoing) <= 0 { return vec3f(); };
     let up_normal = select(normal, -normal, dot(normal, outgoing) <= 0);
     let halfway   = normalize(incoming + outgoing);
     let F         = fresnel_conductor(
@@ -1475,10 +1472,12 @@ fn eval_reflective(color: vec3f, roughness: f32,
            abs(dot(up_normal, incoming));
 }
 
-fn eval_transparent(color: vec3f, ior: f32, roughness: f32,
-    normal: vec3f, outgoing: vec3f, incoming: vec3f) -> vec3f {
-    let up_normal = select(normal, -normal, dot(normal, outgoing) <= 0);
-    if (dot(normal, incoming) * dot(normal, outgoing) >= 0) {
+fn eval_transparent(color: vec3f, ior: f32, roughness: f32, normal: vec3f,
+                    outgoing: vec3f, incoming: vec3f) -> vec3f
+{
+    let up_normal = select(normal, -normal, dot(normal, outgoing) <= 0.0f);
+    if dot(normal, incoming) * dot(normal, outgoing) >= 0.0f
+    {
         let halfway = normalize(incoming + outgoing);
         let F       = fresnel_dielectric(ior, halfway, outgoing);
         let D       = microfacet_distribution(roughness, up_normal, halfway, true);
@@ -1487,7 +1486,9 @@ fn eval_transparent(color: vec3f, ior: f32, roughness: f32,
         return vec3f(1.0f) * F * D * G /
                (4 * dot(up_normal, outgoing) * dot(up_normal, incoming)) *
                abs(dot(up_normal, incoming));
-    } else {
+    }
+    else
+    {
         let reflected = reflect_(-incoming, up_normal);
         let halfway   = normalize(reflected + outgoing);
         let F         = fresnel_dielectric(ior, halfway, outgoing);
@@ -1501,11 +1502,13 @@ fn eval_transparent(color: vec3f, ior: f32, roughness: f32,
 }
 
 fn eval_refractive(color: vec3f, ior: f32, roughness: f32,
-    normal: vec3f, outgoing: vec3f, incoming: vec3f) -> vec3f {
+    normal: vec3f, outgoing: vec3f, incoming: vec3f) -> vec3f
+{
     let entering  = dot(normal, outgoing) >= 0;
     let up_normal = select(normal, -normal, dot(normal, outgoing) <= 0);
     let rel_ior   = select(1.0f / ior, ior, entering);
-    if (dot(normal, incoming) * dot(normal, outgoing) >= 0) {
+    if dot(normal, incoming) * dot(normal, outgoing) >= 0
+    {
         let halfway = normalize(incoming + outgoing);
         let F       = fresnel_dielectric(rel_ior, halfway, outgoing);
         let D       = microfacet_distribution(roughness, up_normal, halfway, true);
@@ -1514,7 +1517,9 @@ fn eval_refractive(color: vec3f, ior: f32, roughness: f32,
         return vec3f(1.0f * F * D * G /
                abs(4.0f * dot(normal, outgoing) * dot(normal, incoming)) *
                abs(dot(normal, incoming)));
-    } else {
+    }
+    else
+    {
         let halfway = -normalize(rel_ior * incoming + outgoing) *
                        (select(-1.0f, 1.0f, entering));
         let F = fresnel_dielectric(rel_ior, halfway, outgoing);
@@ -1532,10 +1537,10 @@ fn eval_refractive(color: vec3f, ior: f32, roughness: f32,
     }
 }
 
-fn eval_gltfpbr(color: vec3f, ior: f32, roughness: f32,
-    metallic: f32, normal: vec3f, outgoing: vec3f,
-    incoming: vec3f) -> vec3f {
-    if (dot(normal, incoming) * dot(normal, outgoing) <= 0) { return vec3f(); }
+fn eval_gltfpbr(color: vec3f, ior: f32, roughness: f32, metallic: f32, normal: vec3f,
+                outgoing: vec3f, incoming: vec3f) -> vec3f
+{
+    if dot(normal, incoming) * dot(normal, outgoing) <= 0.0f { return vec3f(); }
     let reflectivity = mix(
         eta_to_reflectivity(vec3f(ior)), color, metallic);
     let up_normal = select(normal, -normal, dot(normal, outgoing) <= 0);
@@ -1551,47 +1556,37 @@ fn eval_gltfpbr(color: vec3f, ior: f32, roughness: f32,
                abs(dot(up_normal, incoming));
 }
 
-fn sample_bsdfcos_pdf(material: MaterialPoint,
-    normal: vec3f, outgoing: vec3f, incoming: vec3f) -> f32 {
-    if (material.roughness == 0.0f) { return 0.0f; }
+fn sample_bsdfcos_pdf(material: MaterialPoint, normal: vec3f,
+                      outgoing: vec3f, incoming: vec3f) -> f32
+{
+    if material.roughness == 0.0f { return 0.0f; }
 
-    if (material.mat_type == MAT_TYPE_MATTE) {
-        return sample_matte_pdf(material.color, normal, outgoing, incoming);
-    } else if (material.mat_type == MAT_TYPE_GLOSSY) {
-        return sample_glossy_pdf(material.color, material.ior, material.roughness,
-            normal, outgoing, incoming);
-    } else if (material.mat_type == MAT_TYPE_REFLECTIVE) {
-        return sample_reflective_pdf(
-            material.color, material.roughness, normal, outgoing, incoming);
-    } else if (material.mat_type == MAT_TYPE_TRANSPARENT) {
-        return sample_transparent_pdf(material.color, material.ior,
-            material.roughness, normal, outgoing, incoming);
-    } else if (material.mat_type == MAT_TYPE_REFRACTIVE) {
-        return sample_refractive_pdf(material.color, material.ior,
-            material.roughness, normal, outgoing, incoming);
-    } else if (material.mat_type == MAT_TYPE_SUBSURFACE) {
-        return sample_refractive_pdf(material.color, material.ior,
-            material.roughness, normal, outgoing, incoming);
-    } else if (material.mat_type == MAT_TYPE_GLTFPBR) {
-        return sample_gltfpbr_pdf(material.color, material.ior, material.roughness,
-            material.metallic, normal, outgoing, incoming);
-    } else {
-        return 0.0f;
+    switch material.mat_type
+    {
+        case MAT_TYPE_MATTE:        { return sample_matte_pdf(material.color, normal, outgoing, incoming); }
+        case MAT_TYPE_GLOSSY:       { return sample_glossy_pdf(material.color, material.ior, material.roughness, normal, outgoing, incoming); }
+        case MAT_TYPE_REFLECTIVE:   { return sample_reflective_pdf(material.color, material.roughness, normal, outgoing, incoming); }
+        case MAT_TYPE_TRANSPARENT:  { return sample_transparent_pdf(material.color, material.ior, material.roughness, normal, outgoing, incoming); }
+        case MAT_TYPE_REFRACTIVE:   { return sample_refractive_pdf(material.color, material.ior, material.roughness, normal, outgoing, incoming); }
+        case MAT_TYPE_SUBSURFACE:   { return sample_refractive_pdf(material.color, material.ior, material.roughness, normal, outgoing, incoming); }
+        case MAT_TYPE_GLTFPBR:      { return sample_gltfpbr_pdf(material.color, material.ior, material.roughness, material.metallic, normal, outgoing, incoming); }
+        default: { return 0.0f; }
     }
 
     return 0.0f;
 }
 
-fn sample_matte_pdf(color: vec3f, normal: vec3f,
-    outgoing: vec3f, incoming: vec3f) -> f32 {
-    if (dot(normal, incoming) * dot(normal, outgoing) <= 0.0f) { return 0.0f; }
+fn sample_matte_pdf(color: vec3f, normal: vec3f, outgoing: vec3f, incoming: vec3f) -> f32
+{
+    if dot(normal, incoming) * dot(normal, outgoing) <= 0.0f { return 0.0f; }
     let up_normal = select(normal, -normal, dot(normal, outgoing) <= 0.0f);
     return sample_hemisphere_cos_pdf(up_normal, incoming);
 }
 
-fn sample_glossy_pdf(color: vec3f, ior: f32, roughness: f32,
-    normal: vec3f, outgoing: vec3f, incoming: vec3f) -> f32 {
-    if (dot(normal, incoming) * dot(normal, outgoing) <= 0.0f) { return 0.0f; }
+fn sample_glossy_pdf(color: vec3f, ior: f32, roughness: f32, normal: vec3f,
+                     outgoing: vec3f, incoming: vec3f) -> f32
+{
+    if dot(normal, incoming) * dot(normal, outgoing) <= 0.0f { return 0.0f; }
     let up_normal = select(normal, -normal, dot(normal, outgoing) <= 0.0f);
     let halfway   = normalize(outgoing + incoming);
     let F         = fresnel_dielectric(ior, up_normal, outgoing);
@@ -1600,25 +1595,29 @@ fn sample_glossy_pdf(color: vec3f, ior: f32, roughness: f32,
            (1 - F) * sample_hemisphere_cos_pdf(up_normal, incoming);
 }
 
-fn sample_reflective_pdf(color: vec3f, roughness: f32,
-    normal: vec3f, outgoing: vec3f, incoming: vec3f) -> f32 {
-    if (dot(normal, incoming) * dot(normal, outgoing) <= 0) { return 0.0f; }
+fn sample_reflective_pdf(color: vec3f, roughness: f32, normal: vec3f,
+                         outgoing: vec3f, incoming: vec3f) -> f32
+{
+    if dot(normal, incoming) * dot(normal, outgoing) <= 0 { return 0.0f; }
     let up_normal = select(normal, -normal, dot(normal, outgoing) <= 0.0f);
     let halfway   = normalize(outgoing + incoming);
     return sample_microfacet_pdf(roughness, up_normal, halfway, true) /
            (4 * abs(dot(outgoing, halfway)));
 }
 
-fn sample_transparent_pdf(color: vec3f, ior: f32,
-    roughness: f32, normal: vec3f, outgoing: vec3f,
-    incoming: vec3f) -> f32 {
+fn sample_transparent_pdf(color: vec3f, ior: f32, roughness: f32, normal: vec3f,
+                          outgoing: vec3f, incoming: vec3f) -> f32
+{
     let up_normal = select(normal, -normal, dot(normal, outgoing) <= 0.0f);
-    if (dot(normal, incoming) * dot(normal, outgoing) >= 0) {
+    if dot(normal, incoming) * dot(normal, outgoing) >= 0
+    {
         let halfway = normalize(incoming + outgoing);
         return fresnel_dielectric(ior, halfway, outgoing) *
                sample_microfacet_pdf(roughness, up_normal, halfway, true) /
                (4 * abs(dot(outgoing, halfway)));
-    } else {
+    }
+    else
+    {
         let reflected = reflect_(-incoming, up_normal);
         let halfway   = normalize(reflected + outgoing);
         let d         = (1 - fresnel_dielectric(ior, halfway, outgoing)) *
@@ -1627,19 +1626,22 @@ fn sample_transparent_pdf(color: vec3f, ior: f32,
     }
 }
 
-fn sample_refractive_pdf(color: vec3f, ior: f32,
-    roughness: f32, normal: vec3f, outgoing: vec3f,
-    incoming: vec3f) -> f32 {
+fn sample_refractive_pdf(color: vec3f, ior: f32, roughness: f32, normal: vec3f,
+                         outgoing: vec3f, incoming: vec3f) -> f32
+{
     let entering  = dot(normal, outgoing) >= 0;
     let up_normal = select(normal, -normal, dot(normal, outgoing) <= 0.0f);
     let rel_ior   = select(1.0f / ior, ior, entering);
-    if (dot(normal, incoming) * dot(normal, outgoing) >= 0) {
+    if dot(normal, incoming) * dot(normal, outgoing) >= 0.0f
+    {
         let halfway = normalize(incoming + outgoing);
         return fresnel_dielectric(rel_ior, halfway, outgoing) *
                sample_microfacet_pdf(roughness, up_normal, halfway, true) /
                //  sample_microfacet_pdf(roughness, up_normal, halfway, outgoing) /
                (4 * abs(dot(outgoing, halfway)));
-    } else {
+    }
+    else
+    {
         let halfway = -normalize(rel_ior * incoming + outgoing) *
                        (select(-1.0f, 1.0f, entering));
         // [Walter 2007] equation 17
@@ -1651,10 +1653,10 @@ fn sample_refractive_pdf(color: vec3f, ior: f32,
     }
 }
 
-fn sample_gltfpbr_pdf(color: vec3f, ior: f32, roughness: f32,
-    metallic: f32, normal: vec3f, outgoing: vec3f,
-    incoming: vec3f) -> f32 {
-    if (dot(normal, incoming) * dot(normal, outgoing) <= 0) { return 0.0f; }
+fn sample_gltfpbr_pdf(color: vec3f, ior: f32, roughness: f32, metallic: f32, normal: vec3f,
+                      outgoing: vec3f, incoming: vec3f) -> f32
+{
+    if dot(normal, incoming) * dot(normal, outgoing) <= 0 { return 0.0f; }
     let up_normal = select(normal, -normal, dot(normal, outgoing) <= 0.0f);
     let halfway      = normalize(outgoing + incoming);
     let reflectivity = mix(
@@ -1666,14 +1668,15 @@ fn sample_gltfpbr_pdf(color: vec3f, ior: f32, roughness: f32,
            (1 - F) * sample_hemisphere_cos_pdf(up_normal, incoming);
 }
 
-fn sample_microfacet_pdf(
-    roughness: f32, normal: vec3f, halfway: vec3f, ggx: bool) -> f32 {
+fn sample_microfacet_pdf(roughness: f32, normal: vec3f, halfway: vec3f, ggx: bool) -> f32
+{
     let cosine = dot(normal, halfway);
-    if (cosine < 0) { return 0.0f; }
+    if cosine < 0 { return 0.0f; }
     return microfacet_distribution(roughness, normal, halfway, ggx) * cosine;
 }
 
-fn sample_hemisphere_cos(normal: vec3f, ruv: vec2f) -> vec3f {
+fn sample_hemisphere_cos(normal: vec3f, ruv: vec2f) -> vec3f
+{
     let z               = sqrt(ruv.y);
     let r               = sqrt(1 - z * z);
     let phi             = 2 * PI * ruv.x;
@@ -1681,115 +1684,104 @@ fn sample_hemisphere_cos(normal: vec3f, ruv: vec2f) -> vec3f {
     return normalize(basis_fromz(normal) * local_direction);
 }
 
-fn sample_hemisphere_cos_pdf(
-    normal: vec3f, direction: vec3f) -> f32 {
+fn sample_hemisphere_cos_pdf(normal: vec3f, direction: vec3f) -> f32
+{
     let cosw = dot(normal, direction);
     return select(cosw / PI, 0.0f, cosw <= 0.0f);
 }
 
-fn sample_delta(material: MaterialPoint, normal: vec3f,
-    outgoing: vec3f, rnl: f32) -> vec3f {
-    if (material.roughness != 0.0f) { return vec3f(); }
+fn sample_delta(material: MaterialPoint, normal: vec3f, outgoing: vec3f, rnl: f32) -> vec3f
+{
+    if material.roughness != 0.0f { return vec3f(); }
 
-    if (material.mat_type == MAT_TYPE_REFLECTIVE) {
-        return sample_reflective_delta(material.color, normal, outgoing);
-    } else if (material.mat_type == MAT_TYPE_TRANSPARENT) {
-        return sample_transparent_delta(
-            material.color, material.ior, normal, outgoing, rnl);
-    } else if (material.mat_type == MAT_TYPE_REFRACTIVE) {
-        return sample_refractive_delta(
-            material.color, material.ior, normal, outgoing, rnl);
-    } else if (material.mat_type == MAT_TYPE_VOLUMETRIC) {
-        return sample_passthrough(material.color, normal, outgoing);
-    } else {
-        return vec3f();
+    switch material.mat_type
+    {
+        case MAT_TYPE_REFLECTIVE:  { return sample_reflective_delta(material.color, normal, outgoing); }
+        case MAT_TYPE_TRANSPARENT: { return sample_transparent_delta(material.color, material.ior, normal, outgoing, rnl); }
+        case MAT_TYPE_REFRACTIVE:  { return sample_refractive_delta(material.color, material.ior, normal, outgoing, rnl); }
+        case MAT_TYPE_VOLUMETRIC:  { return sample_passthrough(material.color, normal, outgoing); }
+        default: { return vec3f(); }
     }
 
     return vec3f();
 }
 
-fn sample_reflective_delta(
-    color: vec3f, normal: vec3f, outgoing: vec3f) -> vec3f {
+fn sample_reflective_delta(color: vec3f, normal: vec3f, outgoing: vec3f) -> vec3f
+{
     let up_normal = select(normal, -normal, dot(normal, outgoing) <= 0.0f);
     return reflect_(outgoing, up_normal);
 }
 
-fn sample_transparent_delta(color: vec3f, ior: f32,
-    normal: vec3f, outgoing: vec3f, rnl: f32) -> vec3f {
+fn sample_transparent_delta(color: vec3f, ior: f32, normal: vec3f, outgoing: vec3f, rnl: f32) -> vec3f
+{
     let up_normal = select(normal, -normal, dot(normal, outgoing) <= 0.0f);
-    if (rnl < fresnel_dielectric(ior, up_normal, outgoing)) {
+    if rnl < fresnel_dielectric(ior, up_normal, outgoing) {
       return reflect_(outgoing, up_normal);
     } else {
       return -outgoing;
     }
 }
 
-fn sample_refractive_delta(color: vec3f, ior: f32,
-    normal: vec3f, outgoing: vec3f, rnl: f32) -> vec3f {
-    if (abs(ior - 1) < 1e-3) { return -outgoing; }
+fn sample_refractive_delta(color: vec3f, ior: f32, normal: vec3f, outgoing: vec3f, rnl: f32) -> vec3f
+{
+    if abs(ior - 1) < 1e-3 { return -outgoing; }
     let entering  = dot(normal, outgoing) >= 0;
     let up_normal = select(normal, -normal, dot(normal, outgoing) <= 0.0f);
     let rel_ior   = select(1.0f / ior, ior, entering);
-    if (rnl < fresnel_dielectric(rel_ior, up_normal, outgoing)) {
+    if rnl < fresnel_dielectric(rel_ior, up_normal, outgoing) {
         return reflect_(outgoing, up_normal);
     } else {
         return refract_(outgoing, up_normal, 1 / rel_ior);
     }
 }
 
-fn sample_passthrough(
-    color: vec3f, normal: vec3f, outgoing: vec3f) -> vec3f {
+fn sample_passthrough(color: vec3f, normal: vec3f, outgoing: vec3f) -> vec3f
+{
     return -outgoing;
 }
 
-fn eval_delta(material: MaterialPoint, normal: vec3f,
-    outgoing: vec3f, incoming: vec3f) -> vec3f {
-    if (material.roughness != 0.0f) { return vec3f(); }
+fn eval_delta(material: MaterialPoint, normal: vec3f, outgoing: vec3f, incoming: vec3f) -> vec3f
+{
+    if material.roughness != 0.0f { return vec3f(); }
 
-    if (material.mat_type == MAT_TYPE_REFLECTIVE) {
-        return eval_reflective_delta(material.color, normal, outgoing, incoming);
-    } else if (material.mat_type == MAT_TYPE_TRANSPARENT) {
-        return eval_transparent_delta(
-            material.color, material.ior, normal, outgoing, incoming);
-    } else if (material.mat_type == MAT_TYPE_REFRACTIVE) {
-        return eval_refractive_delta(
-            material.color, material.ior, normal, outgoing, incoming);
-    } else if (material.mat_type == MAT_TYPE_VOLUMETRIC) {
-        return eval_passthrough(material.color, normal, outgoing, incoming);
-    } else {
-        return vec3f();
+    switch material.mat_type
+    {
+        case MAT_TYPE_REFLECTIVE:  { return eval_reflective_delta(material.color, normal, outgoing, incoming); }
+        case MAT_TYPE_TRANSPARENT: { return eval_transparent_delta(material.color, material.ior, normal, outgoing, incoming); }
+        case MAT_TYPE_REFRACTIVE:  { return eval_refractive_delta(material.color, material.ior, normal, outgoing, incoming); }
+        case MAT_TYPE_VOLUMETRIC:  { return eval_passthrough(material.color, normal, outgoing, incoming); }
+        default: { return vec3f(); }
     }
 
     return vec3f();
 }
 
-fn eval_reflective_delta(color: vec3f, normal: vec3f,
-    outgoing: vec3f, incoming: vec3f) -> vec3f {
-    if (dot(normal, incoming) * dot(normal, outgoing) <= 0.0f) { return vec3f(); }
+fn eval_reflective_delta(color: vec3f, normal: vec3f, outgoing: vec3f, incoming: vec3f) -> vec3f
+{
+    if dot(normal, incoming) * dot(normal, outgoing) <= 0.0f { return vec3f(); }
     let up_normal = select(normal, -normal, dot(normal, outgoing) <= 0.0f);
-    return fresnel_conductor(
-        reflectivity_to_eta(color), vec3f(), up_normal, outgoing);
+    return fresnel_conductor(reflectivity_to_eta(color), vec3f(), up_normal, outgoing);
 }
 
-fn eval_transparent_delta(color: vec3f, ior: f32,
-    normal: vec3f, outgoing: vec3f, incoming: vec3f) -> vec3f {
+fn eval_transparent_delta(color: vec3f, ior: f32, normal: vec3f, outgoing: vec3f, incoming: vec3f) -> vec3f
+{
     let up_normal = select(normal, -normal, dot(normal, outgoing) <= 0.0f);
-    if (dot(normal, incoming) * dot(normal, outgoing) >= 0) {
+    if dot(normal, incoming) * dot(normal, outgoing) >= 0 {
         return vec3f(1.0f) * fresnel_dielectric(ior, up_normal, outgoing);
     } else {
         return color * (1 - fresnel_dielectric(ior, up_normal, outgoing));
     }
 }
 
-fn eval_refractive_delta(color: vec3f, ior: f32, normal: vec3f,
-    outgoing: vec3f, incoming: vec3f) -> vec3f {
-    if (abs(ior - 1) < 1e-3) {
+fn eval_refractive_delta(color: vec3f, ior: f32, normal: vec3f, outgoing: vec3f, incoming: vec3f) -> vec3f
+{
+    if abs(ior - 1.0f) < 1e-3f {
         return select(vec3f(0.0f), vec3f(1.0f), dot(normal, incoming) * dot(normal, outgoing) <= 0);
     }
     let entering  = dot(normal, outgoing) >= 0;
     let up_normal = select(normal, -normal, dot(normal, outgoing) <= 0.0f);
     let rel_ior   = select(1.0f / ior, ior, entering);
-    if (dot(normal, incoming) * dot(normal, outgoing) >= 0) {
+    if dot(normal, incoming) * dot(normal, outgoing) >= 0.0f {
         return vec3f(1.0f) * fresnel_dielectric(rel_ior, up_normal, outgoing);
     } else {
         return vec3f(1.0f) * (1 / (rel_ior * rel_ior)) *
@@ -1797,75 +1789,74 @@ fn eval_refractive_delta(color: vec3f, ior: f32, normal: vec3f,
     }
 }
 
-fn eval_passthrough(color: vec3f, normal: vec3f,
-    outgoing: vec3f, incoming: vec3f) -> vec3f {
-    if (dot(normal, incoming) * dot(normal, outgoing) >= 0) {
+fn eval_passthrough(color: vec3f, normal: vec3f, outgoing: vec3f, incoming: vec3f) -> vec3f
+{
+    if dot(normal, incoming) * dot(normal, outgoing) >= 0.0f {
         return vec3f(0.0f);
     } else {
         return vec3f(1.0f);
     }
 }
 
-fn sample_delta_pdf(material: MaterialPoint,
-    normal: vec3f, outgoing: vec3f, incoming: vec3f) -> f32 {
-    if (material.roughness != 0.0f) { return 0.0f; }
+fn sample_delta_pdf(material: MaterialPoint, normal: vec3f, outgoing: vec3f, incoming: vec3f) -> f32
+{
+    if material.roughness != 0.0f { return 0.0f; }
 
-    if (material.mat_type == MAT_TYPE_REFLECTIVE) {
-        return sample_reflective_delta_pdf(material.color, normal, outgoing, incoming);
-    } else if (material.mat_type == MAT_TYPE_TRANSPARENT) {
-        return sample_transparent_delta_pdf(
-            material.color, material.ior, normal, outgoing, incoming);
-    } else if (material.mat_type == MAT_TYPE_REFRACTIVE) {
-        return sample_refractive_delta_pdf(
-            material.color, material.ior, normal, outgoing, incoming);
-    } else if (material.mat_type == MAT_TYPE_VOLUMETRIC) {
-        return sample_passthrough_pdf(material.color, normal, outgoing, incoming);
-    } else {
-        return 0.0f;
+    switch material.mat_type
+    {
+        case MAT_TYPE_REFLECTIVE:  { return sample_reflective_delta_pdf(material.color, normal, outgoing, incoming); }
+        case MAT_TYPE_TRANSPARENT: { return sample_transparent_delta_pdf(material.color, material.ior, normal, outgoing, incoming); }
+        case MAT_TYPE_REFRACTIVE:  { return sample_refractive_delta_pdf(material.color, material.ior, normal, outgoing, incoming); }
+        case MAT_TYPE_VOLUMETRIC:  { return sample_passthrough_pdf(material.color, normal, outgoing, incoming); }
+        default: { return 0.0f; }
     }
 
     return 0.0f;
 }
 
-fn sample_reflective_delta_pdf(color: vec3f, normal: vec3f,
-    outgoing: vec3f, incoming: vec3f) -> f32 {
-    if (dot(normal, incoming) * dot(normal, outgoing) <= 0) { return 0.0f; }
+fn sample_reflective_delta_pdf(color: vec3f, normal: vec3f, outgoing: vec3f, incoming: vec3f) -> f32
+{
+    if dot(normal, incoming) * dot(normal, outgoing) <= 0.0f { return 0.0f; }
     return 1.0f;
 }
 
-fn sample_transparent_delta_pdf(color: vec3f, ior: f32,
-    normal: vec3f, outgoing: vec3f, incoming: vec3f) -> f32 {
+fn sample_transparent_delta_pdf(color: vec3f, ior: f32, normal: vec3f,
+                                outgoing: vec3f, incoming: vec3f) -> f32
+{
     let up_normal = select(normal, -normal, dot(normal, outgoing) <= 0.0f);
-    if (dot(normal, incoming) * dot(normal, outgoing) >= 0) {
+    if dot(normal, incoming) * dot(normal, outgoing) >= 0.0f {
         return fresnel_dielectric(ior, up_normal, outgoing);
     } else {
-        return 1 - fresnel_dielectric(ior, up_normal, outgoing);
+        return 1.0f - fresnel_dielectric(ior, up_normal, outgoing);
     }
 }
 
-fn sample_refractive_delta_pdf(color: vec3f, ior: f32, normal: vec3f, outgoing: vec3f, incoming: vec3f) -> f32 {
-  if (abs(ior - 1) < 1e-3) {
-      return select(0.0f, 1.0f, dot(normal, incoming) * dot(normal, outgoing) < 0);
-  }
+fn sample_refractive_delta_pdf(color: vec3f, ior: f32, normal: vec3f, outgoing: vec3f, incoming: vec3f) -> f32
+{
+    if abs(ior - 1) < 1e-3f {
+        return select(0.0f, 1.0f, dot(normal, incoming) * dot(normal, outgoing) < 0.0f);
+    }
     let entering  = dot(normal, outgoing) >= 0;
     let up_normal = select(normal, -normal, dot(normal, outgoing) <= 0.0f);
     let rel_ior   = select(1.0f / ior, ior, entering);
-    if (dot(normal, incoming) * dot(normal, outgoing) >= 0) {
+    if dot(normal, incoming) * dot(normal, outgoing) >= 0.0f {
         return fresnel_dielectric(rel_ior, up_normal, outgoing);
     } else {
         return (1 - fresnel_dielectric(rel_ior, up_normal, outgoing));
     }
 }
 
-fn sample_passthrough_pdf(color: vec3f, normal: vec3f, outgoing: vec3f, incoming: vec3f) -> f32 {
-    if (dot(normal, incoming) * dot(normal, outgoing) >= 0) {
+fn sample_passthrough_pdf(color: vec3f, normal: vec3f, outgoing: vec3f, incoming: vec3f) -> f32
+{
+    if dot(normal, incoming) * dot(normal, outgoing) >= 0.0f {
         return 0.0f;
     } else {
         return 1.0f;
     }
 }
 
-fn basis_fromz(v: vec3f) -> mat3x3f {
+fn basis_fromz(v: vec3f) -> mat3x3f
+{
     // https://graphics.pixar.com/library/OrthonormalB/paper.pdf
     let z    = normalize(v);
     let sign = copysignf(1.0f, z.z);
@@ -1878,15 +1869,17 @@ fn basis_fromz(v: vec3f) -> mat3x3f {
 
 fn copysignf(mag: f32, sgn: f32) -> f32 { return select(mag, -mag, sgn < 0.0f); }
 
-// Reflected and refracted vector.
-fn reflect_(w: vec3f, n: vec3f) -> vec3f {
+// TODO: Investigate what makes these two different from the built-ins of the same name.
+fn reflect_(w: vec3f, n: vec3f) -> vec3f
+{
     return -w + 2 * dot(n, w) * n;
 }
 
-fn refract_(w: vec3f, n: vec3f, inv_eta: f32) -> vec3f {
+fn refract_(w: vec3f, n: vec3f, inv_eta: f32) -> vec3f
+{
     let cosine = dot(n, w);
     let k      = 1 + inv_eta * inv_eta * (cosine * cosine - 1);
-    if (k < 0) { return vec3f(); }  // tir
+    if k < 0.0f { return vec3f(); }  // tir
     return -w * inv_eta + (inv_eta * cosine - sqrt(k)) * n;
 }
 
