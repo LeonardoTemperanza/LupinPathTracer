@@ -52,7 +52,7 @@ var<push_constant> constants: PushConstants;
 // Override constants
 override MAX_BOUNCES: u32 = 5;
 override SAMPLES_PER_PIXEL: u32 = 1;
-override DEBUG: bool = false;  // Relying on dead code elimination for good performance.
+override DEBUG: bool = false;  // Relying on constant propagation for good performance.
 
 // Constants
 const WORKGROUP_SIZE_X: u32 = 4;
@@ -82,15 +82,26 @@ struct Vertex
     // 8 bytes padding
 }
 
+// This lets us fetch the optional vertex attributes.
+struct MeshInfo
+{
+    color_buf_idx: u32,
+    tex_coords_buf_idx: u32,
+    normal_buf_idx: u32,
+}
+
 struct Instance
 {
-    inv_transform: mat4x4f,
+    // NOTE: We want the inverse because it's used much more frequently,
+    // and we want its transpose to take advantage of the reduced size
+    // of the layout of a mat3x4f vs mat4x3f.
+    transpose_inverse_transform: mat3x4f,
     mesh_idx: u32,
     mat_idx: u32,
     // 8 bytes padding
 }
 
-// Wgsl doesn't have enums...
+// WGSL doesn't have enums...
 const MAT_TYPE_MATTE: u32       = 0;
 const MAT_TYPE_GLOSSY: u32      = 1;
 const MAT_TYPE_REFLECTIVE: u32  = 2;
@@ -1034,7 +1045,7 @@ fn ray_scene_intersection(local_id: vec3u, ray: Ray)->HitInfo
     var tri_idx: u32 = 0;
     var mesh_idx: u32 = 0;
     var mat_idx: u32 = 0;
-    var inv_trans = mat4x4f();
+    var transform = mat3x4f();
     while stack_idx > 1
     {
         stack_idx--;
@@ -1043,7 +1054,14 @@ fn ray_scene_intersection(local_id: vec3u, ray: Ray)->HitInfo
         if node.left_right == 0u  // Leaf node
         {
             let instance = instances[node.instance_idx];
-            let ray_trans = transform_ray_without_normalizing_direction(ray, instances[node.instance_idx].inv_transform);
+
+            var ray_trans = ray;
+            // NOTE: We do vector * matrix because it's transposed.
+            ray_trans.ori = (vec4f(ray_trans.ori, 1.0f) * instance.transpose_inverse_transform).xyz;
+            // NOTE: We do not normalize because we do want ray.dir's length to change.
+            ray_trans.dir = (vec4f(ray_trans.dir, 0.0f) * instance.transpose_inverse_transform).xyz;
+            ray_trans.inv_dir = 1.0f / ray_trans.dir;
+
             let result = ray_mesh_intersection(local_id, ray_trans, min_hit.x, instance.mesh_idx);
             if result.hit.x < min_hit.x
             {
@@ -1051,7 +1069,7 @@ fn ray_scene_intersection(local_id: vec3u, ray: Ray)->HitInfo
                 tri_idx   = result.tri_idx;
                 mesh_idx  = instance.mesh_idx;
                 mat_idx   = instance.mat_idx;
-                inv_trans = instance.inv_transform;
+                transform = instance.transpose_inverse_transform;
             }
         }
         else  // Non-leaf node
@@ -1116,7 +1134,7 @@ fn ray_scene_intersection(local_id: vec3u, ray: Ray)->HitInfo
         let w = 1.0 - u - v;
 
         let normal_local = normalize(v0.normal*w + v1.normal*u + v2.normal*v);
-        let normal_mat = transpose(mat3x3f(inv_trans[0].xyz, inv_trans[1].xyz, inv_trans[2].xyz));
+        let normal_mat = mat3x3f(transform[0].xyz, transform[1].xyz, transform[2].xyz);
 
         hit_info.dst = min_hit.x;
         hit_info.mat_idx = mat_idx;
@@ -1275,7 +1293,11 @@ fn ray_mesh_intersection(local_id: vec3u, ray: Ray, cur_min_hit_dst: f32, mesh_i
 fn ray_instance_intersection(local_id: vec3u, ray: Ray, cur_min_hit_dst: f32, instance_idx: u32) -> RayMeshIntersectionResult
 {
     let instance = instances[instance_idx];
-    let ray_trans = transform_ray_without_normalizing_direction(ray, instances[instance_idx].inv_transform);
+
+    let test = transpose(instance.transpose_inverse_transform);
+    let trans_mat4 = mat4x4f(vec4f(test[0], 0.0f), vec4f(test[1], 0.0f), vec4f(test[2], 0.0f), vec4f(test[3], 1.0f));
+
+    let ray_trans = transform_ray_without_normalizing_direction(ray, trans_mat4);
     let result = ray_mesh_intersection(local_id, ray_trans, cur_min_hit_dst, instance.mesh_idx);
     return result;
 }
@@ -1993,8 +2015,11 @@ fn dir_to_env_coords(dir: vec3f, env: u32) -> vec2u
 
 fn compute_dir_from_point_to_tri(instance_idx: u32, tri_idx: u32, uv: vec2f, p: vec3f) -> vec3f
 {
-    let mesh_idx = instances[instance_idx].mesh_idx;
-    let inv_trans = instances[instance_idx].inv_transform;
+    let instance = instances[instance_idx];
+    let mesh_idx = instance.mesh_idx;
+
+    let test = transpose(instance.transpose_inverse_transform);
+    let inv_trans = mat4x4f(vec4f(test[0], 0.0f), vec4f(test[1], 0.0f), vec4f(test[2], 0.0f), vec4f(test[3], 1.0f));
 
     let local_p = (inv_trans * vec4f(p, 1.0f)).xyz;
 
@@ -2005,7 +2030,7 @@ fn compute_dir_from_point_to_tri(instance_idx: u32, tri_idx: u32, uv: vec2f, p: 
 
     let local_tri_pos = v0*w + v1*uv.x + v2*uv.y;
 
-    let world_tri_pos = (mat4f_inverse(inv_trans) * vec4f(local_tri_pos, 1.0f)).xyz;
+    let world_tri_pos = (mat4x4f_inverse(inv_trans) * vec4f(local_tri_pos, 1.0f)).xyz;
     return normalize(world_tri_pos - p);
 
     //let local_dir = normalize(local_tri_pos - local_p);
@@ -2015,8 +2040,11 @@ fn compute_dir_from_point_to_tri(instance_idx: u32, tri_idx: u32, uv: vec2f, p: 
 
 fn compute_tri_normal(instance_idx: u32, tri_idx: u32, uv: vec2f) -> vec3f
 {
-    let mesh_idx = instances[instance_idx].mesh_idx;
-    let inv_trans = instances[instance_idx].inv_transform;
+    let instance = instances[instance_idx];
+    let mesh_idx = instance.mesh_idx;
+
+    let test = transpose(instance.transpose_inverse_transform);
+    let inv_trans = mat4x4f(vec4f(test[0], 0.0f), vec4f(test[1], 0.0f), vec4f(test[2], 0.0f), vec4f(test[3], 1.0f));
 
     let v0 = verts_array[mesh_idx].data[indices_array[mesh_idx].data[tri_idx*3 + 0]];
     let v1 = verts_array[mesh_idx].data[indices_array[mesh_idx].data[tri_idx*3 + 1]];
@@ -2030,8 +2058,11 @@ fn compute_tri_normal(instance_idx: u32, tri_idx: u32, uv: vec2f) -> vec3f
 
 fn compute_tri_geom_normal(instance_idx: u32, tri_idx: u32) -> vec3f
 {
-    let mesh_idx = instances[instance_idx].mesh_idx;
-    let inv_trans = instances[instance_idx].inv_transform;
+    let instance = instances[instance_idx];
+    let mesh_idx = instance.mesh_idx;
+
+    let test = transpose(instance.transpose_inverse_transform);
+    let inv_trans = mat4x4f(vec4f(test[0], 0.0f), vec4f(test[1], 0.0f), vec4f(test[2], 0.0f), vec4f(test[3], 1.0f));
 
     let v0 = verts_pos_array[mesh_idx].data[indices_array[mesh_idx].data[tri_idx*3 + 0]];
     let v1 = verts_pos_array[mesh_idx].data[indices_array[mesh_idx].data[tri_idx*3 + 1]];
@@ -2040,18 +2071,6 @@ fn compute_tri_geom_normal(instance_idx: u32, tri_idx: u32) -> vec3f
     let local_normal = normalize(cross(v2 - v0, v1 - v0));
     let normal_mat = transpose(mat3x3f(inv_trans[0].xyz, inv_trans[1].xyz, inv_trans[2].xyz));
     return normalize(normal_mat * local_normal);
-}
-
-fn tri_area(instance_idx: u32, tri_idx: u32) -> f32
-{
-    let mesh_idx = instances[instance_idx].mesh_idx;
-    let inv_trans = instances[instance_idx].inv_transform;
-
-    let v0 = verts_pos_array[mesh_idx].data[indices_array[mesh_idx].data[tri_idx*3 + 0]];
-    let v1 = verts_pos_array[mesh_idx].data[indices_array[mesh_idx].data[tri_idx*3 + 1]];
-    let v2 = verts_pos_array[mesh_idx].data[indices_array[mesh_idx].data[tri_idx*3 + 2]];
-
-    return length(cross(v1 - v0, v2 - v0)) / 2.0f;
 }
 
 // Safely wraps values in the [0, 1] range.
@@ -2165,7 +2184,7 @@ fn same_hemisphere(normal: vec3f, outgoing: vec3f, incoming: vec3f) -> bool
 
 // Ideally should not be used, but useful for debugging.
 // https://gist.github.com/mattatz/86fff4b32d198d0928d0fa4ff32cf6fa
-fn mat4f_inverse(m: mat4x4f) -> mat4x4f
+fn mat4x4f_inverse(m: mat4x4f) -> mat4x4f
 {
     let n11 = m[0][0]; let n12 = m[1][0]; let n13 = m[2][0]; let n14 = m[3][0];
     let n21 = m[0][1]; let n22 = m[1][1]; let n23 = m[2][1]; let n24 = m[3][1];
@@ -2220,7 +2239,8 @@ fn vec3f_srgb_to_linear(srgb: vec3f) -> vec3f
     return vec3f(srgb_to_linear(srgb.x), srgb_to_linear(srgb.y), srgb_to_linear(srgb.z));
 }
 
-// From: https://twitter.com/_Humus_
+// From: https://x.com/_Humus_/status/1074973351276371968
+// https://sakibsaikia.github.io/graphics/2022/01/04/Nan-Checks-In-HLSL.html
 fn is_finite(x: f32) -> bool
 {
     return (u32(x) & 0x7F800000) != 0x7F800000;
@@ -2251,17 +2271,35 @@ fn orthonormalize(a: vec3f, b: vec3f) -> vec3f
     return normalize(a - b * dot(a, b));
 }
 
-// TODO: refactor
 fn transform_vector_inverse(a: mat3x3f, b: vec3f) -> vec3f
 {
     return vec3f(dot(a[0], b), dot(a[1], b), dot(a[2], b));
 }
 
-// TODO: refactor
 fn transform_direction_inverse(a: mat3x3f, b: vec3f) -> vec3f
 {
     return normalize(transform_vector_inverse(a, b));
 }
+
+/*
+fn mat3x4f_inverse(a: mat3x4f) -> mat3x4f
+{
+    // Inverse of the 3x3 rotation/scale matrix.
+    let cross_yz = cross(a[1], a[2]).xyz;
+    let cross_zx = cross(a[2], a[0]).xyz;
+    let cross_xy = cross(a[0], a[1]).xyz;
+    let adjoint = transpose(mat3x3f(cross_yz, cross_zx, cross_xy));
+    let determinant = dot(a[0], cross_yz);
+    let minv = adjoint * (1.0f / determinant);
+
+    let t = vec3f();
+    let test = t * a;
+
+    // Invert translation (easy to do).
+    return mat3x4f();
+    // return mat3x4f(minv[0], minv[1], minv[2], -(minv * a[3]));
+}
+*/
 
 // Debug visualization
 

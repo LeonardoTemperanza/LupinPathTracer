@@ -549,7 +549,7 @@ pub fn build_tlas(instances: &[Instance], model_aabbs: &[Aabb]) -> Vec<TlasNode>
     {
         let instance = instances[i as usize];
         let model_aabb = model_aabbs[instance.mesh_idx as usize];
-        let transform = mat4_inverse(instance.inv_transform);
+        let transform = instance.transpose_inverse_transform.transpose().inverse();
         let aabb_trans = transform_aabb(model_aabb.min, model_aabb.max, transform);
 
         let tlas_node = TlasNode {

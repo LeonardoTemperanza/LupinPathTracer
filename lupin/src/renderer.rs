@@ -70,7 +70,7 @@ pub struct Mesh
 #[repr(C)]
 pub struct Instance
 {
-    pub inv_transform: Mat4,
+    pub transpose_inverse_transform: Mat4x3,
     pub mesh_idx: u32,
     pub mat_idx: u32,
     pub padding0: f32,
@@ -306,7 +306,7 @@ pub struct PathtraceResources
     pub dummy_output_texture: wgpu::Texture,
 
     // NOTE: Hack to guard for 0 size buffers.
-    // WGPU doesn't allow 0 size bindings and
+    // WGPU doesn't allow 0 size buffers and
     // 0 length arrays of bindings. (Sigh...)
     pub dummy_buf_vertpos: wgpu::Buffer,
     pub dummy_buf_vert: wgpu::Buffer,
@@ -581,7 +581,7 @@ pub struct PathtraceDesc<'a>
     pub accum_params: &'a AccumulationParams<'a>,
     pub tile_params: &'a TileParams,
     pub camera_params: &'a CameraParams,
-    pub camera_transform: Mat4,
+    pub camera_transform: Mat3x4,
 }
 
 /// Pathtrace the entire image. Internally the image is still split into tiles,
@@ -1250,7 +1250,7 @@ fn pathtracer_push_constants(pass: &mut wgpu::ComputePass, desc: &PathtraceDesc,
 
     if desc.camera_params.is_orthographic { push_constants.flags |= FLAG_CAMERA_ORTHO; }
 
-    push_constants.camera_transform = desc.camera_transform;
+    push_constants.camera_transform = desc.camera_transform.to_mat4();
     push_constants.camera_lens = desc.camera_params.lens;
     push_constants.camera_film = desc.camera_params.film;
     push_constants.camera_aspect = desc.camera_params.aspect;

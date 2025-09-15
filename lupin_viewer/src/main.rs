@@ -180,7 +180,7 @@ pub struct AppState<'a>
     // Camera
     pub cam_pos: lp::Vec3,
     pub cam_rot: lp::Quat,
-    pub cam_transform: lp::Mat4,
+    pub cam_transform: lp::Mat3x4,
 
     // Lupin resources,
     pub pathtrace_resources: lp::PathtraceResources,
@@ -195,7 +195,7 @@ pub struct AppState<'a>
     pub output_rgba8_snorm: wgpu::Texture,
 
     // Saved state for accumulation
-    pub prev_cam_transform: lp::Mat4,
+    pub prev_cam_transform: lp::Mat3x4,
     pub accum_counter: u32,
     pub tile_idx: u32,
     pub output_tex_front: usize,
@@ -315,7 +315,7 @@ impl<'a> AppState<'a>
             output_rgba8_snorm,
 
             // Saved state for accumulation
-            prev_cam_transform: lp::Mat4::zeros(),
+            prev_cam_transform: lp::Mat3x4::zeros(),
             accum_counter: 0,
             tile_idx: 0,
             output_tex_front: 1,
@@ -1162,14 +1162,8 @@ impl<'a> AppState<'a>
         if self.selected_cam == -1 { return; }
         self.selected_cam = -1;
         let old = self.cam_rot;
-        self.cam_pos = Default::default();
-        self.cam_rot = Default::default();
-        (self.cam_pos, self.cam_rot, _) = lp::matrix_to_xform(self.cam_transform);
+        //(self.cam_pos, self.cam_rot, _) = lp::matrix_to_xform(self.cam_transform);
         self.cam_transform = Default::default();
-        if old.x != self.cam_rot.x || old.y != self.cam_rot.y ||old.z != self.cam_rot.z || old.w != self.cam_rot.w
-        {
-            println!("changed");
-        }
     }
 
     fn switch_to_cam(&mut self, cam_idx: i32)

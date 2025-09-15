@@ -69,13 +69,6 @@ pub struct Vec3
     pub z: f32
 }
 
-#[derive(Debug, Clone, Copy)]
-#[repr(C)]
-pub struct Mat4
-{
-    pub m: [[f32; 4]; 4]
-}
-
 #[derive(Debug, Default, Clone, Copy)]
 #[repr(C)]
 pub struct Aabb
@@ -332,6 +325,13 @@ impl std::fmt::Display for Vec3
 
 // Matrices (they are all column major)
 
+#[derive(Debug, Clone, Copy)]
+#[repr(C)]
+pub struct Mat4
+{
+    pub m: [[f32; 4]; 4]
+}
+
 impl Default for Mat4
 {
     fn default() -> Self
@@ -344,8 +344,7 @@ impl Mat4
 {
     pub const IDENTITY: Self = Self
     {
-        m:
-        [
+        m: [
             [ 1.0, 0.0, 0.0, 0.0 ],
             [ 0.0, 1.0, 0.0, 0.0 ],
             [ 0.0, 0.0, 1.0, 0.0 ],
@@ -392,7 +391,7 @@ impl std::ops::Mul<Vec4> for Mat4
     type Output = Vec4;
 
     #[inline]
-    fn mul(self, rhs: Vec4)->Vec4
+    fn mul(self, rhs: Vec4) -> Vec4
     {
         let res_x = self.m[0][0]*rhs.x + self.m[1][0]*rhs.y + self.m[2][0]*rhs.z + self.m[3][0]*rhs.w;
         let res_y = self.m[0][1]*rhs.x + self.m[1][1]*rhs.y + self.m[2][1]*rhs.z + self.m[3][1]*rhs.w;
@@ -407,13 +406,178 @@ impl std::ops::Mul<Vec3> for Mat4
     type Output = Vec3;
 
     #[inline]
-    fn mul(self, rhs: Vec3)->Vec3
+    fn mul(self, rhs: Vec3) -> Vec3
     {
         let res_x = self.m[0][0]*rhs.x + self.m[1][0]*rhs.y + self.m[2][0]*rhs.z + self.m[3][0]*1.0;
         let res_y = self.m[0][1]*rhs.x + self.m[1][1]*rhs.y + self.m[2][1]*rhs.z + self.m[3][1]*1.0;
         let res_z = self.m[0][2]*rhs.x + self.m[1][2]*rhs.y + self.m[2][2]*rhs.z + self.m[3][2]*1.0;
         let res_w = self.m[0][3]*rhs.x + self.m[1][3]*rhs.y + self.m[2][3]*rhs.z + self.m[3][3]*1.0;
         return Vec3 { x: res_x / res_w, y: res_y / res_w, z: res_z / res_w };
+    }
+}
+
+/// The naming follows this convention: MatRxC, where R
+/// is the number of rows, and C is the number of columns.
+#[derive(Debug, Clone, Copy)]
+#[repr(C)]
+pub struct Mat3x4
+{
+    pub m: [[f32; 3]; 4]
+}
+
+impl Default for Mat3x4
+{
+    fn default() -> Self
+    {
+        return Self {
+            m: [
+                [ 1.0, 0.0, 0.0 ],
+                [ 0.0, 1.0, 0.0 ],
+                [ 0.0, 0.0, 1.0 ],
+                [ 0.0, 0.0, 0.0 ]
+            ]
+        };
+    }
+}
+
+impl Mat3x4
+{
+    pub const IDENTITY: Self = Self
+    {
+        m: [
+            [ 1.0, 0.0, 0.0 ],
+            [ 0.0, 1.0, 0.0 ],
+            [ 0.0, 0.0, 1.0 ],
+            [ 0.0, 0.0, 0.0 ]
+        ]
+    };
+
+    #[inline]
+    pub fn zeros() -> Self
+    {
+        return Mat3x4 { m: [
+            [ 0.0, 0.0, 0.0 ],
+            [ 0.0, 0.0, 0.0 ],
+            [ 0.0, 0.0, 0.0 ],
+            [ 0.0, 0.0, 0.0 ]
+        ]};
+    }
+
+    #[inline]
+    pub fn transpose(&self) -> Mat4x3
+    {
+        return Mat4x3 {
+            m: [
+                [ self.m[0][0], self.m[1][0], self.m[2][0], self.m[3][0] ],
+                [ self.m[0][1], self.m[1][1], self.m[2][1], self.m[3][1] ],
+                [ self.m[0][2], self.m[1][2], self.m[2][2], self.m[3][2] ],
+            ]
+        };
+    }
+
+    #[inline]
+    pub fn to_mat4(&self) -> Mat4
+    {
+        return Mat4 {
+            m: [
+                [ self.m[0][0], self.m[0][1], self.m[0][2], 0.0 ],
+                [ self.m[1][0], self.m[1][1], self.m[1][2], 0.0 ],
+                [ self.m[2][0], self.m[2][1], self.m[2][2], 0.0 ],
+                [ self.m[3][0], self.m[3][1], self.m[3][2], 1.0 ],
+            ]
+        };
+    }
+    
+    // TODO: @speed
+    #[inline]
+    pub fn inverse(&self) -> Mat3x4
+    {
+        let mat4 = self.to_mat4();
+        let inv = mat4_inverse(mat4);
+        return Mat3x4 {
+            m: [
+                [ inv.m[0][0], inv.m[0][1], inv.m[0][2] ],
+                [ inv.m[1][0], inv.m[1][1], inv.m[1][2] ],
+                [ inv.m[2][0], inv.m[2][1], inv.m[2][2] ],
+                [ inv.m[3][0], inv.m[3][1], inv.m[3][2] ],
+            ]
+        };
+    }
+}
+
+impl std::ops::Mul<Vec3> for Mat3x4
+{
+    type Output = Vec3;
+
+    #[inline]
+    fn mul(self, rhs: Vec3) -> Vec3
+    {
+        let res_x = self.m[0][0]*rhs.x + self.m[1][0]*rhs.y + self.m[2][0]*rhs.z + self.m[3][0]*1.0;
+        let res_y = self.m[0][1]*rhs.x + self.m[1][1]*rhs.y + self.m[2][1]*rhs.z + self.m[3][1]*1.0;
+        let res_z = self.m[0][2]*rhs.x + self.m[1][2]*rhs.y + self.m[2][2]*rhs.z + self.m[3][2]*1.0;
+        return Vec3 { x: res_x, y: res_y, z: res_z };
+    }
+}
+
+impl std::ops::Mul<Mat3x4> for Mat3x4
+{
+    type Output = Mat3x4;
+
+    #[inline]
+    fn mul(self, rhs: Mat3x4) -> Mat3x4
+    {
+        let mut res = Mat3x4::zeros();
+        let rhs_mat4 = rhs.to_mat4();
+        for i in 0..3
+        {
+            for j in 0..4
+            {
+                for k in 0..4 {
+                    res.m[j][i] += self.m[k][i] * rhs_mat4.m[j][k];
+                }
+            }
+        }
+
+        return res;
+    }
+}
+
+/// The naming follows this convention: MatRxC, where R
+/// is the number of rows, and C is the number of columns.
+#[derive(Debug, Clone, Copy)]
+#[repr(C)]
+pub struct Mat4x3
+{
+    pub m: [[f32; 4]; 3]
+}
+
+impl Mat4x3
+{
+    #[inline]
+    pub fn transpose(&self) -> Mat3x4
+    {
+        return Mat3x4 {
+            m: [
+                [ self.m[0][0], self.m[1][0], self.m[2][0] ],
+                [ self.m[0][1], self.m[1][1], self.m[2][1] ],
+                [ self.m[0][2], self.m[1][2], self.m[2][2] ],
+                [ self.m[0][3], self.m[1][3], self.m[2][3] ],
+            ]
+        };
+    }
+}
+
+impl Default for Mat4x3
+{
+    fn default() -> Self
+    {
+        return Self {
+            m: [
+                [ 1.0, 0.0, 0.0, 0.0 ],
+                [ 0.0, 1.0, 0.0, 0.0 ],
+                [ 0.0, 0.0, 1.0, 0.0 ],
+            ]
+        };
     }
 }
 
@@ -540,30 +704,6 @@ impl std::fmt::Display for Quat
         return Ok(());
     }
 }
-
-/*
-#[derive(Debug, Clone, Copy)]
-#[repr(C)]
-pub struct Transform
-{
-    pub pos: Vec3,
-    pub rot: Quat,
-    pub scale: Vec3
-}
-
-impl Default for Transform
-{
-    fn default()->Transform
-    {
-        return Transform
-        {
-            pos: Default::default(),
-            rot: Default::default(),
-            scale: Vec3 { x: 1.0, y: 1.0, z: 1.0 }
-        };
-    }
-}
-*/
 
 pub fn rotate_vec3_with_quat(q: Quat, v: Vec3)->Vec3
 {
@@ -763,7 +903,7 @@ pub fn rotate_torwards_quat(current: Quat, target: Quat, delta: f32)->Quat
     return slerp(current, target, t);
 }
 
-pub fn rotation_matrix(q: Quat)->Mat4
+pub fn rotation_matrix(q: Quat)->Mat3x4
 {
     let x  = q.x * 2.0; let y  = q.y * 2.0; let z  = q.z * 2.0;
     let xx = q.x * x;   let yy = q.y * y;   let zz = q.z * z;
@@ -771,41 +911,36 @@ pub fn rotation_matrix(q: Quat)->Mat4
     let wx = q.w * x;   let wy = q.w * y;   let wz = q.w * z;
 
     // Calculate 3x3 matrix from orthonormal basis
-    let res = Mat4 {
+    let res = Mat3x4 {
         m: [
-            [ 1.0 - (yy + zz), xy + wz, xz - wy, 0.0 ],
-            [ xy - wz, 1.0 - (xx + zz), yz + wx, 0.0 ],
-            [ xz + wy, yz - wx, 1.0 - (xx + yy), 0.0 ],
-            [ 0.0, 0.0, 0.0, 1.0 ],
+            [ 1.0 - (yy + zz), xy + wz, xz - wy ],
+            [ xy - wz, 1.0 - (xx + zz), yz + wx ],
+            [ xz + wy, yz - wx, 1.0 - (xx + yy) ],
+            [ 0.0, 0.0, 0.0 ],
         ]
     };
     return res;
 }
 
-pub fn scale_matrix(scale: Vec3)->Mat4
+pub fn scale_matrix(scale: Vec3)->Mat3x4
 {
-    let mut res = Mat4::zeros();
+    let mut res = Mat3x4::zeros();
     res.m[0][0] = scale.x;
     res.m[1][1] = scale.y;
     res.m[2][2] = scale.z;
-    res.m[3][3] = 1.0;
     return res;
 }
 
-pub fn position_matrix(pos: Vec3)->Mat4
+pub fn position_matrix(pos: Vec3)->Mat3x4
 {
-    let mut res = Mat4::zeros();
-    res.m[0][0] = 1.0;
-    res.m[1][1] = 1.0;
-    res.m[2][2] = 1.0;
-    res.m[3][3] = 1.0;
+    let mut res = Mat3x4::IDENTITY;
     res.m[3][0] = pos.x;
     res.m[3][1] = pos.y;
     res.m[3][2] = pos.z;
     return res;
 }
 
-pub fn xform_to_matrix(pos: Vec3, rot: Quat, scale: Vec3) -> Mat4
+pub fn xform_to_matrix(pos: Vec3, rot: Quat, scale: Vec3) -> Mat3x4
 {
     return position_matrix(pos) * rotation_matrix(rot) * scale_matrix(scale);
 }
@@ -939,7 +1074,7 @@ pub fn grow_aabb_to_include_vert(aabb: &mut Aabb, to_include: Vec3)
     aabb.max.z = aabb.max.z.max(to_include.z);
 }
 
-pub fn transform_aabb(min: Vec3, max: Vec3, transform: Mat4) -> Aabb
+pub fn transform_aabb(min: Vec3, max: Vec3, transform: Mat3x4) -> Aabb
 {
     let verts = [
         Vec3 { x: min.x, y: min.y, z: min.z },
