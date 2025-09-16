@@ -15,7 +15,6 @@ pub fn build_lights(device: &wgpu::Device, queue: &wgpu::Queue, scene: &SceneCPU
     let environments = &scene.environments;
     let instances = &scene.instances;
     let verts_pos = &scene.verts_pos_array;
-    let verts = &scene.verts_array;
     let indices = &scene.indices_array;
     let materials = &scene.materials;
     assert!(environments.len() == envs_info.len(), "Mismatching sizes for environment data!");
@@ -39,7 +38,7 @@ pub fn build_lights(device: &wgpu::Device, queue: &wgpu::Queue, scene: &SceneCPU
             let v1 = mesh_verts[mesh_indices[i+1] as usize];
             let v2 = mesh_verts[mesh_indices[i+2] as usize];
 
-            let area = tri_area(v0.v, v1.v, v2.v);
+            let area = tri_area(v0, v1, v2);
             weights.push(area);
             total_area += area;
         }
@@ -101,9 +100,12 @@ pub fn build_lights(device: &wgpu::Device, queue: &wgpu::Queue, scene: &SceneCPU
         env_alias_tables,
     };
 
-    fn tri_area(p0: Vec3, p1: Vec3, p2: Vec3) -> f32
+    fn tri_area(p0: Vec4, p1: Vec4, p2: Vec4) -> f32
     {
-        return length_vec3(cross_vec3(p1 - p0, p2 - p0)) / 2.0;
+        let p0_v3 = Vec3 { x: p0.x, y: p0.y, z: p0.z };
+        let p1_v3 = Vec3 { x: p1.x, y: p1.y, z: p1.z };
+        let p2_v3 = Vec3 { x: p2.x, y: p2.y, z: p2.z };
+        return length_vec3(cross_vec3(p1_v3 - p0_v3, p2_v3 - p0_v3)) / 2.0;
     }
 }
 
@@ -188,7 +190,7 @@ pub fn build_alias_table(weights: &[f32]) -> Vec::<AliasBin>
 }
 
 // NOTE: This modifies the indices array to change the order of triangles (indices)
-pub fn build_bvh(verts: &[VertexPos], indices: &mut[u32]) -> Vec<BvhNode>
+pub fn build_bvh(verts: &[Vec4], indices: &mut[u32]) -> Vec<BvhNode>
 {
     let num_tris: u32 = indices.len() as u32 / 3;
 
@@ -229,7 +231,7 @@ pub fn build_bvh(verts: &[VertexPos], indices: &mut[u32]) -> Vec<BvhNode>
     return bvh;
 }
 
-pub fn bvh_split(bvh: &mut Vec<BvhNode>, verts: &[VertexPos],
+pub fn bvh_split(bvh: &mut Vec<BvhNode>, verts: &[Vec4],
                  indices: &mut[u32],
                  centroids: &mut[Vec3],
                  tri_bounds: &mut[Aabb],
@@ -358,7 +360,7 @@ impl Default for Bin
 }
 
 // From: https://jacco.ompf2.com/2022/04/21/how-to-build-a-bvh-part-3-quick-builds/
-pub fn choose_split(bvh: &[BvhNode], _verts: &[VertexPos],
+pub fn choose_split(bvh: &[BvhNode], _verts: &[Vec4],
                     _indices: &mut[u32],
                     centroids: &mut[Vec3],
                     tri_bounds: &mut[Aabb],
@@ -468,26 +470,26 @@ pub fn node_cost(size: Vec3, num_tris: u32)->f32
     return half_area * num_tris as f32;
 }
 
-fn get_tri(verts: &[VertexPos], indices: &[u32], tri_idx: usize)->(Vec3, Vec3, Vec3)
+fn get_tri(verts: &[Vec4], indices: &[u32], tri_idx: usize)->(Vec3, Vec3, Vec3)
 {
     let idx0 = (indices[tri_idx*3+0]) as usize;
     let idx1 = (indices[tri_idx*3+1]) as usize;
     let idx2 = (indices[tri_idx*3+2]) as usize;
 
     let t0 = Vec3 {
-        x: verts[idx0].v.x,
-        y: verts[idx0].v.y,
-        z: verts[idx0].v.z,
+        x: verts[idx0].x,
+        y: verts[idx0].y,
+        z: verts[idx0].z,
     };
     let t1 = Vec3 {
-        x: verts[idx1].v.x,
-        y: verts[idx1].v.y,
-        z: verts[idx1].v.z,
+        x: verts[idx1].x,
+        y: verts[idx1].y,
+        z: verts[idx1].z,
     };
     let t2 = Vec3 {
-        x: verts[idx2].v.x,
-        y: verts[idx2].v.y,
-        z: verts[idx2].v.z,
+        x: verts[idx2].x,
+        y: verts[idx2].y,
+        z: verts[idx2].z,
     };
 
     return (t0, t1, t2);
@@ -625,14 +627,17 @@ pub fn tlas_find_best_match(tlas: &[TlasNode], idx_array: &[u32], node_a: u32) -
     return best_b;
 }
 
-/// Also builds auxiliary data structures, e.g. lights.
+/// Also builds and uploads auxiliary data structures, e.g. lights.
 pub fn upload_scene_to_gpu(device: &wgpu::Device, queue: &wgpu::Queue, scene: &SceneCPU, textures: Vec<wgpu::Texture>, samplers: Vec<wgpu::Sampler>, envs_info: &[EnvMapInfo]) -> Scene
 {
     let verts_pos_array: Vec::<wgpu::Buffer> = scene.verts_pos_array.iter().map(|x| upload_storage_buffer(device, queue, to_u8_slice(x))).collect();
-    let verts_array: Vec::<wgpu::Buffer> = scene.verts_array.iter().map(|x| upload_storage_buffer(device, queue, to_u8_slice(x))).collect();
+    let verts_normal_array: Vec::<wgpu::Buffer> = scene.verts_normal_array.iter().map(|x| upload_storage_buffer(device, queue, to_u8_slice(x))).collect();
+    let verts_texcoord_array: Vec::<wgpu::Buffer> = scene.verts_texcoord_array.iter().map(|x| upload_storage_buffer(device, queue, to_u8_slice(x))).collect();
+    let verts_color_array: Vec::<wgpu::Buffer> = scene.verts_color_array.iter().map(|x| upload_storage_buffer(device, queue, to_u8_slice(x))).collect();
     let indices_array: Vec::<wgpu::Buffer> = scene.indices_array.iter().map(|x| upload_storage_buffer(device, queue, to_u8_slice(x))).collect();
     let bvh_nodes_array: Vec::<wgpu::Buffer> = scene.bvh_nodes_array.iter().map(|x| upload_storage_buffer(device, queue, to_u8_slice(x))).collect();
 
+    let mesh_infos = upload_storage_buffer_with_name(device, queue, to_u8_slice(&scene.mesh_infos), "mesh_infos");
     let tlas_nodes = upload_storage_buffer_with_name(device, queue, to_u8_slice(&scene.tlas_nodes), "tlas_nodes");
     let instances = upload_storage_buffer_with_name(device, queue, to_u8_slice(&scene.instances), "instances");
     let materials = upload_storage_buffer_with_name(device, queue, to_u8_slice(&scene.materials), "materials");
@@ -642,8 +647,11 @@ pub fn upload_scene_to_gpu(device: &wgpu::Device, queue: &wgpu::Queue, scene: &S
     let lights = build_lights(device, queue, scene, envs_info);
 
     return Scene {
+        mesh_infos,
         verts_pos_array,
-        verts_array,
+        verts_normal_array,
+        verts_texcoord_array,
+        verts_color_array,
         indices_array,
         bvh_nodes_array,
         tlas_nodes,
@@ -660,15 +668,35 @@ pub fn upload_scene_to_gpu(device: &wgpu::Device, queue: &wgpu::Queue, scene: &S
 /// right before upload_scene_to_gpu.
 pub fn validate_scene(scene: &SceneCPU, num_textures: u32, num_samplers: u32)
 {
-    assert!(scene.verts_pos_array.len() == scene.verts_array.len());
-    assert!(scene.verts_pos_array.len() == scene.bvh_nodes_array.len());
-    assert!(scene.verts_pos_array.len() == scene.mesh_aabbs.len());
+    // TODO: Put readable messages on all of them.
+    assert_eq!(scene.verts_pos_array.len(), scene.bvh_nodes_array.len());
+    assert_eq!(scene.verts_pos_array.len(), scene.mesh_infos.len());
+    assert_eq!(scene.verts_pos_array.len(), scene.mesh_aabbs.len(), "verts_pos_array.len() doesn't match mesh_aabbs.len()");
+
+    for (i, info) in scene.mesh_infos.iter().enumerate()
+    {
+        if info.normals_buf_idx != SENTINEL_IDX
+        {
+            assert!((info.normals_buf_idx as usize) < scene.verts_normal_array.len());
+            assert_eq!(scene.verts_normal_array[info.normals_buf_idx as usize].len(), scene.verts_pos_array[i].len());
+        }
+        if info.texcoords_buf_idx != SENTINEL_IDX
+        {
+            assert!((info.texcoords_buf_idx as usize) < scene.verts_texcoord_array.len());
+            assert_eq!(scene.verts_texcoord_array[info.texcoords_buf_idx as usize].len(), scene.verts_pos_array[i].len());
+        }
+        if info.colors_buf_idx != SENTINEL_IDX
+        {
+            assert!((info.colors_buf_idx as usize) < scene.verts_color_array.len());
+            assert_eq!(scene.verts_color_array[info.colors_buf_idx as usize].len(), scene.verts_pos_array[i].len());
+        }
+    }
 
     for (i, indices) in scene.indices_array.iter().enumerate()
     {
         for idx in indices
         {
-            assert!((*idx as usize) < scene.verts_array[i].len());
+            assert!((*idx as usize) < scene.verts_pos_array[i].len());
         }
     }
 
@@ -677,7 +705,7 @@ pub fn validate_scene(scene: &SceneCPU, num_textures: u32, num_samplers: u32)
     }
     for instance in &scene.instances
     {
-        assert!((instance.mesh_idx as usize) < scene.verts_array.len());
+        assert!((instance.mesh_idx as usize) < scene.mesh_infos.len());
         assert!((instance.mat_idx  as usize) < scene.materials.len());
     }
 
@@ -696,6 +724,15 @@ pub fn validate_scene(scene: &SceneCPU, num_textures: u32, num_samplers: u32)
         assert!(env.emission.x >= 0.0 && env.emission.y >= 0.0 && env.emission.z >= 0.0);
         assert!(env.emission_tex_idx < num_textures || env.emission_tex_idx == SENTINEL_IDX);
     }
+}
+
+pub fn compute_mesh_aabb(verts_pos: &[Vec4]) -> Aabb
+{
+    let mut aabb = Aabb::neutral();
+    for pos in verts_pos {
+        grow_aabb_to_include_vert(&mut aabb, Vec3 { x: pos.x, y: pos.y, z: pos.z });
+    }
+    return aabb;
 }
 
 #[cfg(test)]

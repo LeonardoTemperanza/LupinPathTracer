@@ -1,23 +1,26 @@
 
 // Group 0: Scene Description
 // Mesh
-@group(0) @binding(0) var<storage, read> verts_pos_array: binding_array<VertsPos>;
-@group(0) @binding(1) var<storage, read> verts_array: binding_array<Verts>;
-@group(0) @binding(2) var<storage, read> indices_array: binding_array<Indices>;
-@group(0) @binding(3) var<storage, read> bvh_nodes_array: binding_array<BvhNodes>;
+@group(0) @binding(0) var<storage, read> mesh_infos: array<MeshInfo>;
+@group(0) @binding(1) var<storage, read> verts_pos_array: binding_array<VertsPos>;
+@group(0) @binding(2) var<storage, read> verts_normal_array: binding_array<VertsNormal>;
+@group(0) @binding(3) var<storage, read> verts_texcoord_array: binding_array<VertsUV>;
+@group(0) @binding(4) var<storage, read> verts_color_array: binding_array<VertsColor>;
+@group(0) @binding(5) var<storage, read> indices_array: binding_array<Indices>;
+@group(0) @binding(6) var<storage, read> bvh_nodes_array: binding_array<BvhNodes>;
 // Instances
-@group(0) @binding(4) var<storage, read> tlas_nodes: array<TlasNode>;
-@group(0) @binding(5) var<storage, read> instances: array<Instance>;
-@group(0) @binding(6) var<storage, read> materials: array<Material>;
+@group(0) @binding(7) var<storage, read> tlas_nodes: array<TlasNode>;
+@group(0) @binding(8) var<storage, read> instances: array<Instance>;
+@group(0) @binding(9) var<storage, read> materials: array<Material>;
 // Textures
-@group(0) @binding(7) var textures: binding_array<texture_2d<f32>>;
-@group(0) @binding(8) var samplers: binding_array<sampler>;
+@group(0) @binding(10) var textures: binding_array<texture_2d<f32>>;
+@group(0) @binding(11) var samplers: binding_array<sampler>;
 // Environments
-@group(0) @binding(9) var<storage, read> environments: array<Environment>;
+@group(0) @binding(12) var<storage, read> environments: array<Environment>;
 // Lights
-@group(0) @binding(10) var<storage, read> lights: array<Light>;
-@group(0) @binding(11) var<storage, read> alias_tables: binding_array<AliasTable>;
-@group(0) @binding(12) var<storage, read> env_alias_tables: binding_array<AliasTable>;
+@group(0) @binding(13) var<storage, read> lights: array<Light>;
+@group(0) @binding(14) var<storage, read> alias_tables: binding_array<AliasTable>;
+@group(0) @binding(15) var<storage, read> env_alias_tables: binding_array<AliasTable>;
 
 // Group 1: Pathtrace settings
 @group(1) @binding(0) var prev_frame: texture_2d<f32>;
@@ -61,33 +64,24 @@ const SENTINEL_IDX: u32 = U32_MAX;
 
 // We need these wrappers, or we get a weird
 // compilation error, for some reason...
-struct VertsPos   { data: array<vec3f>    }
-struct Verts      { data: array<Vertex>   }
-struct Indices    { data: array<u32>      }
-struct BvhNodes   { data: array<BvhNode>  }
-struct AliasTable { data: array<AliasBin> }
+struct VertsPos    { data: array<vec3f>    }
+struct VertsColor  { data: array<vec4f>    }
+struct VertsUV     { data: array<vec2f>    }
+struct VertsNormal { data: array<vec3f>    }
+struct Indices     { data: array<u32>      }
+struct BvhNodes    { data: array<BvhNode>  }
+struct AliasTable  { data: array<AliasBin> }
 
 //////////////////////////////////////////////
 // Scene description
 //////////////////////////////////////////////
 
-// This doesn't include positions; those are
-// stored in a separate buffer for cache-locality.
-struct Vertex
-{
-    color: vec4f,
-    normal: vec3f,
-    // 4 bytes padding
-    tex_coords: vec2f
-    // 8 bytes padding
-}
-
 // This lets us fetch the optional vertex attributes.
 struct MeshInfo
 {
-    color_buf_idx: u32,
-    tex_coords_buf_idx: u32,
-    normal_buf_idx: u32,
+    normals_buf_idx: u32,
+    texcoords_buf_idx: u32,
+    colors_buf_idx: u32,
 }
 
 struct Instance
@@ -282,7 +276,7 @@ fn gbuffer_albedo_main(@builtin(local_invocation_id) local_id: vec3u, @builtin(g
             let hit = ray_scene_intersection(local_id, camera_ray);
             if hit.dst != F32_MAX
             {
-                let mat_point = get_material_point(materials[hit.mat_idx], hit.tex_coords, hit.color);
+                let mat_point = get_material_point(hit);
                 color += mat_point.color.rgb;
                 //color += vec3f(mat_point.opacity);
                 //color += hit.normal * 0.5f + 0.5f;
@@ -321,7 +315,7 @@ fn gbuffer_normals_main(@builtin(local_invocation_id) local_id: vec3u, @builtin(
             let hit = ray_scene_intersection(local_id, camera_ray);
             if hit.dst != F32_MAX
             {
-                let normal = get_shading_normal(hit);
+                let normal = compute_shading_normal(hit);
                 color += normal * 0.5f + 0.5f;
             }
         }
@@ -406,7 +400,7 @@ fn pathtrace_naive(local_id: vec3u, start_ray: Ray) -> vec3f
         let hit_pos = ray.ori + ray.dir * hit.dst;
         let outgoing = -ray.dir;
 
-        let mat_point = get_material_point(materials[hit.mat_idx], hit.tex_coords, hit.color);
+        let mat_point = get_material_point(hit);
 
         // TODO: No caustics param.
 
@@ -420,7 +414,7 @@ fn pathtrace_naive(local_id: vec3u, start_ray: Ray) -> vec3f
             continue;
         }
 
-        let normal = get_shading_normal(hit);
+        let normal = compute_shading_normal(hit);
 
         // Accumulate emission.
         radiance += weight * mat_point.emission /** f32(dot(normal, outgoing) >= 0.0f)*/;
@@ -486,7 +480,9 @@ fn pathtrace(local_id: vec3u, start_ray: Ray) -> vec3f
         let hit_pos = ray.ori + ray.dir * hit.dst;
         let outgoing = -ray.dir;
 
-        let mat_point = get_material_point(materials[hit.mat_idx], hit.tex_coords, hit.color);
+        let instance = instances[hit.instance_idx];
+        let mat = materials[instance.mat_idx];
+        let mat_point = get_material_point(hit);
 
         // Handle coverage.
         if mat_point.opacity < 1.0f && random_f32() >= mat_point.opacity
@@ -498,7 +494,7 @@ fn pathtrace(local_id: vec3u, start_ray: Ray) -> vec3f
             continue;
         }
 
-        let normal = get_shading_normal(hit);
+        let normal = compute_shading_normal(hit);
 
         // Accumulate emission.
         radiance += weight * mat_point.emission /** f32(dot(normal, outgoing) >= 0.0f)*/;
@@ -571,8 +567,15 @@ struct MaterialPoint
 
 const MIN_ROUGHNESS: f32 = 0.03f * 0.03f;
 
-fn get_material_point(mat: Material, uv: vec2f, hit_color: vec4f) -> MaterialPoint
+fn get_material_point(hit: HitInfo) -> MaterialPoint
 {
+    let instance_idx = hit.instance_idx;
+    let instance = instances[instance_idx];
+    let mesh_idx = instance.mesh_idx;
+    let mat = materials[instance.mat_idx];
+    let mesh_info = mesh_infos[mesh_idx];
+    let tri_idx = hit.tri_idx;
+
     var res = MaterialPoint();
     res.mat_type = mat.mat_type;
 
@@ -580,30 +583,42 @@ fn get_material_point(mat: Material, uv: vec2f, hit_color: vec4f) -> MaterialPoi
 
     // Sample textures.
     var color_sample = vec4f(1.0f);
-    if mat.color_tex_idx != SENTINEL_IDX {
-        color_sample = textureSampleLevel(textures[mat.color_tex_idx], samplers[mat_sampler_idx], uv, 0.0f);
-        color_sample = vec4f(vec3f_srgb_to_linear(color_sample.rgb), color_sample.a);
-    }
     var emission_sample = vec3f(1.0f);
-    if mat.emission_tex_idx != SENTINEL_IDX {
-        emission_sample = textureSampleLevel(textures[mat.emission_tex_idx], samplers[mat_sampler_idx], uv, 0.0f).rgb;
-    }
     var roughness_sample = 1.0f;
     var metallic_sample = 1.0f;
-    if mat.roughness_tex_idx != SENTINEL_IDX {
-        let tex_sample = textureSampleLevel(textures[mat.roughness_tex_idx], samplers[mat_sampler_idx], uv, 0.0f).rgb;
-        let sample_linear = vec3f_srgb_to_linear(tex_sample);
-        roughness_sample = sample_linear.g;
-        metallic_sample = sample_linear.b;
-    }
     var scattering_sample = vec3f(1.0f);
-    if mat.scattering_tex_idx != SENTINEL_IDX {
-        scattering_sample = textureSampleLevel(textures[mat.scattering_tex_idx], samplers[mat_sampler_idx], uv, 0.0f).rgb;
+    if mesh_info.texcoords_buf_idx != SENTINEL_IDX
+    {
+        let uv0 = verts_texcoord_array[mesh_info.texcoords_buf_idx].data[indices_array[mesh_idx].data[tri_idx*3 + 0]];
+        let uv1 = verts_texcoord_array[mesh_info.texcoords_buf_idx].data[indices_array[mesh_idx].data[tri_idx*3 + 1]];
+        let uv2 = verts_texcoord_array[mesh_info.texcoords_buf_idx].data[indices_array[mesh_idx].data[tri_idx*3 + 2]];
+        let w = 1.0f - hit.uv.x - hit.uv.y;
+        let texcoords = uv0*w + uv1*hit.uv.x + uv2*hit.uv.y;
+
+        if mat.color_tex_idx != SENTINEL_IDX {
+            color_sample = textureSampleLevel(textures[mat.color_tex_idx], samplers[mat_sampler_idx], texcoords, 0.0f);
+            color_sample = vec4f(vec3f_srgb_to_linear(color_sample.rgb), color_sample.a);
+        }
+        if mat.emission_tex_idx != SENTINEL_IDX {
+            emission_sample = textureSampleLevel(textures[mat.emission_tex_idx], samplers[mat_sampler_idx], texcoords, 0.0f).rgb;
+        }
+        if mat.roughness_tex_idx != SENTINEL_IDX {
+            let tex_sample = textureSampleLevel(textures[mat.roughness_tex_idx], samplers[mat_sampler_idx], texcoords, 0.0f).rgb;
+            // TODO: Is this a thing???
+            let sample_linear = vec3f_srgb_to_linear(tex_sample);
+            roughness_sample = sample_linear.g;
+            metallic_sample = sample_linear.b;
+        }
+        if mat.scattering_tex_idx != SENTINEL_IDX {
+            scattering_sample = textureSampleLevel(textures[mat.scattering_tex_idx], samplers[mat_sampler_idx], texcoords, 0.0f).rgb;
+        }
     }
 
+    let vert_color = get_vert_color(instance_idx, tri_idx, hit.uv);
+
     // Fill in material.
-    res.color = color_sample.rgb * mat.color.rgb * hit_color.rgb;
-    res.opacity = color_sample.a * mat.color.a * hit_color.a;
+    res.color = color_sample.rgb * mat.color.rgb * vert_color.rgb;
+    res.opacity = color_sample.a * mat.color.a * vert_color.a;
     res.emission = emission_sample * mat.emission.rgb;
     res.roughness = roughness_sample * mat.roughness;
     res.roughness *= res.roughness;
@@ -633,28 +648,43 @@ fn get_material_point(mat: Material, uv: vec2f, hit_color: vec4f) -> MaterialPoi
     return res;
 }
 
-fn get_shading_normal(hit: HitInfo) -> vec3f
+fn compute_shading_normal(hit: HitInfo) -> vec3f
 {
-    let mat = materials[hit.mat_idx];
-    let uv = hit.tex_coords;
+    let instance = instances[hit.instance_idx];
+    let mesh_idx = instance.mesh_idx;
+    let mesh_info = mesh_infos[mesh_idx];
+    let mat = materials[instance.mat_idx];
+    let uv = hit.uv;
+    let tri_idx = hit.tri_idx;
 
-    var res = hit.normal;
+    var res = get_vert_normal(hit.instance_idx, hit.tri_idx, hit.uv);
 
-    // Sample normalmap.
-    if mat.normal_tex_idx != SENTINEL_IDX
+    if mesh_info.texcoords_buf_idx != SENTINEL_IDX
     {
-        const mat_sampler_idx: u32 = 0;  // TODO!
+        // Sample normalmap.
+        if mat.normal_tex_idx != SENTINEL_IDX
+        {
+            const mat_sampler_idx: u32 = 0;  // TODO!
 
-        let normalmap_sample = textureSampleLevel(textures[mat.normal_tex_idx], samplers[mat_sampler_idx], uv, 0.0f).xyz;
-        var normal_local = -1.0 + 2.0 * normalmap_sample;
-        var frame = mat3x3f(hit.tangent, hit.bitangent, res);
-        frame[0] = orthonormalize(frame[0], frame[2]);
-        frame[1] = normalize(cross(frame[2], frame[0]));
+            let uv0 = verts_texcoord_array[mesh_info.texcoords_buf_idx].data[indices_array[mesh_idx].data[tri_idx*3 + 0]];
+            let uv1 = verts_texcoord_array[mesh_info.texcoords_buf_idx].data[indices_array[mesh_idx].data[tri_idx*3 + 1]];
+            let uv2 = verts_texcoord_array[mesh_info.texcoords_buf_idx].data[indices_array[mesh_idx].data[tri_idx*3 + 2]];
+            let p0  = verts_pos_array[mesh_idx].data[indices_array[mesh_idx].data[tri_idx*3 + 0]];
+            let p1  = verts_pos_array[mesh_idx].data[indices_array[mesh_idx].data[tri_idx*3 + 1]];
+            let p2  = verts_pos_array[mesh_idx].data[indices_array[mesh_idx].data[tri_idx*3 + 2]];
+            let tangents = compute_tangents_from_uv(hit.instance_idx, p0, p1, p2, uv0, uv1, uv2);
 
-        let should_flip_v = dot(frame[1], hit.bitangent) < 0.0f;
-        if should_flip_v { normal_local *= -1.0f; }
+            let normalmap_sample = textureSampleLevel(textures[mat.normal_tex_idx], samplers[mat_sampler_idx], uv, 0.0f).xyz;
+            var normal_local = -1.0 + 2.0 * normalmap_sample;
+            var frame = mat3x3f(tangents.tangent, tangents.bitangent, res);
+            frame[0] = orthonormalize(frame[0], frame[2]);
+            frame[1] = normalize(cross(frame[2], frame[0]));
 
-        res = normalize(frame * normal_local);
+            let should_flip_v = dot(frame[1], tangents.bitangent) < 0.0f;
+            if should_flip_v { normal_local *= -1.0f; }
+
+            res = normalize(frame * normal_local);
+        }
     }
 
     return res;
@@ -1004,16 +1034,14 @@ fn ray_tri_dst(ray: Ray, v0: vec3f, v1: vec3f, v2: vec3f)->vec3f
 
 struct HitInfo
 {
-    normal: vec3f,
-    dst: f32,
-    tangent: vec3f,
-    mat_idx: u32,
-    bitangent: vec3f,
-    color: vec4f,
-    tex_coords: vec2f,
+    dst: f32,  // Null if == F32_MAX
+    uv: vec2f,
+    instance_idx: u32,
+    tri_idx: u32,
+    hit_backside: bool,
 }
 
-const invalid_hit: HitInfo = HitInfo(vec3f(), F32_MAX, vec3f(), 0, vec3f(), vec4f(), vec2f());
+const INVALID_HIT: HitInfo = HitInfo(F32_MAX, vec2f(), 0, 0, false);
 
 const MAX_TLAS_DEPTH: u32 = 20;  // This supports 2^MAX_TLAS_DEPTH objects.
 const TLAS_STACK_SIZE: u32 = (MAX_TLAS_DEPTH + 1) * 8 * 8;  // shared memory
@@ -1043,9 +1071,8 @@ fn ray_scene_intersection(local_id: vec3u, ray: Ray)->HitInfo
     // t, u, v
     var min_hit = vec3f(F32_MAX, 0.0f, 0.0f);
     var tri_idx: u32 = 0;
-    var mesh_idx: u32 = 0;
-    var mat_idx: u32 = 0;
-    var transform = mat3x4f();
+    var instance_idx: u32 = 0;
+    var hit_backside = false;
     while stack_idx > 1
     {
         stack_idx--;
@@ -1065,11 +1092,10 @@ fn ray_scene_intersection(local_id: vec3u, ray: Ray)->HitInfo
             let result = ray_mesh_intersection(local_id, ray_trans, min_hit.x, instance.mesh_idx);
             if result.hit.x < min_hit.x
             {
-                min_hit   = result.hit;
-                tri_idx   = result.tri_idx;
-                mesh_idx  = instance.mesh_idx;
-                mat_idx   = instance.mat_idx;
-                transform = instance.transpose_inverse_transform;
+                min_hit      = result.hit;
+                tri_idx      = result.tri_idx;
+                instance_idx = node.instance_idx;
+                hit_backside = false;
             }
         }
         else  // Non-leaf node
@@ -1081,6 +1107,10 @@ fn ray_scene_intersection(local_id: vec3u, ray: Ray)->HitInfo
 
             let left_dst  = ray_aabb_dst(ray, left_child_node.aabb_min,  left_child_node.aabb_max);
             let right_dst = ray_aabb_dst(ray, right_child_node.aabb_min, right_child_node.aabb_max);
+
+            if DEBUG {
+                RAY_DEBUG_INFO.num_aabb_checks += 2;
+            }
 
             // Push children onto the stack
             // The closest child should be looked at
@@ -1123,57 +1153,14 @@ fn ray_scene_intersection(local_id: vec3u, ray: Ray)->HitInfo
         }
     }
 
-    var hit_info: HitInfo = invalid_hit;
+    var hit_info: HitInfo = INVALID_HIT;
     if min_hit.x != F32_MAX
     {
-        let v0: Vertex = verts_array[mesh_idx].data[indices_array[mesh_idx].data[tri_idx*3 + 0]];
-        let v1: Vertex = verts_array[mesh_idx].data[indices_array[mesh_idx].data[tri_idx*3 + 1]];
-        let v2: Vertex = verts_array[mesh_idx].data[indices_array[mesh_idx].data[tri_idx*3 + 2]];
-        let u = min_hit.y;
-        let v = min_hit.z;
-        let w = 1.0 - u - v;
-
-        let normal_local = normalize(v0.normal*w + v1.normal*u + v2.normal*v);
-        let normal_mat = mat3x3f(transform[0].xyz, transform[1].xyz, transform[2].xyz);
-
         hit_info.dst = min_hit.x;
-        hit_info.mat_idx = mat_idx;
-
-        hit_info.normal = normalize(normal_mat * normal_local);
-        hit_info.color = v0.color*w + v1.color*u + v2.color*v;
-        hit_info.tex_coords = v0.tex_coords*w + v1.tex_coords*u + v2.tex_coords*v;
-
-        // Tangent and bitangent from uv.
-        {
-            let p0 = verts_pos_array[mesh_idx].data[indices_array[mesh_idx].data[tri_idx*3 + 0]];
-            let p1 = verts_pos_array[mesh_idx].data[indices_array[mesh_idx].data[tri_idx*3 + 1]];
-            let p2 = verts_pos_array[mesh_idx].data[indices_array[mesh_idx].data[tri_idx*3 + 2]];
-
-            // From YoctoGL.
-            // Follows the definition in http://www.terathon.com/code/tangent.html and
-            // https://gist.github.com/aras-p/2843984
-            // normal points up from texture space
-            let p   = p1 - p0;
-            let q   = p2 - p0;
-            let s   = vec2f(v1.tex_coords.x - v0.tex_coords.x, v2.tex_coords.x - v0.tex_coords.x);
-            let t   = vec2f(v1.tex_coords.y - v0.tex_coords.y, v2.tex_coords.y - v0.tex_coords.y);
-            let div = s.x * t.y - s.y * t.x;
-
-            var tangent_local   = vec3f(1.0f, 0.0f, 0.0f);
-            var bitangent_local = vec3f(0.0f, 1.0f, 0.0f);
-            if div != 0
-            {
-                tangent_local   = vec3f(t.y * p.x - t.x * q.x,
-                                        t.y * p.y - t.x * q.y,
-                                        t.y * p.z - t.x * q.z) / div;
-                bitangent_local = vec3f(s.x * q.x - s.y * p.x,
-                                        s.x * q.y - s.y * p.y,
-                                        s.x * q.z - s.y * p.z) / div;
-            }
-
-            hit_info.tangent = normalize(normal_mat * tangent_local);
-            hit_info.bitangent = normalize(normal_mat * bitangent_local);
-        }
+        hit_info.uv = min_hit.yz;
+        hit_info.instance_idx = instance_idx;
+        hit_info.tri_idx = tri_idx;
+        hit_info.hit_backside = hit_backside;
     }
 
     return hit_info;
@@ -1300,6 +1287,86 @@ fn ray_instance_intersection(local_id: vec3u, ray: Ray, cur_min_hit_dst: f32, in
     let ray_trans = transform_ray_without_normalizing_direction(ray, trans_mat4);
     let result = ray_mesh_intersection(local_id, ray_trans, cur_min_hit_dst, instance.mesh_idx);
     return result;
+}
+
+struct Tangents
+{
+    tangent: vec3f,
+    bitangent: vec3f,
+}
+
+// TODO: Change function params, and refactor.
+fn compute_tangents_from_uv(instance_idx: u32, p0: vec3f, p1: vec3f, p2: vec3f, uv0: vec2f, uv1: vec2f, uv2: vec2f) -> Tangents
+{
+    // From YoctoGL.
+    // Follows the definition in http://www.terathon.com/code/tangent.html and
+    // https://gist.github.com/aras-p/2843984
+    // normal points up from texture space
+    let p   = p1 - p0;
+    let q   = p2 - p0;
+    let s   = vec2f(uv1.x - uv0.x, uv2.x - uv0.x);
+    let t   = vec2f(uv1.y - uv0.y, uv2.y - uv0.y);
+    let div = s.x * t.y - s.y * t.x;
+
+    var tangent_local   = vec3f(1.0f, 0.0f, 0.0f);
+    var bitangent_local = vec3f(0.0f, 1.0f, 0.0f);
+    if div != 0
+    {
+        tangent_local   = vec3f(t.y * p.x - t.x * q.x,
+                                t.y * p.y - t.x * q.y,
+                                t.y * p.z - t.x * q.z) / div;
+        bitangent_local = vec3f(s.x * q.x - s.y * p.x,
+                                s.x * q.y - s.y * p.y,
+                                s.x * q.z - s.y * p.z) / div;
+    }
+
+    let instance = instances[instance_idx];
+    let test = transpose(instance.transpose_inverse_transform);
+    let inv_trans = mat4x4f(vec4f(test[0], 0.0f), vec4f(test[1], 0.0f), vec4f(test[2], 0.0f), vec4f(test[3], 1.0f));
+    let normal_mat = transpose(mat3x3f(inv_trans[0].xyz, inv_trans[1].xyz, inv_trans[2].xyz));
+    return Tangents(normalize(normal_mat * tangent_local), normalize(normal_mat * bitangent_local));
+}
+
+// Get extra vertex attributes, with default fallback values if absent.
+fn get_vert_normal(instance_idx: u32, tri_idx: u32, uv: vec2f) -> vec3f
+{
+    let mesh_idx = instances[instance_idx].mesh_idx;
+    let mesh_info = mesh_infos[mesh_idx];
+
+    if mesh_info.normals_buf_idx == SENTINEL_IDX {
+        return compute_tri_geom_normal(instance_idx, tri_idx);
+    }
+
+    let n0 = verts_normal_array[mesh_info.normals_buf_idx].data[indices_array[mesh_idx].data[tri_idx*3 + 0]];
+    let n1 = verts_normal_array[mesh_info.normals_buf_idx].data[indices_array[mesh_idx].data[tri_idx*3 + 1]];
+    let n2 = verts_normal_array[mesh_info.normals_buf_idx].data[indices_array[mesh_idx].data[tri_idx*3 + 2]];
+    let w = 1.0f - uv.x - uv.y;
+    let normal_local = normalize(n0*w + n1*uv.x + n2*uv.y);
+
+    let transform = instances[instance_idx].transpose_inverse_transform;
+    let normal_mat = mat3x3f(transform[0].xyz, transform[1].xyz, transform[2].xyz);
+    return normalize(normal_mat * normal_local);
+}
+
+fn get_vert_texcoords(instance_idx: u32, tri_idx: u32, uv: vec2f) -> vec2f
+{
+    let mesh_info = mesh_infos[instances[instance_idx].mesh_idx];
+    return vec2f();
+}
+
+fn get_vert_color(instance_idx: u32, tri_idx: u32, uv: vec2f) -> vec4f
+{
+    let mesh_idx = instances[instance_idx].mesh_idx;
+    let mesh_info = mesh_infos[mesh_idx];
+    if mesh_info.colors_buf_idx == SENTINEL_IDX {
+        return vec4f(1.0f);
+    }
+
+    let c0 = verts_color_array[mesh_info.colors_buf_idx].data[indices_array[mesh_idx].data[tri_idx*3 + 0]];
+    let c1 = verts_color_array[mesh_info.colors_buf_idx].data[indices_array[mesh_idx].data[tri_idx*3 + 1]];
+    let c2 = verts_color_array[mesh_info.colors_buf_idx].data[indices_array[mesh_idx].data[tri_idx*3 + 2]];
+    let w = 1.0f - uv.x - uv.y;
+    return c0*w + c1*uv.x + c2*uv.y;
 }
 
 //////////////////////////////////////////////
@@ -2038,6 +2105,7 @@ fn compute_dir_from_point_to_tri(instance_idx: u32, tri_idx: u32, uv: vec2f, p: 
     //return normalize(normal_mat * local_dir);
 }
 
+/*
 fn compute_tri_normal(instance_idx: u32, tri_idx: u32, uv: vec2f) -> vec3f
 {
     let instance = instances[instance_idx];
@@ -2055,6 +2123,7 @@ fn compute_tri_normal(instance_idx: u32, tri_idx: u32, uv: vec2f) -> vec3f
     let normal_mat = transpose(mat3x3f(inv_trans[0].xyz, inv_trans[1].xyz, inv_trans[2].xyz));
     return normalize(normal_mat * local_normal).xyz;
 }
+*/
 
 fn compute_tri_geom_normal(instance_idx: u32, tri_idx: u32) -> vec3f
 {

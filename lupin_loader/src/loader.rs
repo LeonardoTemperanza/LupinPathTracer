@@ -4,16 +4,9 @@ use lupin::wgpu as wgpu;
 
 pub fn build_scene(device: &wgpu::Device, queue: &wgpu::Queue) -> lp::Scene
 {
-    let mut verts_pos_array: Vec<Vec<lp::VertexPos>> = Default::default();
-    let mut verts_array: Vec<Vec<lp::Vertex>> = Default::default();
-    let mut indices_array: Vec<Vec<u32>> = Default::default();
-    let mut bvh_nodes_array: Vec<Vec<lp::BvhNode>> = Default::default();
-    let mut mesh_aabbs: Vec<lp::Aabb> = Default::default();
-    let mut materials: Vec<lp::Material> = Default::default();
-    let mut environments: Vec<lp::Environment> = Default::default();
-
-    let mut textures: Vec<wgpu::Texture> = Default::default();
-    let mut samplers: Vec<wgpu::Sampler> = Default::default();
+    let mut scene = lp::SceneCPU::default();
+    let mut textures = Vec::<wgpu::Texture>::default();
+    let mut samplers = Vec::<wgpu::Sampler>::default();
 
     // Textures
     let white_tex = push_asset(&mut textures, lp::create_white_texture(device, queue));
@@ -26,14 +19,14 @@ pub fn build_scene(device: &wgpu::Device, queue: &wgpu::Queue) -> lp::Scene
     let linear_sampler = push_asset(&mut samplers, lp::create_linear_sampler(device));
 
     // Meshes
-    let bunny_mesh  = load_mesh_obj("stanford_bunny.obj", &mut verts_pos_array, &mut verts_array, &mut indices_array, &mut bvh_nodes_array, &mut mesh_aabbs);
-    let quad_mesh   = load_mesh_obj("quad.obj",           &mut verts_pos_array, &mut verts_array, &mut indices_array, &mut bvh_nodes_array, &mut mesh_aabbs);
-    let gazebo_mesh = load_mesh_obj("gazerbo.obj",        &mut verts_pos_array, &mut verts_array, &mut indices_array, &mut bvh_nodes_array, &mut mesh_aabbs);
-    let dragon_80k_mesh = load_mesh_obj("Dragon_80K.obj", &mut verts_pos_array, &mut verts_array, &mut indices_array, &mut bvh_nodes_array, &mut mesh_aabbs);
-    let ply_test = load_mesh_ply(std::path::Path::new("C:/work/LupinPathTracer/assets/yocto-scenes/coffee/shapes/shape22.ply"), &mut verts_pos_array, &mut verts_array, &mut indices_array, &mut bvh_nodes_array, &mut mesh_aabbs).unwrap();
+    let bunny_mesh  = load_mesh_obj("stanford_bunny.obj", &mut scene);
+    let quad_mesh   = load_mesh_obj("quad.obj",           &mut scene);
+    let gazebo_mesh = load_mesh_obj("gazerbo.obj",        &mut scene);
+    let dragon_80k_mesh = load_mesh_obj("Dragon_80K.obj", &mut scene);
+    //let ply_test = load_mesh_ply(std::path::Path::new("C:/work/LupinPathTracer/assets/yocto-scenes/coffee/shapes/shape22.ply"), &mut scene, &mut mesh_aabbs).unwrap();
 
     // Materials
-    let alpha = push_asset(&mut materials, {
+    let alpha = push_asset(&mut scene.materials, {
         let mut mat = lp::Material::default();
         mat.mat_type = lp::MaterialType::Matte;
         mat.color = lp::Vec4 { x: 1.0, y: 1.0, z: 1.0, w: 0.3 };
@@ -41,7 +34,7 @@ pub fn build_scene(device: &wgpu::Device, queue: &wgpu::Queue) -> lp::Scene
         mat
     });
 
-    let bunny_matte = push_asset(&mut materials, {
+    let bunny_matte = push_asset(&mut scene.materials, {
         let mut mat = lp::Material::default();
         mat.mat_type = lp::MaterialType::Matte;
         mat.color = lp::Vec4 { x: 1.0, y: 1.0, z: 1.0, w: 1.0 };
@@ -49,35 +42,35 @@ pub fn build_scene(device: &wgpu::Device, queue: &wgpu::Queue) -> lp::Scene
         mat
     });
 
-    let glossy = push_asset(&mut materials, {
+    let glossy = push_asset(&mut scene.materials, {
         let mut mat = lp::Material::default();
         mat.mat_type = lp::MaterialType::Glossy;
         mat.color = lp::Vec4 { x: 1.0, y: 1.0, z: 1.0, w: 1.0 };
         mat
     });
 
-    let reflective = push_asset(&mut materials, {
+    let reflective = push_asset(&mut scene.materials, {
         let mut mat = lp::Material::default();
         mat.mat_type = lp::MaterialType::Reflective;
         mat.color = lp::Vec4 { x: 1.0, y: 1.0, z: 1.0, w: 1.0 };
         mat
     });
 
-    let transparent = push_asset(&mut materials, {
+    let transparent = push_asset(&mut scene.materials, {
         let mut mat = lp::Material::default();
         mat.mat_type = lp::MaterialType::Transparent;
         mat.color = lp::Vec4 { x: 1.0, y: 1.0, z: 1.0, w: 1.0 };
         mat
     });
 
-    let refractive = push_asset(&mut materials, {
+    let refractive = push_asset(&mut scene.materials, {
         let mut mat = lp::Material::default();
         mat.mat_type = lp::MaterialType::Refractive;
         mat.color = lp::Vec4 { x: 1.0, y: 1.0, z: 1.0, w: 1.0 };
         mat
     });
 
-    let white_matte = push_asset(&mut materials, {
+    let white_matte = push_asset(&mut scene.materials, {
         let mut mat = lp::Material::default();
         mat.mat_type = lp::MaterialType::Matte;
         mat.color = lp::Vec4 { x: 1.0, y: 1.0, z: 1.0, w: 1.0 };
@@ -86,42 +79,42 @@ pub fn build_scene(device: &wgpu::Device, queue: &wgpu::Queue) -> lp::Scene
 
     // Rough reflective
     // 6
-    let rough_reflective = push_asset(&mut materials, {
+    let rough_reflective = push_asset(&mut scene.materials, {
         let mut mat = lp::Material::default();
         mat.mat_type = lp::MaterialType::Reflective;
         mat.color = lp::Vec4 { x: 1.0, y: 1.0, z: 1.0, w: 1.0 };
         mat
     });
 
-    let rough_glossy = push_asset(&mut materials, {
+    let rough_glossy = push_asset(&mut scene.materials, {
         let mut mat = lp::Material::default();
         mat.mat_type = lp::MaterialType::Glossy;
         mat.color = lp::Vec4 { x: 1.0, y: 1.0, z: 1.0, w: 1.0 };
         mat
     });
 
-    let glft = push_asset(&mut materials, {
+    let glft = push_asset(&mut scene.materials, {
         let mut mat = lp::Material::default();
         mat.mat_type = lp::MaterialType::GltfPbr;
         mat.color = lp::Vec4 { x: 1.0, y: 1.0, z: 1.0, w: 1.0 };
         mat
     });
 
-    let rough_transparent = push_asset(&mut materials, {
+    let rough_transparent = push_asset(&mut scene.materials, {
         let mut mat = lp::Material::default();
         mat.mat_type = lp::MaterialType::Transparent;
         mat.color = lp::Vec4 { x: 1.0, y: 1.0, z: 1.0, w: 1.0 };
         mat
     });
 
-    let rough_reflective = push_asset(&mut materials, {
+    let rough_reflective = push_asset(&mut scene.materials, {
         let mut mat = lp::Material::default();
         mat.mat_type = lp::MaterialType::Refractive;
         mat.color = lp::Vec4 { x: 1.0, y: 1.0, z: 1.0, w: 1.0 };
         mat
     });
 
-    let emissive = push_asset(&mut materials, {
+    let emissive = push_asset(&mut scene.materials, {
         let mut mat = lp::Material::default();
         mat.mat_type = lp::MaterialType::Matte;
         mat.color = lp::Vec4 { x: 1.0, y: 1.0, z: 1.0, w: 1.0 };
@@ -141,42 +134,40 @@ pub fn build_scene(device: &wgpu::Device, queue: &wgpu::Queue) -> lp::Scene
                 inv_transform: lp::mat4_inverse(lp::xform_to_matrix(lp::Vec3 { x: offset * i as f32, y: 0.0, z: offset * j as f32 }, lp::Quat::default(), lp::Vec3::ones())),
                 mesh_idx: 0,
                 mat_idx: 0,
-                padding0: 0.0, padding1: 0.0
+                _padding0: 0.0, _padding1: 0.0
             });
         }
     }
     */
 
     // Instances
-    let instances = vec![
-        lp::Instance { transpose_inverse_transform: lp::xform_to_matrix(lp::Vec3 { x: 0.0, y: 0.0, z: 0.0 }, lp::Quat::default(), lp::Vec3::ones()).inverse().transpose(), mesh_idx: 0, mat_idx: bunny_matte, padding0: 0.0, padding1: 0.0 },
-        lp::Instance { transpose_inverse_transform: lp::xform_to_matrix(lp::Vec3 { x: 0.0, y: 0.0, z: -4.0 }, lp::Quat::default(), lp::Vec3::ones()).inverse().transpose(), mesh_idx: 0, mat_idx: alpha, padding0: 0.0, padding1: 0.0 },
-        lp::Instance { transpose_inverse_transform: lp::xform_to_matrix(lp::Vec3 { x: -2.0, y: 0.0, z: 0.0 }, lp::angle_axis(lp::Vec3::RIGHT, 90.0 * 3.1415 / 180.0), lp::Vec3::ones()).inverse().transpose(), mesh_idx: 0, mat_idx: glossy, padding0: 0.0, padding1: 0.0},
-        lp::Instance { transpose_inverse_transform: lp::xform_to_matrix(lp::Vec3 { x: -2.0, y: 0.0, z: -2.0 }, lp::angle_axis(lp::Vec3::UP, 90.0 * 3.1415 / 180.0), lp::Vec3 { x: 0.2, y: 1.0, z: 1.0 }).inverse().transpose(), mesh_idx: 0, mat_idx: glossy, padding0: 0.0, padding1: 0. },
-        lp::Instance { transpose_inverse_transform: lp::xform_to_matrix(lp::Vec3 { x: 2.0, y: 0.0, z: 0.0 }, lp::Quat::default(), lp::Vec3 { x: 1.0, y: 1.0, z: 1.0 }).inverse().transpose(), mesh_idx: 0, mat_idx: reflective, padding0: 0.0, padding1: 0.0 },
-        lp::Instance { transpose_inverse_transform: lp::xform_to_matrix(lp::Vec3 { x: 2.0, y: 0.0, z: -2.0 }, lp::Quat::default(), lp::Vec3 { x: 1.0, y: 1.0, z: 1.0 }).inverse().transpose(), mesh_idx: 0, mat_idx: transparent, padding0: 0.0, padding1: 0.0 },
-        lp::Instance { transpose_inverse_transform: lp::xform_to_matrix(lp::Vec3 { x: 4.0, y: 0.0, z: 0.0 }, lp::Quat::default(), lp::Vec3::ones()).inverse().transpose(), mesh_idx: 0, mat_idx: refractive, padding0: 0.0, padding1: 0.0 },
-        lp::Instance { transpose_inverse_transform: lp::xform_to_matrix(lp::Vec3 { x: 4.0, y: 0.0, z: -2.0 }, lp::Quat::default(), lp::Vec3::ones()).inverse().transpose(), mesh_idx: 0, mat_idx: rough_glossy, padding0: 0.0, padding1: 0.0 },
-        lp::Instance { transpose_inverse_transform: lp::xform_to_matrix(lp::Vec3 { x: 6.0, y: 0.0, z: 0.0 }, lp::Quat::default(), lp::Vec3::ones()).inverse().transpose(), mesh_idx: 0, mat_idx: rough_reflective, padding0: 0.0, padding1: 0.0 },
-        lp::Instance { transpose_inverse_transform: lp::xform_to_matrix(lp::Vec3 { x: 6.0, y: 0.0, z: -2.0 }, lp::Quat::default(), lp::Vec3::ones()).inverse().transpose(), mesh_idx: 0, mat_idx: rough_transparent, padding0: 0.0, padding1: 0.0 },
-        //lp::Instance { inv_transform: lp::mat4_inverse(lp::xform_to_matrix(lp::Vec3 { x: 8.0, y: 0.0, z: 0.0 }, lp::Quat::default(), lp::Vec3::ones())), mesh_idx: 0, mat_idx: emissive, padding0: 0.0, padding1: 0.0 },
-        //lp::Instance { inv_transform: lp::mat4_inverse(lp::xform_to_matrix(lp::Vec3 { x: 10.0, y: 0.0, z: 0.0 }, lp::Quat::default(), lp::Vec3::ones())), mesh_idx: 0, mat_idx: emissive, padding0: 0.0, padding1: 0.0 },
+    scene.instances = vec![
+        lp::Instance { transpose_inverse_transform: lp::xform_to_matrix(lp::Vec3 { x: 0.0, y: 0.0, z: 0.0 }, lp::Quat::default(), lp::Vec3::ones()).inverse().transpose(), mesh_idx: 0, mat_idx: bunny_matte, _padding0: 0.0, _padding1: 0.0 },
+        lp::Instance { transpose_inverse_transform: lp::xform_to_matrix(lp::Vec3 { x: 0.0, y: 0.0, z: -4.0 }, lp::Quat::default(), lp::Vec3::ones()).inverse().transpose(), mesh_idx: 0, mat_idx: alpha, _padding0: 0.0, _padding1: 0.0 },
+        lp::Instance { transpose_inverse_transform: lp::xform_to_matrix(lp::Vec3 { x: -2.0, y: 0.0, z: 0.0 }, lp::angle_axis(lp::Vec3::RIGHT, 90.0 * 3.1415 / 180.0), lp::Vec3::ones()).inverse().transpose(), mesh_idx: 0, mat_idx: glossy, _padding0: 0.0, _padding1: 0.0},
+        lp::Instance { transpose_inverse_transform: lp::xform_to_matrix(lp::Vec3 { x: -2.0, y: 0.0, z: -2.0 }, lp::angle_axis(lp::Vec3::UP, 90.0 * 3.1415 / 180.0), lp::Vec3 { x: 0.2, y: 1.0, z: 1.0 }).inverse().transpose(), mesh_idx: 0, mat_idx: glossy, _padding0: 0.0, _padding1: 0. },
+        lp::Instance { transpose_inverse_transform: lp::xform_to_matrix(lp::Vec3 { x: 2.0, y: 0.0, z: 0.0 }, lp::Quat::default(), lp::Vec3 { x: 1.0, y: 1.0, z: 1.0 }).inverse().transpose(), mesh_idx: 0, mat_idx: reflective, _padding0: 0.0, _padding1: 0.0 },
+        lp::Instance { transpose_inverse_transform: lp::xform_to_matrix(lp::Vec3 { x: 2.0, y: 0.0, z: -2.0 }, lp::Quat::default(), lp::Vec3 { x: 1.0, y: 1.0, z: 1.0 }).inverse().transpose(), mesh_idx: 0, mat_idx: transparent, _padding0: 0.0, _padding1: 0.0 },
+        lp::Instance { transpose_inverse_transform: lp::xform_to_matrix(lp::Vec3 { x: 4.0, y: 0.0, z: 0.0 }, lp::Quat::default(), lp::Vec3::ones()).inverse().transpose(), mesh_idx: 0, mat_idx: refractive, _padding0: 0.0, _padding1: 0.0 },
+        lp::Instance { transpose_inverse_transform: lp::xform_to_matrix(lp::Vec3 { x: 4.0, y: 0.0, z: -2.0 }, lp::Quat::default(), lp::Vec3::ones()).inverse().transpose(), mesh_idx: 0, mat_idx: rough_glossy, _padding0: 0.0, _padding1: 0.0 },
+        lp::Instance { transpose_inverse_transform: lp::xform_to_matrix(lp::Vec3 { x: 6.0, y: 0.0, z: 0.0 }, lp::Quat::default(), lp::Vec3::ones()).inverse().transpose(), mesh_idx: 0, mat_idx: rough_reflective, _padding0: 0.0, _padding1: 0.0 },
+        lp::Instance { transpose_inverse_transform: lp::xform_to_matrix(lp::Vec3 { x: 6.0, y: 0.0, z: -2.0 }, lp::Quat::default(), lp::Vec3::ones()).inverse().transpose(), mesh_idx: 0, mat_idx: rough_transparent, _padding0: 0.0, _padding1: 0.0 },
+        //lp::Instance { inv_transform: lp::mat4_inverse(lp::xform_to_matrix(lp::Vec3 { x: 8.0, y: 0.0, z: 0.0 }, lp::Quat::default(), lp::Vec3::ones())), mesh_idx: 0, mat_idx: emissive, _padding0: 0.0, _padding1: 0.0 },
+        //lp::Instance { inv_transform: lp::mat4_inverse(lp::xform_to_matrix(lp::Vec3 { x: 10.0, y: 0.0, z: 0.0 }, lp::Quat::default(), lp::Vec3::ones())), mesh_idx: 0, mat_idx: emissive, _padding0: 0.0, _padding1: 0.0 },
         // Floor
-        lp::Instance { transpose_inverse_transform: lp::xform_to_matrix(lp::Vec3 { x: 0.0, y: -0.01, z: 0.0 }, lp::Quat::default(), lp::Vec3::ones() * 20.0).inverse().transpose(), mesh_idx: 1, mat_idx: white_matte, padding0: 0.0, padding1: 0.0 },
+        lp::Instance { transpose_inverse_transform: lp::xform_to_matrix(lp::Vec3 { x: 0.0, y: -0.01, z: 0.0 }, lp::Quat::default(), lp::Vec3::ones() * 20.0).inverse().transpose(), mesh_idx: 1, mat_idx: white_matte, _padding0: 0.0, _padding1: 0.0 },
         // Studio light
-        lp::Instance { transpose_inverse_transform: lp::xform_to_matrix(lp::Vec3 { x: 0.0, y: 10.0, z: -10.0 }, lp::angle_axis(lp::Vec3::RIGHT, -80.0 * 3.1415 / 180.0), lp::Vec3::ones()).inverse().transpose(), mesh_idx: 1, mat_idx: emissive, padding0: 0.0, padding1: 0.0 },
+        lp::Instance { transpose_inverse_transform: lp::xform_to_matrix(lp::Vec3 { x: 0.0, y: 10.0, z: -10.0 }, lp::angle_axis(lp::Vec3::RIGHT, -80.0 * 3.1415 / 180.0), lp::Vec3::ones()).inverse().transpose(), mesh_idx: 1, mat_idx: emissive, _padding0: 0.0, _padding1: 0.0 },
         // Gazebo
-        lp::Instance { transpose_inverse_transform: lp::xform_to_matrix(lp::Vec3 { x: 30.0, y: 0.0, z: 0.0 }, lp::Quat::default(), lp::Vec3::ones()).inverse().transpose(), mesh_idx: gazebo_mesh, mat_idx: white_matte, padding0: 0.0, padding1: 0.0 },
-        lp::Instance { transpose_inverse_transform: lp::xform_to_matrix(lp::Vec3 { x: 30.0, y: 0.0, z: -20.0 }, lp::Quat::default(), lp::Vec3::ones()).inverse().transpose(), mesh_idx: gazebo_mesh, mat_idx: white_matte, padding0: 0.0, padding1: 0.0 },
+        lp::Instance { transpose_inverse_transform: lp::xform_to_matrix(lp::Vec3 { x: 30.0, y: 0.0, z: 0.0 }, lp::Quat::default(), lp::Vec3::ones()).inverse().transpose(), mesh_idx: gazebo_mesh, mat_idx: white_matte, _padding0: 0.0, _padding1: 0.0 },
+        lp::Instance { transpose_inverse_transform: lp::xform_to_matrix(lp::Vec3 { x: 30.0, y: 0.0, z: -20.0 }, lp::Quat::default(), lp::Vec3::ones()).inverse().transpose(), mesh_idx: gazebo_mesh, mat_idx: white_matte, _padding0: 0.0, _padding1: 0.0 },
         // Dragon
-        //lp::Instance { transpose_inverse_transform: lp::xform_to_matrix(linverse().p::Vec3 { x: 0.0, y: 2.5, z: 0.0 }, lp::Quat::default(), lp::Vec3::ones() * 10.0)).transpose(), mesh_idx: dragon_80k_mesh, mat_idx: transparent, padding0: 0.0, padding1: 0.0 },
-        // Ply test
-        lp::Instance { transpose_inverse_transform: lp::xform_to_matrix(lp::Vec3 { x: 30.0, y: 0.0, z: 0.0 }, lp::angle_axis(lp::Vec3::RIGHT, -80.0 * 3.1415 / 180.0), lp::Vec3::ones() * 20.0).inverse().transpose(), mesh_idx: ply_test, mat_idx: emissive, padding0: 0.0, padding1: 0.0 },
+        //lp::Instance { transpose_inverse_transform: lp::xform_to_matrix(linverse().p::Vec3 { x: 0.0, y: 2.5, z: 0.0 }, lp::Quat::default(), lp::Vec3::ones() * 10.0)).transpose(), mesh_idx: dragon_80k_mesh, mat_idx: transparent, _padding0: 0.0, _padding1: 0.0 },
     ];
 
-    let tlas_nodes = lp::build_tlas(instances.as_slice(), &mesh_aabbs);
+    scene.tlas_nodes = lp::build_tlas(scene.instances.as_slice(), &scene.mesh_aabbs);
 
-    let env = push_asset(&mut environments, lp::Environment {
+    let env = push_asset(&mut scene.environments, lp::Environment {
         emission: lp::Vec3 { x: 1.0, y: 1.0, z: 1.0 },
         emission_tex_idx: env_map,
         transform: lp::Mat4::IDENTITY,
@@ -193,21 +184,9 @@ pub fn build_scene(device: &wgpu::Device, queue: &wgpu::Queue) -> lp::Scene
         ..Default::default()
     });
 
-    let scene_cpu = lp::SceneCPU {
-        verts_pos_array,
-        verts_array,
-        indices_array,
-        bvh_nodes_array,
-        mesh_aabbs,
-        tlas_nodes,
-        instances,
-        materials,
-        environments,
-    };
+    lp::validate_scene(&scene, textures.len() as u32, samplers.len() as u32);
 
-    lp::validate_scene(&scene_cpu, textures.len() as u32, samplers.len() as u32);
-
-    return lp::upload_scene_to_gpu(device, queue, &scene_cpu, textures, samplers, &[env_map_cpu]);
+    return lp::upload_scene_to_gpu(device, queue, &scene, textures, samplers, &[env_map_cpu]);
 }
 
 /// Builds an empty scene, which should show up as a black texture in a render.
@@ -215,8 +194,11 @@ pub fn build_scene(device: &wgpu::Device, queue: &wgpu::Queue) -> lp::Scene
 pub fn build_scene_empty(device: &wgpu::Device, queue: &wgpu::Queue) -> lp::Scene
 {
     let scene_cpu = lp::SceneCPU {
+        mesh_infos: vec![],
         verts_pos_array: vec![],
-        verts_array: vec![],
+        verts_normal_array: vec![],
+        verts_texcoord_array: vec![],
+        verts_color_array: vec![],
         indices_array: vec![],
         bvh_nodes_array: vec![],
         mesh_aabbs: vec![],
@@ -230,60 +212,218 @@ pub fn build_scene_empty(device: &wgpu::Device, queue: &wgpu::Queue) -> lp::Scen
     return lp::upload_scene_to_gpu(device, queue, &scene_cpu, vec![], vec![], &[]);
 }
 
-/*
-pub fn build_scene_cornell_box(device: &wgpu::Device, queue: &wgpu::Queue) -> lp::Scene
+pub fn build_scene_cornell_box(device: &wgpu::Device, queue: &wgpu::Queue) -> (lp::Scene, Vec<SceneCamera>)
 {
-    let mut verts_pos_array: Vec<Vec<lp::VertexPos>> = Default::default();
-    let mut verts_array: Vec<Vec<lp::Vertex>> = Default::default();
-    let mut indices_array: Vec<Vec<u32>> = Default::default();
-    let mut bvh_nodes_array: Vec<Vec<lp::BvhNode>> = Default::default();
-    let mut mesh_aabbs: Vec<lp::Aabb> = Default::default();
-    let mut materials: Vec<lp::Material> = Default::default();
-    let mut environments: Vec<lp::Environment> = Default::default();
+    // Values taken from YoctoGL.
 
-    let mut textures: Vec<wgpu::Texture> = Default::default();
-    let mut samplers: Vec<wgpu::Sampler> = Default::default();
+    let mut scene = lp::SceneCPU::default();
 
-    let white_tex = push_asset(&mut textures, lp::create_white_texture(device, queue));
-    let matte_white = push_asset(&mut materials, lp::Material::new(
-        lp::MaterialType::Matte,                  // Mat type
-        lp::Vec4::new(1.0, 1.0, 1.0, 1.0),        // Color
-        lp::Vec4::new(100.0, 100.0, 100.0, 0.0),  // Emission
-        lp::Vec4::new(0.0, 0.0, 0.0, 0.0),        // Scattering
-        0.05,                                     // Roughness
-        0.0,                                      // Metallic
-        1.33,                                     // ior
-        0.0,                                      // anisotropy
-        0.0,                                      // depth
-        0,                                        // Color tex
-        0,                                        // Emission tex
-        0,                                        // Roughness tex
-        0,                                        // Scattering tex
-        0,                                        // Normal tex
-    ));
+    let white_mat = push_asset(&mut scene.materials, {
+        let mut mat = lp::Material::default();
+        mat.color = lp::Vec4 { x: 0.725, y: 0.71, z: 0.68, w: 1.0 };
+        mat
+    });
+    let red_mat = push_asset(&mut scene.materials, {
+        let mut mat = lp::Material::default();
+        mat.color = lp::Vec4 { x: 0.63, y: 0.065, z: 0.05, w: 1.0 };
+        mat
+    });
+    let green_mat = push_asset(&mut scene.materials, {
+        let mut mat = lp::Material::default();
+        mat.color = lp::Vec4 { x: 0.14, y: 0.45, z: 0.091, w: 1.0 };
+        mat
+    });
+    let emissive_mat = push_asset(&mut scene.materials, {
+        let mut mat = lp::Material::default();
+        mat.emission = lp::Vec4 { x: 17.0, y: 12.0, z: 4.0, w: 0.0 };
+        mat
+    });
 
-    let mut instances = vec![
-    ];
+    // Floor
+    {
+        let floor_mesh = push_asset(&mut scene.mesh_infos, lp::MeshInfo::default());
+        scene.verts_pos_array.push(vec![
+            lp::Vec4::new(-1.0, 0.0,  1.0, 0.0), lp::Vec4::new( 1.0, 0.0,  1.0, 0.0),
+            lp::Vec4::new( 1.0, 0.0, -1.0, 0.0), lp::Vec4::new(-1.0, 0.0, -1.0, 0.0),
+        ]);
+        scene.indices_array.push(vec![0, 1, 2, 2, 3, 0]);
+        scene.mesh_aabbs.push(lp::compute_mesh_aabb(&scene.verts_pos_array[floor_mesh as usize]));
+        scene.bvh_nodes_array.push(lp::build_bvh(&scene.verts_pos_array[floor_mesh as usize], &mut scene.indices_array[floor_mesh as usize]));
 
-    let tlas_nodes = lp::build_tlas(instances.as_slice(), &mesh_aabbs);
+        let floor_instance = push_asset(&mut scene.instances, {
+            let mut instance = lp::Instance::default();
+            instance.mesh_idx = floor_mesh;
+            instance.mat_idx  = white_mat;
+            instance
+        });
+    }
 
-    let scene_cpu = lp::SceneCPU {
-        verts_pos_array,
-        verts_array,
-        indices_array,
-        bvh_nodes_array,
-        mesh_aabbs,
-        tlas_nodes,
-        instances,
-        materials,
-        environments: vec![],
-    };
+    // Ceiling
+    {
+        let ceiling_mesh = push_asset(&mut scene.mesh_infos, lp::MeshInfo::default());
+        scene.verts_pos_array.push(vec![
+            lp::Vec4::new(-1.0, 2.0,  1.0, 0.0), lp::Vec4::new(-1.0, 2.0, -1.0, 0.0),
+            lp::Vec4::new( 1.0, 2.0, -1.0, 0.0), lp::Vec4::new( 1.0, 2.0,  1.0, 0.0),
+        ]);
+        scene.indices_array.push(vec![0, 1, 2, 2, 3, 0]);
+        scene.mesh_aabbs.push(lp::compute_mesh_aabb(&scene.verts_pos_array[ceiling_mesh as usize]));
+        scene.bvh_nodes_array.push(lp::build_bvh(&scene.verts_pos_array[ceiling_mesh as usize], &mut scene.indices_array[ceiling_mesh as usize]));
 
-    lp::validate_scene(&scene_cpu, textures.len() as u32, samplers.len() as u32);
+        let ceiling_instance = push_asset(&mut scene.instances, {
+            let mut instance = lp::Instance::default();
+            instance.mesh_idx = ceiling_mesh;
+            instance.mat_idx  = white_mat;
+            instance
+        });
+    }
 
-    return lp::upload_scene_to_gpu(device, queue, &scene_cpu, textures, samplers, &[]);
+    // Backwall
+    {
+        let backwall_mesh = push_asset(&mut scene.mesh_infos, lp::MeshInfo::default());
+        scene.verts_pos_array.push(vec![
+            lp::Vec4::new(-1.0, 2.0,  1.0, 0.0), lp::Vec4::new(-1.0, 2.0, -1.0, 0.0),
+            lp::Vec4::new( 1.0, 2.0, -1.0, 0.0), lp::Vec4::new( 1.0, 2.0,  1.0, 0.0),
+        ]);
+        scene.indices_array.push(vec![0, 1, 2, 2, 3, 0]);
+        scene.mesh_aabbs.push(lp::compute_mesh_aabb(&scene.verts_pos_array[backwall_mesh as usize]));
+        scene.bvh_nodes_array.push(lp::build_bvh(&scene.verts_pos_array[backwall_mesh as usize], &mut scene.indices_array[backwall_mesh as usize]));
+
+        let backwall_instance = push_asset(&mut scene.instances, {
+            let mut instance = lp::Instance::default();
+            instance.mesh_idx = backwall_mesh;
+            instance.mat_idx  = white_mat;
+            instance
+        });
+    }
+
+    // Rightwall
+    {
+        let rightwall_mesh = push_asset(&mut scene.mesh_infos, lp::MeshInfo::default());
+        scene.verts_pos_array.push(vec![
+            lp::Vec4::new(1.0, 0.0, -1.0, 0.0), lp::Vec4::new(1.0, 0.0,  1.0, 0.0),
+            lp::Vec4::new(1.0, 2.0,  1.0, 0.0), lp::Vec4::new(1.0, 2.0, -1.0, 0.0),
+        ]);
+        scene.indices_array.push(vec![0, 1, 2, 2, 3, 0]);
+        scene.mesh_aabbs.push(lp::compute_mesh_aabb(&scene.verts_pos_array[rightwall_mesh as usize]));
+        scene.bvh_nodes_array.push(lp::build_bvh(&scene.verts_pos_array[rightwall_mesh as usize], &mut scene.indices_array[rightwall_mesh as usize]));
+
+        let rightwall_instance = push_asset(&mut scene.instances, {
+            let mut instance = lp::Instance::default();
+            instance.mesh_idx = rightwall_mesh;
+            instance.mat_idx  = green_mat;
+            instance
+        });
+    }
+
+    // Leftwall
+    {
+        let leftwall_mesh = push_asset(&mut scene.mesh_infos, lp::MeshInfo::default());
+        scene.verts_pos_array.push(vec![
+            lp::Vec4::new(-1.0, 0.0,  1.0, 0.0), lp::Vec4::new(-1.0, 0.0, -1.0, 0.0),
+            lp::Vec4::new(-1.0, 2.0, -1.0, 0.0), lp::Vec4::new(-1.0, 2.0,  1.0, 0.0),
+        ]);
+        scene.indices_array.push(vec![0, 1, 2, 2, 3, 0]);
+        scene.mesh_aabbs.push(lp::compute_mesh_aabb(&scene.verts_pos_array[leftwall_mesh as usize]));
+        scene.bvh_nodes_array.push(lp::build_bvh(&scene.verts_pos_array[leftwall_mesh as usize], &mut scene.indices_array[leftwall_mesh as usize]));
+
+        let leftwall_instance = push_asset(&mut scene.instances, {
+            let mut instance = lp::Instance::default();
+            instance.mesh_idx = leftwall_mesh;
+            instance.mat_idx  = red_mat;
+            instance
+        });
+    }
+
+    // Shortbox
+    {
+        let shortbox_mesh = push_asset(&mut scene.mesh_infos, lp::MeshInfo::default());
+        scene.verts_pos_array.push(vec![
+            lp::Vec4::new(0.53, 0.6, 0.75, 0.0), lp::Vec4::new(0.7, 0.6, 0.17, 0.0), lp::Vec4::new(0.13, 0.6, 0.0, 0.0),
+            lp::Vec4::new(-0.05, 0.6, 0.57, 0.0), lp::Vec4::new(-0.05, 0.0, 0.57, 0.0), lp::Vec4::new(-0.05, 0.6, 0.57, 0.0),
+            lp::Vec4::new(0.13, 0.6, 0.0, 0.0), lp::Vec4::new(0.13, 0.0, 0.0, 0.0), lp::Vec4::new(0.53, 0.0, 0.75, 0.0),
+            lp::Vec4::new(0.53, 0.6, 0.75, 0.0), lp::Vec4::new(-0.05, 0.6, 0.57, 0.0), lp::Vec4::new(-0.05, 0.0, 0.57, 0.0),
+            lp::Vec4::new(0.7, 0.0, 0.17, 0.0), lp::Vec4::new(0.7, 0.6, 0.17, 0.0), lp::Vec4::new(0.53, 0.6, 0.75, 0.0),
+            lp::Vec4::new(0.53, 0.0, 0.75, 0.0), lp::Vec4::new(0.13, 0.0, 0.0, 0.0), lp::Vec4::new(0.13, 0.6, 0.0, 0.0),
+            lp::Vec4::new(0.7, 0.6, 0.17, 0.0), lp::Vec4::new(0.7, 0.0, 0.17, 0.0), lp::Vec4::new(0.53, 0.0, 0.75, 0.0),
+            lp::Vec4::new(0.7, 0.0, 0.17, 0.0), lp::Vec4::new(0.13, 0.0, 0.0, 0.0), lp::Vec4::new(-0.05, 0.0, 0.57, 0.0),
+        ]);
+        scene.indices_array.push(vec![0, 1, 2, 2, 3, 0, 4, 5, 6, 6, 7, 4,
+                                      8, 9, 10, 10, 11, 8, 12, 13, 14, 14, 15, 12,
+                                      16, 17, 18, 18, 19, 16, 20, 21, 22, 22, 23, 20]);
+        scene.mesh_aabbs.push(lp::compute_mesh_aabb(&scene.verts_pos_array[shortbox_mesh as usize]));
+        scene.bvh_nodes_array.push(lp::build_bvh(&scene.verts_pos_array[shortbox_mesh as usize], &mut scene.indices_array[shortbox_mesh as usize]));
+
+        let shortbox_instance = push_asset(&mut scene.instances, {
+            let mut instance = lp::Instance::default();
+            instance.mesh_idx = shortbox_mesh;
+            instance.mat_idx  = white_mat;
+            instance
+        });
+    }
+
+    // Tallbox
+    {
+        let tallbox_mesh = push_asset(&mut scene.mesh_infos, lp::MeshInfo::default());
+        scene.verts_pos_array.push(vec![
+            lp::Vec4::new(-0.53, 1.2, 0.09, 0.0), lp::Vec4::new(0.04, 1.2, -0.09, 0.0), lp::Vec4::new(-0.14, 1.2, -0.67, 0.0),
+            lp::Vec4::new(-0.71, 1.2, -0.49, 0.0), lp::Vec4::new(-0.53, 0.0, 0.09, 0.0), lp::Vec4::new(-0.53, 1.2, 0.09, 0.0),
+            lp::Vec4::new(-0.71, 1.2, -0.49, 0.0), lp::Vec4::new(-0.71, 0.0, -0.49, 0.0), lp::Vec4::new(-0.71, 0.0, -0.49, 0.0),
+            lp::Vec4::new(-0.71, 1.2, -0.49, 0.0), lp::Vec4::new(-0.14, 1.2, -0.67, 0.0), lp::Vec4::new(-0.14, 0.0, -0.67, 0.0),
+            lp::Vec4::new(-0.14, 0.0, -0.67, 0.0), lp::Vec4::new(-0.14, 1.2, -0.67, 0.0), lp::Vec4::new(0.04, 1.2, -0.09, 0.0),
+            lp::Vec4::new(0.04, 0.0, -0.09, 0.0), lp::Vec4::new(0.04, 0.0, -0.09, 0.0), lp::Vec4::new(0.04, 1.2, -0.09, 0.0),
+            lp::Vec4::new(-0.53, 1.2, 0.09, 0.0), lp::Vec4::new(-0.53, 0.0, 0.09, 0.0), lp::Vec4::new(-0.53, 0.0, 0.09, 0.0),
+            lp::Vec4::new(0.04, 0.0, -0.09, 0.0), lp::Vec4::new(-0.14, 0.0, -0.67, 0.0), lp::Vec4::new(-0.71, 0.0, -0.49, 0.0),
+        ]);
+        scene.indices_array.push(vec![0, 1, 2, 2, 3, 0, 4, 5, 6, 6, 7, 4,
+                                      8, 9, 10, 10, 11, 8, 12, 13, 14, 14, 15, 12,
+                                      16, 17, 18, 18, 19, 16, 20, 21, 22, 22, 23, 20]);
+        scene.mesh_aabbs.push(lp::compute_mesh_aabb(&scene.verts_pos_array[tallbox_mesh as usize]));
+        scene.bvh_nodes_array.push(lp::build_bvh(&scene.verts_pos_array[tallbox_mesh as usize], &mut scene.indices_array[tallbox_mesh as usize]));
+
+        let tallbox_instance = push_asset(&mut scene.instances, {
+            let mut instance = lp::Instance::default();
+            instance.mesh_idx = tallbox_mesh;
+            instance.mat_idx  = white_mat;
+            instance
+        });
+    }
+
+    // Light
+    {
+        let light_mesh = push_asset(&mut scene.mesh_infos, lp::MeshInfo::default());
+        scene.verts_pos_array.push(vec![
+            lp::Vec4::new(-0.25, 1.99, 0.25,  0.0), lp::Vec4::new(-0.25, 1.99, -0.25, 0.0),
+            lp::Vec4::new(0.25,  1.99, -0.25, 0.0), lp::Vec4::new(0.25,  1.99, 0.25,  0.0),
+        ]);
+        scene.indices_array.push(vec![0, 1, 2, 2, 3, 0]);
+        scene.mesh_aabbs.push(lp::compute_mesh_aabb(&scene.verts_pos_array[light_mesh as usize]));
+        scene.bvh_nodes_array.push(lp::build_bvh(&scene.verts_pos_array[light_mesh as usize], &mut scene.indices_array[light_mesh as usize]));
+
+        let light_instance = push_asset(&mut scene.instances, {
+            let mut instance = lp::Instance::default();
+            instance.mesh_idx = light_mesh;
+            instance.mat_idx  = emissive_mat;
+            instance
+        });
+    }
+
+    scene.tlas_nodes = lp::build_tlas(&scene.instances, &scene.mesh_aabbs);
+
+    lp::validate_scene(&scene, 0, 0);
+
+    let cameras = vec![SceneCamera {
+        transform: lp::Mat3x4 { m: [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, -1.0], [0.0, 1.0, 3.9]] },
+        params: lp::CameraParams {
+            is_orthographic: false,
+            lens: 0.035,
+            aperture: 0.0,
+            focus: 3.9,
+            film: 0.024,
+            aspect: 1.0,
+        },
+    }];
+    return (lp::upload_scene_to_gpu(device, queue, &scene, vec![], vec![], &[]), cameras);
 }
-*/
 
 pub fn load_texture(device: &wgpu::Device, queue: &wgpu::Queue, path: &str, hdr: bool) -> Result<wgpu::Texture, image::ImageError>
 {
@@ -433,61 +573,82 @@ fn push_asset<T>(vec: &mut Vec<T>, el: T) -> u32
     return (vec.len() - 1) as u32;
 }
 
-fn load_mesh_obj<P: AsRef<std::path::Path>>(path: P, verts_pos: &mut Vec<Vec<lp::VertexPos>>, verts: &mut Vec<Vec<lp::Vertex>>, indices: &mut Vec<Vec<u32>>, bvh_nodes: &mut Vec<Vec<lp::BvhNode>>, aabbs: &mut Vec<lp::Aabb>) -> u32
+fn load_mesh_obj<P: AsRef<std::path::Path>>(path: P, scene: &mut lp::SceneCPU) -> u32
 {
-    assert!(verts_pos.len() == verts.len() && verts.len() == indices.len() && indices.len() == aabbs.len() && aabbs.len() == bvh_nodes.len());
+    assert_eq!(scene.verts_pos_array.len(), scene.mesh_infos.len());
+    assert_eq!(scene.mesh_infos.len(), scene.indices_array.len());
+    assert_eq!(scene.indices_array.len(), scene.mesh_aabbs.len());
+    assert_eq!(scene.mesh_aabbs.len(), scene.bvh_nodes_array.len());
 
-    let scene = tobj::load_obj(path.as_ref().to_str().unwrap(), &tobj::GPU_LOAD_OPTIONS);
-    assert!(scene.is_ok());
+    let tobj_scene = tobj::load_obj(path.as_ref().to_str().unwrap(), &tobj::GPU_LOAD_OPTIONS);
+    assert!(tobj_scene.is_ok());
 
-    let (mut models, _materials) = scene.expect("Failed to load OBJ file");
+    let (mut models, _materials) = tobj_scene.expect("Failed to load OBJ file");
 
     let mesh = &mut models[0].mesh;
 
     let mut aabb = lp::Aabb::neutral();
-    let mut mesh_verts_pos = Vec::<lp::VertexPos>::with_capacity(mesh.positions.len());
+    let mut mesh_verts_pos = Vec::<lp::Vec4>::with_capacity(mesh.positions.len());
     for i in (0..mesh.positions.len()).step_by(3)
     {
         let pos = lp::Vec3 { x: mesh.positions[i + 0], y: mesh.positions[i + 1], z: mesh.positions[i + 2] };
-        mesh_verts_pos.push(lp::VertexPos { v: lp::Vec3 { x: pos.x, y: pos.y, z: pos.z }, _padding: 0.0 });
+        mesh_verts_pos.push(lp::Vec4 { x: pos.x, y: pos.y, z: pos.z, w: 0.0 });
         lp::grow_aabb_to_include_vert(&mut aabb, pos);
     }
 
     let bvh = lp::build_bvh(mesh_verts_pos.as_slice(), &mut mesh.indices);
 
-    let mut mesh_verts = Vec::<lp::Vertex>::with_capacity(mesh.positions.len());
-    for vert_idx in 0..(mesh.positions.len() / 3)
+    let mut mesh_info = lp::MeshInfo::default();
+
+/*
+    if mesh.normals.len() > 0
     {
-        let mut normal = lp::Vec3::default();
-        if mesh.normals.len() > 0
-        {
-            normal.x = mesh.normals[vert_idx*3+0];
-            normal.y = mesh.normals[vert_idx*3+1];
-            normal.z = mesh.normals[vert_idx*3+2];
-            normal = lp::normalize_vec3(normal);
-        };
+        let mut normals = Vec::<lp::Vec4>::new();
 
-        let mut tex_coords = lp::Vec2::default();
-        if mesh.texcoords.len() > 0
+        for i in 0..mesh.normals.len()/3
         {
-            tex_coords.x = mesh.texcoords[vert_idx*2+0];
-            // WGPU Convention is +=right,down and tipically it's +=right,up
-            tex_coords.y = 1.0 - mesh.texcoords[vert_idx*2+1];
-        };
+            let normal = lp::Vec4 {
+                x: mesh.normals[i*3+0],
+                y: mesh.normals[i*3+1],
+                z: mesh.normals[i*3+2],
+                w: 0.0,
+            }.normalized();
 
-        let mut vert = lp::Vertex::default();
-        vert.normal = normal;
-        vert.tex_coords = tex_coords;
-        mesh_verts.push(vert);
+            normals.push(normal);
+        }
+
+        verts_normal.push(normals);
+        let normals_idx = verts_normal.len() - 1;
+        mesh_info.normals_buf_idx = normals_idx as u32;
     }
 
-    verts_pos.push(mesh_verts_pos);
-    verts.push(mesh_verts);
-    indices.push(mesh.indices.clone());
-    aabbs.push(aabb);
-    bvh_nodes.push(bvh);
+    if mesh.texcoords.len() > 0
+    {
+        let mut tex_coords = Vec::<lp::Vec2>::new();
 
-    return (verts.len() - 1) as u32;
+        for i in 0..mesh.texcoords.len()/2
+        {
+            let tex_coord = lp::Vec2 {
+                x: mesh.texcoords[i*2+0],
+                y: 1.0 - mesh.texcoords[i*2+1]  // WGPU Convention is +=right,down and tipically it's +=right,up
+            };
+
+            tex_coords.push(tex_coord);
+        }
+
+        verts_texcoord.push(tex_coords);
+        let texcoords_idx = verts_texcoord.len() - 1;
+        mesh_info.texcoords_buf_idx = texcoords_idx as u32;
+    };
+*/
+
+    scene.mesh_infos.push(mesh_info);
+    scene.verts_pos_array.push(mesh_verts_pos);
+    scene.indices_array.push(mesh.indices.clone());
+    scene.mesh_aabbs.push(aabb);
+    scene.bvh_nodes_array.push(bvh);
+
+    return (scene.mesh_infos.len() - 1) as u32;
 }
 
 /// Camera that has been placed into the scene.
@@ -524,14 +685,7 @@ pub fn load_scene_yoctogl_v24(path: &std::path::Path, device: &wgpu::Device, que
 {
     let parent_dir = path.parent().unwrap_or(std::path::Path::new(""));
 
-    let mut verts_pos_array = Vec::<Vec::<lp::VertexPos>>::new();
-    let mut verts_array = Vec::<Vec::<lp::Vertex>>::new();
-    let mut indices_array = Vec::<Vec::<u32>>::new();
-    let mut bvh_nodes_array = Vec::<Vec::<lp::BvhNode>>::new();
-    let mut mesh_aabbs = Vec::<lp::Aabb>::new();
-    let mut materials = Vec::<lp::Material>::new();
-    let mut environments = Vec::<lp::Environment>::new();
-
+    let mut scene = lp::SceneCPU::default();
     let mut textures = Vec::<wgpu::Texture>::new();
     let mut samplers = Vec::<wgpu::Sampler>::new();
 
@@ -540,7 +694,6 @@ pub fn load_scene_yoctogl_v24(path: &std::path::Path, device: &wgpu::Device, que
 
     let linear_sampler = push_asset(&mut samplers, lp::create_linear_sampler(device));
 
-    let mut instances = Vec::<lp::Instance>::new();
     let mut scene_cams = Vec::<SceneCamera>::new();
 
     // Conversion matrix to Lupin's coordinate system, which is left-handed.
@@ -661,7 +814,7 @@ pub fn load_scene_yoctogl_v24(path: &std::path::Path, device: &wgpu::Device, que
                     }
 
                     p.expect_char('}');
-                    environments.push(env);
+                    scene.environments.push(env);
 
                     list_continue = p.next_list_el();
                 }
@@ -732,7 +885,7 @@ pub fn load_scene_yoctogl_v24(path: &std::path::Path, device: &wgpu::Device, que
                     while dict_continue
                     {
                         let mat = parse_material_yocto_v24(&mut p, &mut tex_load_infos);
-                        push_asset(&mut materials, mat);
+                        push_asset(&mut scene.materials, mat);
 
                         dict_continue = p.next_list_el();
                     }
@@ -774,7 +927,7 @@ pub fn load_scene_yoctogl_v24(path: &std::path::Path, device: &wgpu::Device, que
                                     {
                                         "ply" =>
                                         {
-                                            let res = load_mesh_ply(&full_path, &mut verts_pos_array, &mut verts_array, &mut indices_array, &mut bvh_nodes_array, &mut mesh_aabbs);
+                                            let res = load_mesh_ply(&full_path, &mut scene);
                                             if let Err(err) = res {
                                                 return Err(err);
                                             }
@@ -812,7 +965,7 @@ pub fn load_scene_yoctogl_v24(path: &std::path::Path, device: &wgpu::Device, que
                 while list_continue
                 {
                     let mut instance = lp::Instance::default();
-                    let default_transform = conversion * lp::Mat3x4::IDENTITY * conversion;
+                    let default_transform = conversion * lp::Mat3x4::IDENTITY;
                     instance.transpose_inverse_transform = default_transform.inverse().transpose();
 
                     p.expect_char('{');
@@ -831,7 +984,7 @@ pub fn load_scene_yoctogl_v24(path: &std::path::Path, device: &wgpu::Device, que
                             "frame" =>
                             {
                                 p.expect_char(':');
-                                let transform = conversion * p.parse_mat3x4f() * conversion;
+                                let transform = conversion * p.parse_mat3x4f();
                                 instance.transpose_inverse_transform = transform.inverse().transpose();
                             },
                             "material" =>
@@ -851,7 +1004,7 @@ pub fn load_scene_yoctogl_v24(path: &std::path::Path, device: &wgpu::Device, que
                     }
 
                     p.expect_char('}');
-                    instances.push(instance);
+                    scene.instances.push(instance);
 
                     list_continue = p.next_list_el();
                 }
@@ -880,7 +1033,7 @@ pub fn load_scene_yoctogl_v24(path: &std::path::Path, device: &wgpu::Device, que
 
     if p.found_error { return Err(LoadError::InvalidJson); }
 
-    let tlas_nodes = lp::build_tlas(instances.as_slice(), &mesh_aabbs);
+    scene.tlas_nodes = lp::build_tlas(scene.instances.as_slice(), &scene.mesh_aabbs);
 
     // Load textures.
     for info in &tex_load_infos
@@ -902,8 +1055,8 @@ pub fn load_scene_yoctogl_v24(path: &std::path::Path, device: &wgpu::Device, que
     }
 
     // Fill in environment data.
-    let mut environment_infos = Vec::<lp::EnvMapInfo>::with_capacity(environments.len());
-    for env in &environments
+    let mut environment_infos = Vec::<lp::EnvMapInfo>::with_capacity(scene.environments.len());
+    for env in &scene.environments
     {
         if env.emission_tex_idx == lp::SENTINEL_IDX { continue; }
         let info = &tex_load_infos[env.emission_tex_idx as usize];
@@ -931,22 +1084,10 @@ pub fn load_scene_yoctogl_v24(path: &std::path::Path, device: &wgpu::Device, que
         }
     }
 
-    let scene_cpu = lp::SceneCPU {
-        verts_pos_array,
-        verts_array,
-        indices_array,
-        bvh_nodes_array,
-        mesh_aabbs,
-        tlas_nodes,
-        instances,
-        materials,
-        environments,
-    };
+    lp::validate_scene(&scene, textures.len() as u32, samplers.len() as u32);
 
-    lp::validate_scene(&scene_cpu, textures.len() as u32, samplers.len() as u32);
-
-    let scene = lp::upload_scene_to_gpu(device, queue, &scene_cpu, textures, samplers, &environment_infos);
-    return Ok((scene, scene_cams));
+    let scene_gpu = lp::upload_scene_to_gpu(device, queue, &scene, textures, samplers, &environment_infos);
+    return Ok((scene_gpu, scene_cams));
 }
 
 fn parse_material_yocto_v24(p: &mut Parser, tex_load_infos: &mut Vec<TextureLoadInfo>) -> lp::Material
@@ -1457,9 +1598,12 @@ impl From<image::ImageError> for LoadError
 
 // NOTE: Not a complete ply parser, it parses/uses only the features
 // that are expected to be used from the yoctogl 2.4 format.
-fn load_mesh_ply(path: &std::path::Path, mesh_verts_pos: &mut Vec<Vec<lp::VertexPos>>, mesh_verts: &mut Vec<Vec<lp::Vertex>>, mesh_indices: &mut Vec<Vec<u32>>, bvh_nodes: &mut Vec<Vec<lp::BvhNode>>, aabbs: &mut Vec<lp::Aabb>) -> Result<u32, LoadError>
+fn load_mesh_ply(path: &std::path::Path, scene: &mut lp::SceneCPU) -> Result<u32, LoadError>
 {
-    assert!(mesh_verts_pos.len() == mesh_verts.len() && mesh_verts.len() == mesh_indices.len() && mesh_indices.len() == aabbs.len() && aabbs.len() == bvh_nodes.len());
+    assert_eq!(scene.verts_pos_array.len(), scene.mesh_infos.len());
+    assert_eq!(scene.mesh_infos.len(), scene.indices_array.len());
+    assert_eq!(scene.indices_array.len(), scene.mesh_aabbs.len());
+    assert_eq!(scene.mesh_aabbs.len(), scene.bvh_nodes_array.len());
 
     // Parse header
     let ply = std::fs::read(path)?;
@@ -1586,18 +1730,52 @@ fn load_mesh_ply(path: &std::path::Path, mesh_verts_pos: &mut Vec<Vec<lp::Vertex
         return Err(LoadError::InvalidPly);
     }
 
-    let (mut verts_pos, mut verts) = ply_extract_verts(p.buf,
-                                                       &x_buf, &y_buf, &z_buf,
-                                                       &nx_buf, &ny_buf, &nz_buf,
-                                                       &u_buf, &v_buf,
-                                                       &r_buf, &g_buf, &b_buf, &a_buf,
-                                                       num_verts);
-    assert!(verts_pos.len() == verts.len());
+    if !x_buf.present || !y_buf.present || !z_buf.present {
+        return Err(LoadError::InvalidPly);
+    }
+
+    let mut mesh_info = lp::MeshInfo::default();
+
+    let verts_pos = buf_extract_vec3_as_vec4(p.buf, &x_buf, &y_buf, &z_buf, num_verts);
+    if nx_buf.present || ny_buf.present || nz_buf.present
+    {
+        assert!(nx_buf.present && ny_buf.present && nz_buf.present);
+        let mut normals = buf_extract_vec3_as_vec4(p.buf, &nx_buf, &ny_buf, &nz_buf, num_verts);
+
+        //for normal in &mut normals {
+        //    *normal = lp::normalize_vec3(normal);
+        //}
+
+        scene.verts_normal_array.push(normals);
+        let normals_idx = scene.verts_normal_array.len() - 1;
+        mesh_info.normals_buf_idx = normals_idx as u32;
+    }
+    if u_buf.present || v_buf.present
+    {
+        assert!(u_buf.present && v_buf.present);
+
+        let mut texcoords = buf_extract_vec2(p.buf, &u_buf, &v_buf, num_verts);
+
+        for texcoord in &mut texcoords
+        {
+            // WGPU Convention is +=right,down and tipically it's +=right,up
+            texcoord.y = 1.0 - texcoord.y;
+        }
+
+        scene.verts_texcoord_array.push(texcoords);
+        let texcoords_idx = scene.verts_texcoord_array.len() - 1;
+        mesh_info.texcoords_buf_idx = texcoords_idx as u32;
+    }
+    if r_buf.present || g_buf.present || b_buf.present || a_buf.present
+    {
+        assert!(r_buf.present && g_buf.present && b_buf.present);
+        let colors = buf_extract_vec4(p.buf, &r_buf, &g_buf, &b_buf, &a_buf, num_verts);
+        scene.verts_color_array.push(colors);
+        let colors_idx = scene.verts_color_array.len() - 1;
+        mesh_info.colors_buf_idx = colors_idx as u32;
+    }
 
     let mut indices = ply_extract_indices(&p.buf[(num_verts * vert_size as u32) as usize..], num_faces);
-
-    let missing_normals = !nx_buf.present || !ny_buf.present || !nz_buf.present;
-    ply_fill_missing_info(&mut verts_pos, &mut verts, &mut indices, missing_normals);
 
     // Check indices
     for idx in &indices
@@ -1608,141 +1786,89 @@ fn load_mesh_ply(path: &std::path::Path, mesh_verts_pos: &mut Vec<Vec<lp::Vertex
     }
 
     let mut aabb = lp::Aabb::neutral();
-    for pos in &verts_pos
-    {
-        lp::grow_aabb_to_include_vert(&mut aabb, pos.v);
+    for pos in &verts_pos {
+        lp::grow_aabb_to_include_vert(&mut aabb, lp::Vec3::new(pos.x, pos.y, pos.z));
     }
 
     let bvh = lp::build_bvh(verts_pos.as_slice(), &mut indices);
 
-    for vert in &mut verts
-    {
-        vert.normal = lp::normalize_vec3(vert.normal);
+    scene.mesh_infos.push(mesh_info);
+    scene.verts_pos_array.push(verts_pos);
+    scene.indices_array.push(indices.clone());
+    scene.mesh_aabbs.push(aabb);
+    scene.bvh_nodes_array.push(bvh);
 
-        // TODO: If normal is not present just compute the geometric normal I guess.
-
-        // WGPU Convention is +=right,down and tipically it's +=right,up
-        vert.tex_coords.y = 1.0 - vert.tex_coords.y;
-    }
-
-    mesh_verts_pos.push(verts_pos);
-    mesh_verts.push(verts.clone());
-    mesh_indices.push(indices.clone());
-    aabbs.push(aabb);
-    bvh_nodes.push(bvh);
-
-    return Ok((mesh_verts.len() - 1) as u32);
+    return Ok((scene.mesh_infos.len() - 1) as u32);
 }
 
-fn ply_extract_verts(buf: &[u8],
-                     x: &Buffer, y: &Buffer, z: &Buffer,
-                     nx: &Buffer, ny: &Buffer, nz: &Buffer,
-                     u: &Buffer, v: &Buffer,
-                     r: &Buffer, g: &Buffer, b: &Buffer, a: &Buffer,
-                     num_verts: u32) -> (Vec<lp::VertexPos>, Vec<lp::Vertex>)
+// Extracts 3 elements from a buffer, and fills in 0 as the last element in the vec4.
+fn buf_extract_vec3_as_vec4(buf: &[u8], x: &Buffer, y: &Buffer, z: &Buffer, num: u32) -> Vec<lp::Vec4>
 {
-    let mut verts_pos = vec![lp::VertexPos::default(); num_verts as usize];
-    let mut verts = vec![lp::Vertex::default(); num_verts as usize];
-
-    if x.present
+    assert!(x.present && y.present && z.present);
+    let mut res = vec![lp::Vec4::default(); num as usize];
+    for i in 0..num as usize
     {
-        for i in 0..num_verts as usize
-        {
-            let offset = x.offset + i * x.stride;
-            verts_pos[i].v.x = extract_f32(buf, offset);
-        }
+        let offset = x.offset + i * x.stride;
+        res[i].x = extract_f32(buf, offset);
     }
-    if y.present
+    for i in 0..num as usize
     {
-        for i in 0..num_verts as usize
-        {
-            let offset = y.offset + i * y.stride;
-            verts_pos[i].v.y = extract_f32(buf, offset);
-        }
+        let offset = y.offset + i * y.stride;
+        res[i].y = extract_f32(buf, offset);
     }
-    if z.present
+    for i in 0..num as usize
     {
-        for i in 0..num_verts as usize
-        {
-            let offset = z.offset + i * z.stride;
-            verts_pos[i].v.z = -extract_f32(buf, offset);
-        }
-    }
-    if nx.present
-    {
-        for i in 0..num_verts as usize
-        {
-            let offset = nx.offset + i * nx.stride;
-            verts[i].normal.x = extract_f32(buf, offset);
-        }
-    }
-    if ny.present
-    {
-        for i in 0..num_verts as usize
-        {
-            let offset = ny.offset + i * ny.stride;
-            verts[i].normal.y = extract_f32(buf, offset);
-        }
-    }
-    if nz.present
-    {
-        for i in 0..num_verts as usize
-        {
-            let offset = nz.offset + i * nz.stride;
-            verts[i].normal.z = -extract_f32(buf, offset);
-        }
-    }
-    if u.present
-    {
-        for i in 0..num_verts as usize
-        {
-            let offset = u.offset + i * u.stride;
-            verts[i].tex_coords.x = extract_f32(buf, offset);
-        }
-    }
-    if v.present
-    {
-        for i in 0..num_verts as usize
-        {
-            let offset = v.offset + i * v.stride;
-            verts[i].tex_coords.y = extract_f32(buf, offset);
-        }
-    }
-    if r.present
-    {
-        for i in 0..num_verts as usize
-        {
-            let offset = r.offset + i * r.stride;
-            verts[i].color.x = extract_f32(buf, offset);
-        }
-    }
-    if g.present
-    {
-        for i in 0..num_verts as usize
-        {
-            let offset = g.offset + i * g.stride;
-            verts[i].color.y = extract_f32(buf, offset);
-        }
-    }
-    if b.present
-    {
-        for i in 0..num_verts as usize
-        {
-            let offset = b.offset + i * b.stride;
-            verts[i].color.z = extract_f32(buf, offset);
-        }
-    }
-    if a.present
-    {
-        for i in 0..num_verts as usize
-        {
-            let offset = a.offset + i * a.stride;
-            verts[i].color.w = extract_f32(buf, offset);
-        }
+        let offset = z.offset + i * z.stride;
+        res[i].z = extract_f32(buf, offset);
     }
 
-    assert!(verts_pos.len() == verts.len());
-    return (verts_pos, verts);
+    return res;
+}
+
+fn buf_extract_vec4(buf: &[u8], x: &Buffer, y: &Buffer, z: &Buffer, w: &Buffer, num: u32) -> Vec<lp::Vec4>
+{
+    assert!(x.present && y.present && z.present && w.present);
+    let mut res = vec![lp::Vec4::default(); num as usize];
+    for i in 0..num as usize
+    {
+        let offset = x.offset + i * x.stride;
+        res[i].x = extract_f32(buf, offset);
+    }
+    for i in 0..num as usize
+    {
+        let offset = y.offset + i * y.stride;
+        res[i].y = extract_f32(buf, offset);
+    }
+    for i in 0..num as usize
+    {
+        let offset = z.offset + i * z.stride;
+        res[i].z = extract_f32(buf, offset);
+    }
+    for i in 0..num as usize
+    {
+        let offset = w.offset + i * w.stride;
+        res[i].w = extract_f32(buf, offset);
+    }
+
+    return res;
+}
+
+fn buf_extract_vec2(buf: &[u8], x: &Buffer, y: &Buffer, num: u32) -> Vec<lp::Vec2>
+{
+    assert!(x.present && y.present);
+    let mut res = vec![lp::Vec2::default(); num as usize];
+    for i in 0..num as usize
+    {
+        let offset = x.offset + i * x.stride;
+        res[i].x = extract_f32(buf, offset);
+    }
+    for i in 0..num as usize
+    {
+        let offset = y.offset + i * y.stride;
+        res[i].y = extract_f32(buf, offset);
+    }
+
+    return res;
 }
 
 fn ply_extract_indices(buf: &[u8], num_faces: u32) -> Vec<u32>
@@ -1775,50 +1901,6 @@ fn ply_extract_indices(buf: &[u8], num_faces: u32) -> Vec<u32>
     }
 
     return indices;
-}
-
-fn ply_fill_missing_info(verts_pos: &mut Vec<lp::VertexPos>, verts: &mut Vec<lp::Vertex>, indices: &mut Vec<u32>, missing_normals: bool)
-{
-    if !missing_normals { return; }
-
-    let mut verts_pos_new = Vec::<lp::VertexPos>::new();
-    let mut verts_new = Vec::<lp::Vertex>::new();
-    let mut indices_new = Vec::<u32>::new();
-
-    for i in (0..indices.len()).step_by(3)
-    {
-        let vp0 = verts_pos[indices[i+0] as usize];
-        let vp1 = verts_pos[indices[i+1] as usize];
-        let vp2 = verts_pos[indices[i+2] as usize];
-        let mut v0 = verts[indices[i+0] as usize];
-        let mut v1 = verts[indices[i+1] as usize];
-        let mut v2 = verts[indices[i+2] as usize];
-
-        let geom_normal = lp::normalize_vec3(lp::cross_vec3(vp1.v - vp0.v, vp2.v - vp0.v));
-        v0.normal = geom_normal;
-        v1.normal = geom_normal;
-        v2.normal = geom_normal;
-
-        let old_len = verts_pos_new.len() as u32;
-        verts_pos_new.push(vp0);
-        verts_pos_new.push(vp1);
-        verts_pos_new.push(vp2);
-        verts_new.push(v0);
-        verts_new.push(v1);
-        verts_new.push(v2);
-
-        let i0 = old_len + 0;
-        let i1 = old_len + 1;
-        let i2 = old_len + 2;
-
-        indices_new.push(i0);
-        indices_new.push(i1);
-        indices_new.push(i2);
-    }
-
-    *verts_pos = verts_pos_new;
-    *verts = verts_new;
-    *indices = indices_new;
 }
 
 #[derive(Default, Copy, Clone, Debug)]

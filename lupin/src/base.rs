@@ -6,6 +6,12 @@ use std::
     task::{Context, Poll, RawWaker, RawWakerVTable, Waker},
 };
 
+#[allow(unused_macros)]
+macro_rules! static_assert {
+    ($($tt:tt)*) => {
+        const _: () = assert!($($tt)*);
+    }
+}
 
 ////////
 // Synchronization
@@ -109,21 +115,31 @@ pub struct Vec4
 
 impl Vec4
 {
+    #[inline]
     pub fn new(x: f32, y: f32, z: f32, w: f32) -> Self
     {
         return Self { x, y, z, w };
     }
 
+    #[inline]
     pub fn is_zero(&self) -> bool
     {
         return self.x == 0.0 && self.y == 0.0 && self.z == 0.0 && self.w == 0.0;
+    }
+
+    #[inline]
+    pub fn normalized(&self) -> Vec4
+    {
+        let magnitude = self.x * self.x + self.y * self.y + self.z * self.z + self.w * self.w;
+        return Vec4 { x: self.x / magnitude, y: self.y / magnitude, z: self.z / magnitude, w: self.w / magnitude };
     }
 }
 
 impl Aabb
 {
-    // Initialization for a neutral value with
-    // respect to "grow" types of operations
+    /// Initialization for a neutral value with
+    /// respect to "grow" types of operations
+    #[inline]
     pub fn neutral()->Self
     {
         return Aabb
@@ -487,7 +503,7 @@ impl Mat3x4
             ]
         };
     }
-    
+
     // TODO: @speed
     #[inline]
     pub fn inverse(&self) -> Mat3x4
