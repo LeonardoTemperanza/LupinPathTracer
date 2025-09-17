@@ -282,6 +282,25 @@ fn gbuffer_albedo_main(@builtin(local_invocation_id) local_id: vec3u, @builtin(g
                 //color += hit.normal * 0.5f + 0.5f;
                 //color += vec3f(mat_point.roughness);
                 //color += vec3f(mat_point.metallic);
+
+                // Debug tangents
+                /*
+                let instance = instances[hit.instance_idx];
+                let mesh_info = mesh_infos[instance.mesh_idx];
+                let mesh_idx = instance.mesh_idx;
+                let tri_idx = hit.tri_idx;
+                if mesh_info.texcoords_buf_idx != SENTINEL_IDX
+                {
+                    let uv0 = verts_texcoord_array[mesh_info.texcoords_buf_idx].data[indices_array[mesh_idx].data[tri_idx*3 + 0]];
+                    let uv1 = verts_texcoord_array[mesh_info.texcoords_buf_idx].data[indices_array[mesh_idx].data[tri_idx*3 + 1]];
+                    let uv2 = verts_texcoord_array[mesh_info.texcoords_buf_idx].data[indices_array[mesh_idx].data[tri_idx*3 + 2]];
+                    let p0  = verts_pos_array[mesh_idx].data[indices_array[mesh_idx].data[tri_idx*3 + 0]];
+                    let p1  = verts_pos_array[mesh_idx].data[indices_array[mesh_idx].data[tri_idx*3 + 1]];
+                    let p2  = verts_pos_array[mesh_idx].data[indices_array[mesh_idx].data[tri_idx*3 + 2]];
+                    let tangents = compute_tangents_from_uv(hit.instance_idx, p0, p1, p2, uv0, uv1, uv2);
+                    color += tangents.bitangent * 0.5f + 0.5f;
+                }
+                */
             }
         }
     }
@@ -655,6 +674,7 @@ fn compute_shading_normal(hit: HitInfo) -> vec3f
     let mesh_info = mesh_infos[mesh_idx];
     let mat = materials[instance.mat_idx];
     let uv = hit.uv;
+    let w = 1.0f - hit.uv.x - hit.uv.y;
     let tri_idx = hit.tri_idx;
 
     var res = get_vert_normal(hit.instance_idx, hit.tri_idx, hit.uv);
@@ -669,12 +689,13 @@ fn compute_shading_normal(hit: HitInfo) -> vec3f
             let uv0 = verts_texcoord_array[mesh_info.texcoords_buf_idx].data[indices_array[mesh_idx].data[tri_idx*3 + 0]];
             let uv1 = verts_texcoord_array[mesh_info.texcoords_buf_idx].data[indices_array[mesh_idx].data[tri_idx*3 + 1]];
             let uv2 = verts_texcoord_array[mesh_info.texcoords_buf_idx].data[indices_array[mesh_idx].data[tri_idx*3 + 2]];
+            let texcoords = uv0*w + uv1*uv.x + uv2*uv.y;
             let p0  = verts_pos_array[mesh_idx].data[indices_array[mesh_idx].data[tri_idx*3 + 0]];
             let p1  = verts_pos_array[mesh_idx].data[indices_array[mesh_idx].data[tri_idx*3 + 1]];
             let p2  = verts_pos_array[mesh_idx].data[indices_array[mesh_idx].data[tri_idx*3 + 2]];
             let tangents = compute_tangents_from_uv(hit.instance_idx, p0, p1, p2, uv0, uv1, uv2);
 
-            let normalmap_sample = textureSampleLevel(textures[mat.normal_tex_idx], samplers[mat_sampler_idx], uv, 0.0f).xyz;
+            let normalmap_sample = textureSampleLevel(textures[mat.normal_tex_idx], samplers[mat_sampler_idx], texcoords, 0.0f).xyz;
             var normal_local = -1.0 + 2.0 * normalmap_sample;
             var frame = mat3x3f(tangents.tangent, tangents.bitangent, res);
             frame[0] = orthonormalize(frame[0], frame[2]);
@@ -1321,9 +1342,8 @@ fn compute_tangents_from_uv(instance_idx: u32, p0: vec3f, p1: vec3f, p2: vec3f, 
     }
 
     let instance = instances[instance_idx];
-    let test = transpose(instance.transpose_inverse_transform);
-    let inv_trans = mat4x4f(vec4f(test[0], 0.0f), vec4f(test[1], 0.0f), vec4f(test[2], 0.0f), vec4f(test[3], 1.0f));
-    let normal_mat = transpose(mat3x3f(inv_trans[0].xyz, inv_trans[1].xyz, inv_trans[2].xyz));
+    let transform = instances[instance_idx].transpose_inverse_transform;
+    let normal_mat = mat3x3f(transform[0].xyz, transform[1].xyz, transform[2].xyz);
     return Tangents(normalize(normal_mat * tangent_local), normalize(normal_mat * bitangent_local));
 }
 
@@ -1346,12 +1366,6 @@ fn get_vert_normal(instance_idx: u32, tri_idx: u32, uv: vec2f) -> vec3f
     let transform = instances[instance_idx].transpose_inverse_transform;
     let normal_mat = mat3x3f(transform[0].xyz, transform[1].xyz, transform[2].xyz);
     return normalize(normal_mat * normal_local);
-}
-
-fn get_vert_texcoords(instance_idx: u32, tri_idx: u32, uv: vec2f) -> vec2f
-{
-    let mesh_info = mesh_infos[instances[instance_idx].mesh_idx];
-    return vec2f();
 }
 
 fn get_vert_color(instance_idx: u32, tri_idx: u32, uv: vec2f) -> vec4f
@@ -2085,10 +2099,7 @@ fn compute_dir_from_point_to_tri(instance_idx: u32, tri_idx: u32, uv: vec2f, p: 
     let instance = instances[instance_idx];
     let mesh_idx = instance.mesh_idx;
 
-    let test = transpose(instance.transpose_inverse_transform);
-    let inv_trans = mat4x4f(vec4f(test[0], 0.0f), vec4f(test[1], 0.0f), vec4f(test[2], 0.0f), vec4f(test[3], 1.0f));
-
-    let local_p = (inv_trans * vec4f(p, 1.0f)).xyz;
+    let local_p = (vec4f(p, 1.0f) * instance.transpose_inverse_transform).xyz;
 
     let v0: vec3f = verts_pos_array[mesh_idx].data[indices_array[mesh_idx].data[tri_idx*3 + 0]];
     let v1: vec3f = verts_pos_array[mesh_idx].data[indices_array[mesh_idx].data[tri_idx*3 + 1]];
@@ -2097,12 +2108,8 @@ fn compute_dir_from_point_to_tri(instance_idx: u32, tri_idx: u32, uv: vec2f, p: 
 
     let local_tri_pos = v0*w + v1*uv.x + v2*uv.y;
 
-    let world_tri_pos = (mat4x4f_inverse(inv_trans) * vec4f(local_tri_pos, 1.0f)).xyz;
-    return normalize(world_tri_pos - p);
-
-    //let local_dir = normalize(local_tri_pos - local_p);
-    //let normal_mat = transpose(mat3x3f(inv_trans[0].xyz, inv_trans[1].xyz, inv_trans[2].xyz));
-    //return normalize(normal_mat * local_dir);
+    let local_dir = normalize(local_tri_pos - local_p);
+    return normalize((vec4f(local_dir, 0.0f) * instance.transpose_inverse_transform).xyz);
 }
 
 /*

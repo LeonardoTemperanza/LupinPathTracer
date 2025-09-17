@@ -48,7 +48,7 @@ fn main()
         format: wgpu::TextureFormat::Rgba8Unorm,
         width: width as u32,
         height: height as u32,
-        present_mode: wgpu::PresentMode::Mailbox,
+        present_mode: wgpu::PresentMode::AutoNoVsync,  // Disabling vsync makes it so tiled rendering isn't slowed down.
         desired_maximum_frame_latency: 0,
         alpha_mode: wgpu::CompositeAlphaMode::Auto,
         view_formats: vec![],
@@ -210,7 +210,7 @@ impl<'a> AppState<'a>
         const DEFAULT_MAX_BOUNCES: u32 = 8;
 
         let pathtrace_resources = lp::build_pathtrace_resources(&device, &lp::BakedPathtraceParams {
-            with_runtime_checks: true,
+            with_runtime_checks: false,
             samples_per_pixel: DEFAULT_SAMPLES_PER_PIXEL,
             max_bounces: DEFAULT_MAX_BOUNCES,
         });
