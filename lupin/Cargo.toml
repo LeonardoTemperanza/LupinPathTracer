@@ -9,7 +9,7 @@ name = "check_shaders"
 path = "src/tools/check_shaders.rs"
 
 [dependencies]
-wgpu = "24.0.1"
-oidn = "2.3.2"
+wgpu = "25.0.2"
+#oidn = "2.3.2"
 half = "2.6.0"
 rand = "0.8"

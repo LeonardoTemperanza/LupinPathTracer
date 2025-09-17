@@ -31,7 +31,7 @@ pub fn init_default_wgpu_context<'a>(device_desc: wgpu::DeviceDescriptor,
     };
     let adapter = wait_for(instance.request_adapter(&adapter_options)).expect("Failed to get adapter");
 
-    let (device, queue) = wait_for(adapter.request_device(&device_desc, None)).expect("Failed to get device");
+    let (device, queue) = wait_for(adapter.request_device(&device_desc)).expect("Failed to get device");
 
     surface.configure(&device, &surface_config);
 
@@ -61,7 +61,7 @@ pub fn init_default_wgpu_context_no_window(device_desc: wgpu::DeviceDescriptor)-
     };
     let adapter = wait_for(instance.request_adapter(&adapter_options)).expect("Failed to get adapter");
 
-    let (device, queue) = wait_for(adapter.request_device(&device_desc, None)).expect("Failed to get device");
+    let (device, queue) = wait_for(adapter.request_device(&device_desc)).expect("Failed to get device");
 
     return (device, queue, adapter);
 }

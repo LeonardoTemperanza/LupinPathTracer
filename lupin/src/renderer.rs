@@ -266,12 +266,15 @@ pub fn get_required_device_spec()->wgpu::DeviceDescriptor<'static>
                            wgpu::Features::PUSH_CONSTANTS,
         required_limits: wgpu::Limits {
             max_storage_buffers_per_shader_stage: MAX_MESHES * NUM_STORAGE_BUFFERS_PER_MESH + MAX_ENVS + 64,
+            max_binding_array_elements_per_shader_stage: MAX_MESHES * NUM_STORAGE_BUFFERS_PER_MESH + MAX_ENVS + MAX_TEXTURES + 64,
+            max_binding_array_sampler_elements_per_shader_stage: MAX_SAMPLERS,
             max_sampled_textures_per_shader_stage: MAX_TEXTURES + 64,
             max_samplers_per_shader_stage: MAX_SAMPLERS + 8,
             max_push_constant_size: MAX_PUSH_CONSTANTS_SIZE,
             ..Default::default()
         },
         memory_hints: Default::default(),
+        trace: Default::default(),
     };
 }
 
@@ -358,16 +361,16 @@ pub fn build_pathtrace_resources(device: &wgpu::Device, baked_pathtrace_params: 
         }],
     });
 
-    let constants = std::collections::HashMap::from([
-        (std::string::String::from("MAX_BOUNCES"), baked_pathtrace_params.max_bounces as f64),
-        (std::string::String::from("SAMPLES_PER_PIXEL"), baked_pathtrace_params.samples_per_pixel as f64),
-    ]);
+    let constants = [
+        ("MAX_BOUNCES", baked_pathtrace_params.max_bounces as f64),
+        ("SAMPLES_PER_PIXEL", baked_pathtrace_params.samples_per_pixel as f64),
+    ];
 
-    let debug_constants = std::collections::HashMap::from([
-        (std::string::String::from("MAX_BOUNCES"), baked_pathtrace_params.max_bounces as f64),
-        (std::string::String::from("SAMPLES_PER_PIXEL"), baked_pathtrace_params.samples_per_pixel as f64),
-        (std::string::String::from("DEBUG"), 1 as f64),
-    ]);
+    let debug_constants = [
+        ("MAX_BOUNCES", baked_pathtrace_params.max_bounces as f64),
+        ("SAMPLES_PER_PIXEL", baked_pathtrace_params.samples_per_pixel as f64),
+        ("DEBUG", 1 as f64),
+    ];
 
     let pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
         label: Some("Lupin Pathtracer Pipeline"),

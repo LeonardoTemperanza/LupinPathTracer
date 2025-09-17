@@ -2027,7 +2027,7 @@ pub fn download_texture(device: &wgpu::Device, queue: &wgpu::Queue, texture: &wg
         let buffer_slice = buffer.slice(..);
         let (tx, rx) = std::sync::mpsc::channel();
         buffer_slice.map_async(wgpu::MapMode::Read, move |res| tx.send(res).unwrap());
-        device.poll(wgpu::Maintain::Wait);
+        device.poll(wgpu::PollType::Wait);
         rx.recv().unwrap().unwrap();
     }
 
@@ -2161,7 +2161,7 @@ pub fn save_texture(device: &wgpu::Device, queue: &wgpu::Queue, path: &std::path
     // Map synchronously.
     let buffer_slice = output_buffer.slice(..);
     buffer_slice.map_async(wgpu::MapMode::Read, |_| {});
-    device.poll(wgpu::Maintain::Wait);
+    device.poll(wgpu::PollType::Wait);
 
     let data = buffer_slice.get_mapped_range();
 
