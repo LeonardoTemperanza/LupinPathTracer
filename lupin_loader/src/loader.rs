@@ -281,8 +281,8 @@ pub fn build_scene_cornell_box(device: &wgpu::Device, queue: &wgpu::Queue) -> (l
     {
         let backwall_mesh = push_asset(&mut scene.mesh_infos, lp::MeshInfo::default());
         scene.verts_pos_array.push(vec![
-            lp::Vec4::new(-1.0, 2.0,  1.0, 0.0), lp::Vec4::new(-1.0, 2.0, -1.0, 0.0),
-            lp::Vec4::new( 1.0, 2.0, -1.0, 0.0), lp::Vec4::new( 1.0, 2.0,  1.0, 0.0),
+            lp::Vec4::new(-1.0, 0.0, -1.0, 0.0), lp::Vec4::new( 1.0, 0.0, -1.0, 0.0),
+            lp::Vec4::new( 1.0, 2.0, -1.0, 0.0), lp::Vec4::new(-1.0, 2.0, -1.0, 0.0),
         ]);
         scene.indices_array.push(vec![0, 1, 2, 2, 3, 0]);
         scene.mesh_aabbs.push(lp::compute_mesh_aabb(&scene.verts_pos_array[backwall_mesh as usize]));
