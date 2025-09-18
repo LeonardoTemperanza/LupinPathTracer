@@ -51,7 +51,7 @@ struct PushConstants
 }
 
 var<push_constant> constants: PushConstants;
-const max_radiance = 10.0f;
+const max_radiance = 100.0f;
 
 // Override constants
 override MAX_BOUNCES: u32 = 5;
