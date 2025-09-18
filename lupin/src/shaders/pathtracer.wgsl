@@ -619,6 +619,7 @@ fn get_material_point(hit: HitInfo) -> MaterialPoint
         }
         if mat.emission_tex_idx != SENTINEL_IDX {
             emission_sample = textureSampleLevel(textures[mat.emission_tex_idx], samplers[mat_sampler_idx], texcoords, 0.0f).rgb;
+            emission_sample = vec3f_srgb_to_linear(emission_sample);
         }
         if mat.roughness_tex_idx != SENTINEL_IDX {
             let tex_sample = textureSampleLevel(textures[mat.roughness_tex_idx], samplers[mat_sampler_idx], texcoords, 0.0f).rgb;
@@ -1390,13 +1391,14 @@ fn get_vert_color(instance_idx: u32, tri_idx: u32, uv: vec2f) -> vec4f
     return c0*w + c1*uv.x + c2*uv.y;
 }
 
-// Hack to guard from floating point imprecision.
+// Hack to guard from floating point imprecision. Kind of necessary
+// when doing any form of MIS.
 fn clamp_radiance(radiance: vec3f) -> vec3f
 {
     var res = radiance;
     if !vec3f_is_finite(res) { res = vec3f(0.0f); }
 
-    if all(res > vec3f(max_radiance)) {
+    if any(res > vec3f(max_radiance)) {
         res *= max_radiance / max(res.x, max(res.y, res.z));
     }
     return res;
@@ -2318,19 +2320,22 @@ fn mat4x4f_inverse(m: mat4x4f) -> mat4x4f
     return ret;
 }
 
-fn srgb_to_linear(srgb: f32) -> f32
-{
-    if srgb <= 0.04045 {
-        return srgb / 12.92f;
-    } else {
-        return pow((srgb + 0.055f) / (1.0f + 0.055f), 2.4f);
-    }
-}
-
-// TODO: @speed, use vec3b and lerp instead.
 fn vec3f_srgb_to_linear(srgb: vec3f) -> vec3f
 {
-    return vec3f(srgb_to_linear(srgb.x), srgb_to_linear(srgb.y), srgb_to_linear(srgb.z));
+    let cutoff = vec3f(srgb < vec3f(0.04045));
+    let higher = pow((srgb + vec3f(0.055)) / vec3f(1.055), vec3f(2.4));
+    let lower = srgb / vec3f(12.92);
+
+    return mix(higher, lower, cutoff);
+}
+
+fn vec4f_srgb_to_linear(srgb: vec4f) -> vec4f
+{
+    let cutoff = vec4f(srgb < vec4f(0.04045));
+    let higher = pow((srgb + vec4f(0.055)) / vec4f(1.055), vec4f(2.4));
+    let lower = srgb / vec4f(12.92);
+
+    return mix(higher, lower, cutoff);
 }
 
 // From: https://x.com/_Humus_/status/1074973351276371968
