@@ -28,7 +28,6 @@ pub fn build_scene(device: &wgpu::Device, queue: &wgpu::Queue) -> lp::Scene
     // Materials
     let alpha = push_asset(&mut scene.materials, {
         let mut mat = lp::Material::default();
-        mat.mat_type = lp::MaterialType::Matte;
         mat.color = lp::Vec4 { x: 1.0, y: 1.0, z: 1.0, w: 0.3 };
         mat.color_tex_idx = bunny_color;
         mat
@@ -36,7 +35,6 @@ pub fn build_scene(device: &wgpu::Device, queue: &wgpu::Queue) -> lp::Scene
 
     let bunny_matte = push_asset(&mut scene.materials, {
         let mut mat = lp::Material::default();
-        mat.mat_type = lp::MaterialType::Matte;
         mat.color = lp::Vec4 { x: 1.0, y: 1.0, z: 1.0, w: 1.0 };
         mat.color_tex_idx = bunny_color;
         mat
@@ -142,18 +140,18 @@ pub fn build_scene(device: &wgpu::Device, queue: &wgpu::Queue) -> lp::Scene
 
     // Instances
     scene.instances = vec![
-        lp::Instance { transpose_inverse_transform: lp::xform_to_matrix(lp::Vec3 { x: 0.0, y: 0.0, z: 0.0 }, lp::Quat::default(), lp::Vec3::ones()).inverse().transpose(), mesh_idx: 0, mat_idx: bunny_matte, _padding0: 0.0, _padding1: 0.0 },
-        lp::Instance { transpose_inverse_transform: lp::xform_to_matrix(lp::Vec3 { x: 0.0, y: 0.0, z: -4.0 }, lp::Quat::default(), lp::Vec3::ones()).inverse().transpose(), mesh_idx: 0, mat_idx: alpha, _padding0: 0.0, _padding1: 0.0 },
-        lp::Instance { transpose_inverse_transform: lp::xform_to_matrix(lp::Vec3 { x: -2.0, y: 0.0, z: 0.0 }, lp::angle_axis(lp::Vec3::RIGHT, 90.0 * 3.1415 / 180.0), lp::Vec3::ones()).inverse().transpose(), mesh_idx: 0, mat_idx: glossy, _padding0: 0.0, _padding1: 0.0},
-        lp::Instance { transpose_inverse_transform: lp::xform_to_matrix(lp::Vec3 { x: -2.0, y: 0.0, z: -2.0 }, lp::angle_axis(lp::Vec3::UP, 90.0 * 3.1415 / 180.0), lp::Vec3 { x: 0.2, y: 1.0, z: 1.0 }).inverse().transpose(), mesh_idx: 0, mat_idx: glossy, _padding0: 0.0, _padding1: 0. },
-        lp::Instance { transpose_inverse_transform: lp::xform_to_matrix(lp::Vec3 { x: 2.0, y: 0.0, z: 0.0 }, lp::Quat::default(), lp::Vec3 { x: 1.0, y: 1.0, z: 1.0 }).inverse().transpose(), mesh_idx: 0, mat_idx: reflective, _padding0: 0.0, _padding1: 0.0 },
-        lp::Instance { transpose_inverse_transform: lp::xform_to_matrix(lp::Vec3 { x: 2.0, y: 0.0, z: -2.0 }, lp::Quat::default(), lp::Vec3 { x: 1.0, y: 1.0, z: 1.0 }).inverse().transpose(), mesh_idx: 0, mat_idx: transparent, _padding0: 0.0, _padding1: 0.0 },
-        lp::Instance { transpose_inverse_transform: lp::xform_to_matrix(lp::Vec3 { x: 4.0, y: 0.0, z: 0.0 }, lp::Quat::default(), lp::Vec3::ones()).inverse().transpose(), mesh_idx: 0, mat_idx: refractive, _padding0: 0.0, _padding1: 0.0 },
-        lp::Instance { transpose_inverse_transform: lp::xform_to_matrix(lp::Vec3 { x: 4.0, y: 0.0, z: -2.0 }, lp::Quat::default(), lp::Vec3::ones()).inverse().transpose(), mesh_idx: 0, mat_idx: rough_glossy, _padding0: 0.0, _padding1: 0.0 },
-        lp::Instance { transpose_inverse_transform: lp::xform_to_matrix(lp::Vec3 { x: 6.0, y: 0.0, z: 0.0 }, lp::Quat::default(), lp::Vec3::ones()).inverse().transpose(), mesh_idx: 0, mat_idx: rough_reflective, _padding0: 0.0, _padding1: 0.0 },
-        lp::Instance { transpose_inverse_transform: lp::xform_to_matrix(lp::Vec3 { x: 6.0, y: 0.0, z: -2.0 }, lp::Quat::default(), lp::Vec3::ones()).inverse().transpose(), mesh_idx: 0, mat_idx: rough_transparent, _padding0: 0.0, _padding1: 0.0 },
-        //lp::Instance { inv_transform: lp::mat4_inverse(lp::xform_to_matrix(lp::Vec3 { x: 8.0, y: 0.0, z: 0.0 }, lp::Quat::default(), lp::Vec3::ones())), mesh_idx: 0, mat_idx: emissive, _padding0: 0.0, _padding1: 0.0 },
-        //lp::Instance { inv_transform: lp::mat4_inverse(lp::xform_to_matrix(lp::Vec3 { x: 10.0, y: 0.0, z: 0.0 }, lp::Quat::default(), lp::Vec3::ones())), mesh_idx: 0, mat_idx: emissive, _padding0: 0.0, _padding1: 0.0 },
+        lp::Instance { transpose_inverse_transform: lp::xform_to_matrix(lp::Vec3 { x: 0.0, y: 0.0, z: 0.0 }, lp::Quat::default(), lp::Vec3::ones()).inverse().transpose(), mesh_idx: bunny_mesh, mat_idx: bunny_matte, _padding0: 0.0, _padding1: 0.0 },
+        lp::Instance { transpose_inverse_transform: lp::xform_to_matrix(lp::Vec3 { x: 0.0, y: 0.0, z: -4.0 }, lp::Quat::default(), lp::Vec3::ones()).inverse().transpose(), mesh_idx: bunny_mesh, mat_idx: alpha, _padding0: 0.0, _padding1: 0.0 },
+        lp::Instance { transpose_inverse_transform: lp::xform_to_matrix(lp::Vec3 { x: -2.0, y: 0.0, z: 0.0 }, lp::angle_axis(lp::Vec3::RIGHT, 90.0 * 3.1415 / 180.0), lp::Vec3::ones()).inverse().transpose(), mesh_idx: bunny_mesh, mat_idx: glossy, _padding0: 0.0, _padding1: 0.0},
+        lp::Instance { transpose_inverse_transform: lp::xform_to_matrix(lp::Vec3 { x: -2.0, y: 0.0, z: -2.0 }, lp::angle_axis(lp::Vec3::UP, 90.0 * 3.1415 / 180.0), lp::Vec3 { x: 0.2, y: 1.0, z: 1.0 }).inverse().transpose(), mesh_idx: bunny_mesh, mat_idx: glossy, _padding0: 0.0, _padding1: 0. },
+        lp::Instance { transpose_inverse_transform: lp::xform_to_matrix(lp::Vec3 { x: 2.0, y: 0.0, z: 0.0 }, lp::Quat::default(), lp::Vec3 { x: 1.0, y: 1.0, z: 1.0 }).inverse().transpose(), mesh_idx: bunny_mesh, mat_idx: reflective, _padding0: 0.0, _padding1: 0.0 },
+        lp::Instance { transpose_inverse_transform: lp::xform_to_matrix(lp::Vec3 { x: 2.0, y: 0.0, z: -2.0 }, lp::Quat::default(), lp::Vec3 { x: 1.0, y: 1.0, z: 1.0 }).inverse().transpose(), mesh_idx: bunny_mesh, mat_idx: transparent, _padding0: 0.0, _padding1: 0.0 },
+        lp::Instance { transpose_inverse_transform: lp::xform_to_matrix(lp::Vec3 { x: 4.0, y: 0.0, z: 0.0 }, lp::Quat::default(), lp::Vec3::ones()).inverse().transpose(), mesh_idx: bunny_mesh, mat_idx: refractive, _padding0: 0.0, _padding1: 0.0 },
+        lp::Instance { transpose_inverse_transform: lp::xform_to_matrix(lp::Vec3 { x: 4.0, y: 0.0, z: -2.0 }, lp::Quat::default(), lp::Vec3::ones()).inverse().transpose(), mesh_idx: bunny_mesh, mat_idx: rough_glossy, _padding0: 0.0, _padding1: 0.0 },
+        lp::Instance { transpose_inverse_transform: lp::xform_to_matrix(lp::Vec3 { x: 6.0, y: 0.0, z: 0.0 }, lp::Quat::default(), lp::Vec3::ones()).inverse().transpose(), mesh_idx: bunny_mesh, mat_idx: rough_reflective, _padding0: 0.0, _padding1: 0.0 },
+        lp::Instance { transpose_inverse_transform: lp::xform_to_matrix(lp::Vec3 { x: 6.0, y: 0.0, z: -2.0 }, lp::Quat::default(), lp::Vec3::ones()).inverse().transpose(), mesh_idx: bunny_mesh, mat_idx: rough_transparent, _padding0: 0.0, _padding1: 0.0 },
+        //lp::Instance { inv_transform: lp::mat4_inverse(lp::xform_to_matrix(lp::Vec3 { x: 8.0, y: 0.0, z: 0.0 }, lp::Quat::default(), lp::Vec3::ones())), mesh_idx: bunny_mesh, mat_idx: emissive, _padding0: 0.0, _padding1: 0.0 },
+        //lp::Instance { inv_transform: lp::mat4_inverse(lp::xform_to_matrix(lp::Vec3 { x: 10.0, y: 0.0, z: 0.0 }, lp::Quat::default(), lp::Vec3::ones())), mesh_idx: bunny_mesh, mat_idx: emissive, _padding0: 0.0, _padding1: 0.0 },
         // Floor
         lp::Instance { transpose_inverse_transform: lp::xform_to_matrix(lp::Vec3 { x: 0.0, y: -0.01, z: 0.0 }, lp::Quat::default(), lp::Vec3::ones() * 20.0).inverse().transpose(), mesh_idx: 1, mat_idx: white_matte, _padding0: 0.0, _padding1: 0.0 },
         // Studio light
@@ -600,7 +598,6 @@ fn load_mesh_obj<P: AsRef<std::path::Path>>(path: P, scene: &mut lp::SceneCPU) -
 
     let mut mesh_info = lp::MeshInfo::default();
 
-/*
     if mesh.normals.len() > 0
     {
         let mut normals = Vec::<lp::Vec4>::new();
@@ -617,8 +614,8 @@ fn load_mesh_obj<P: AsRef<std::path::Path>>(path: P, scene: &mut lp::SceneCPU) -
             normals.push(normal);
         }
 
-        verts_normal.push(normals);
-        let normals_idx = verts_normal.len() - 1;
+        scene.verts_normal_array.push(normals);
+        let normals_idx = scene.verts_normal_array.len() - 1;
         mesh_info.normals_buf_idx = normals_idx as u32;
     }
 
@@ -636,11 +633,10 @@ fn load_mesh_obj<P: AsRef<std::path::Path>>(path: P, scene: &mut lp::SceneCPU) -
             tex_coords.push(tex_coord);
         }
 
-        verts_texcoord.push(tex_coords);
-        let texcoords_idx = verts_texcoord.len() - 1;
+        scene.verts_texcoord_array.push(tex_coords);
+        let texcoords_idx = scene.verts_texcoord_array.len() - 1;
         mesh_info.texcoords_buf_idx = texcoords_idx as u32;
     };
-*/
 
     scene.mesh_infos.push(mesh_info);
     scene.verts_pos_array.push(mesh_verts_pos);
@@ -693,6 +689,7 @@ pub fn load_scene_yoctogl_v24(path: &std::path::Path, device: &wgpu::Device, que
     let mut num_parsed_textures = 0;
 
     let linear_sampler = push_asset(&mut samplers, lp::create_linear_sampler(device));
+    //let point_sampler = push_asset(&mut samplers, lp::create_point_sampler(device));
 
     let mut scene_cams = Vec::<SceneCamera>::new();
 
@@ -1891,7 +1888,6 @@ fn ply_extract_indices(buf: &[u8], num_faces: u32) -> Vec<u32>
 
         for j in 0..num_indices-3
         {
-            idx0 = idx1;
             idx1 = idx2;
             idx2 = s.read_u32();
             indices.push(idx0);
