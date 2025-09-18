@@ -2025,7 +2025,17 @@ fn sample_lights(pos: vec3f, normal: vec3f, outgoing: vec3f) -> vec3f
         let mesh_idx = instances[instance_idx].mesh_idx;
         let uv = random_tri_uv();
 
-        let incoming = compute_dir_from_point_to_tri(instance_idx, tri_idx, uv, pos);
+        let local_to_world = mat4x3f_inverse(transpose(instances[instance_idx].transpose_inverse_transform));
+
+        // Compute dir from pos to point on tri (with uv).
+        let v0: vec3f = verts_pos_array[mesh_idx].data[indices_array[mesh_idx].data[tri_idx*3 + 0]];
+        let v1: vec3f = verts_pos_array[mesh_idx].data[indices_array[mesh_idx].data[tri_idx*3 + 1]];
+        let v2: vec3f = verts_pos_array[mesh_idx].data[indices_array[mesh_idx].data[tri_idx*3 + 2]];
+        let w = 1.0 - uv.x - uv.y;
+        let local_tri_pos = v0*w + v1*uv.x + v2*uv.y;
+        let world_tri_pos = local_to_world * vec4f(local_tri_pos, 1.0f);
+
+        let incoming = normalize(world_tri_pos - pos);
 
         if !same_hemisphere(up_normal, outgoing, incoming) { return vec3f(0.0f); }
         return incoming;
@@ -2113,44 +2123,6 @@ fn dir_to_env_coords(dir: vec3f, env: u32) -> vec2u
     return vec2u(clamp(u32(uv.x * f32(env_tex_size.x)), 0u, env_tex_size.x - 1),
                  clamp(u32(uv.y * f32(env_tex_size.y)), 0u, env_tex_size.y - 1));
 }
-
-fn compute_dir_from_point_to_tri(instance_idx: u32, tri_idx: u32, uv: vec2f, p: vec3f) -> vec3f
-{
-    let instance = instances[instance_idx];
-    let mesh_idx = instance.mesh_idx;
-
-    let local_p = (vec4f(p, 1.0f) * instance.transpose_inverse_transform).xyz;
-
-    let v0: vec3f = verts_pos_array[mesh_idx].data[indices_array[mesh_idx].data[tri_idx*3 + 0]];
-    let v1: vec3f = verts_pos_array[mesh_idx].data[indices_array[mesh_idx].data[tri_idx*3 + 1]];
-    let v2: vec3f = verts_pos_array[mesh_idx].data[indices_array[mesh_idx].data[tri_idx*3 + 2]];
-    let w = 1.0 - uv.x - uv.y;
-
-    let local_tri_pos = v0*w + v1*uv.x + v2*uv.y;
-
-    let local_dir = normalize(local_tri_pos - local_p);
-    return normalize((vec4f(local_dir, 0.0f) * instance.transpose_inverse_transform).xyz);
-}
-
-/*
-fn compute_tri_normal(instance_idx: u32, tri_idx: u32, uv: vec2f) -> vec3f
-{
-    let instance = instances[instance_idx];
-    let mesh_idx = instance.mesh_idx;
-
-    let test = transpose(instance.transpose_inverse_transform);
-    let inv_trans = mat4x4f(vec4f(test[0], 0.0f), vec4f(test[1], 0.0f), vec4f(test[2], 0.0f), vec4f(test[3], 1.0f));
-
-    let v0 = verts_array[mesh_idx].data[indices_array[mesh_idx].data[tri_idx*3 + 0]];
-    let v1 = verts_array[mesh_idx].data[indices_array[mesh_idx].data[tri_idx*3 + 1]];
-    let v2 = verts_array[mesh_idx].data[indices_array[mesh_idx].data[tri_idx*3 + 2]];
-    let w = 1.0 - uv.x - uv.y;
-
-    let local_normal = normalize(v0.normal*w + v1.normal*uv.x + v2.normal*uv.y);
-    let normal_mat = transpose(mat3x3f(inv_trans[0].xyz, inv_trans[1].xyz, inv_trans[2].xyz));
-    return normalize(normal_mat * local_normal).xyz;
-}
-*/
 
 fn compute_tri_geom_normal(instance_idx: u32, tri_idx: u32) -> vec3f
 {
@@ -2380,8 +2352,8 @@ fn transform_direction_inverse(a: mat3x3f, b: vec3f) -> vec3f
     return normalize(transform_vector_inverse(a, b));
 }
 
-/*
-fn mat3x4f_inverse(a: mat3x4f) -> mat3x4f
+// Inverse of an affine transform (3 rows, 4 columns).
+fn mat4x3f_inverse(a: mat4x3f) -> mat4x3f
 {
     // Inverse of the 3x3 rotation/scale matrix.
     let cross_yz = cross(a[1], a[2]).xyz;
@@ -2391,14 +2363,9 @@ fn mat3x4f_inverse(a: mat3x4f) -> mat3x4f
     let determinant = dot(a[0], cross_yz);
     let minv = adjoint * (1.0f / determinant);
 
-    let t = vec3f();
-    let test = t * a;
-
     // Invert translation (easy to do).
-    return mat3x4f();
-    // return mat3x4f(minv[0], minv[1], minv[2], -(minv * a[3]));
+    return mat4x3f(minv[0], minv[1], minv[2], -(minv * a[3]));
 }
-*/
 
 // Debug visualization
 
