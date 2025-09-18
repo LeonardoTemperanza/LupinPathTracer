@@ -180,3 +180,17 @@ pub fn create_linear_sampler(device: &wgpu::Device) -> wgpu::Sampler
         ..Default::default()
     });
 }
+
+pub fn create_point_sampler(device: &wgpu::Device) -> wgpu::Sampler
+{
+    return device.create_sampler(&wgpu::SamplerDescriptor {
+        label: None,
+        address_mode_u: wgpu::AddressMode::Repeat,
+        address_mode_v: wgpu::AddressMode::Repeat,
+        address_mode_w: wgpu::AddressMode::Repeat,
+        mag_filter: wgpu::FilterMode::Nearest,
+        min_filter: wgpu::FilterMode::Nearest,
+        mipmap_filter: wgpu::FilterMode::Nearest,
+        ..Default::default()
+    });
+}

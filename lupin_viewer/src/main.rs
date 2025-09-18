@@ -219,8 +219,8 @@ impl<'a> AppState<'a>
         let width = window.inner_size().width;
         let height = window.inner_size().height;
 
-        //let (scene, scene_cameras) = (lpl::build_scene(&device, &queue), Vec::<lpl::SceneCamera>::new());
-        let (scene, scene_cameras) = lpl::build_scene_cornell_box(&device, &queue);
+        let (scene, scene_cameras) = (lpl::build_scene(&device, &queue), Vec::<lpl::SceneCamera>::new());
+        //let (scene, scene_cameras) = lpl::build_scene_cornell_box(&device, &queue);
         //let (scene, scene_cameras) = (lpl::build_scene_empty(&device, &queue), Vec::<SceneCamera>::new());
         //let (scene, scene_cameras) = lpl::load_scene_json(std::path::Path::new("yocto-scenes/bathroom1/bathroom1.json"), &device, &queue).unwrap();
 

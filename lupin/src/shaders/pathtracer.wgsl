@@ -51,6 +51,7 @@ struct PushConstants
 }
 
 var<push_constant> constants: PushConstants;
+const max_radiance = 10.0f;
 
 // Override constants
 override MAX_BOUNCES: u32 = 5;
@@ -195,7 +196,7 @@ fn pathtrace_main(@builtin(local_invocation_id) local_id: vec3u, @builtin(global
     {
         let pixel_offset = random_vec2f() - 0.5f;
         let camera_ray = compute_camera_ray(global_id, output_dim, pixel_offset);
-        color += pathtrace(local_id, camera_ray);
+        color += clamp_radiance(pathtrace(local_id, camera_ray));
     }
     color /= f32(SAMPLES_PER_PIXEL);
     color = max(color, vec3f(0.0f));
@@ -516,7 +517,7 @@ fn pathtrace(local_id: vec3u, start_ray: Ray) -> vec3f
         let normal = compute_shading_normal(hit);
 
         // Accumulate emission.
-        radiance += weight * mat_point.emission /** f32(dot(normal, outgoing) >= 0.0f)*/;
+        radiance += weight * mat_point.emission /** f32(dot(normal, outgoing) >= 0.0f) */;
 
         // Compute next direction.
         var incoming = vec3f();
@@ -544,8 +545,6 @@ fn pathtrace(local_id: vec3u, start_ray: Ray) -> vec3f
         else
         {
             incoming = sample_delta(mat_point, normal, outgoing, random_f32());
-            if all(incoming == vec3f(0.0f)) { break; }
-
             weight *= eval_delta(mat_point, normal, outgoing, incoming) /
                       sample_delta_pdf(mat_point, normal, outgoing, incoming);
         }
@@ -677,7 +676,7 @@ fn compute_shading_normal(hit: HitInfo) -> vec3f
     let w = 1.0f - hit.uv.x - hit.uv.y;
     let tri_idx = hit.tri_idx;
 
-    var res = get_vert_normal(hit.instance_idx, hit.tri_idx, hit.uv);
+    var res = get_vert_normal(hit.instance_idx, hit.tri_idx, hit.uv, hit.hit_backside);
 
     if mesh_info.texcoords_buf_idx != SENTINEL_IDX
     {
@@ -1010,7 +1009,7 @@ struct Ray
     inv_dir: vec3f  // Precomputed inverse of the ray direction, for performance.
 }
 
-const RAY_HIT_MIN_DIST: f32 = 0.0001;
+const RAY_ESPILON: f32 = 0.001;
 
 // From: https://tavianator.com/2011/ray_box.html
 // For misses, t = F32_MAX
@@ -1028,9 +1027,9 @@ fn ray_aabb_dst(ray: Ray, aabb_min: vec3f, aabb_max: vec3f)->f32
 }
 
 // From: https://www.shadertoy.com/view/MlGcDz
-// Triangle intersection. Returns { t, u, v }
+// Triangle intersection. Returns { t, u, v, det }
 // For misses, t = F32_MAX
-fn ray_tri_dst(ray: Ray, v0: vec3f, v1: vec3f, v2: vec3f)->vec3f
+fn ray_tri_dst(ray: Ray, v0: vec3f, v1: vec3f, v2: vec3f)->vec4f
 {
     let v1v0 = v1 - v0;
     let v2v0 = v2 - v0;
@@ -1049,8 +1048,10 @@ fn ray_tri_dst(ray: Ray, v0: vec3f, v1: vec3f, v2: vec3f)->vec3f
     let v = d * dot(q, v1v0);
     var t = d * dot(-n, rov0);
 
-    if min(u, v) < 0.0 || (u+v) > 1.0 || t < RAY_HIT_MIN_DIST { t = F32_MAX; }
-    return vec3f(t, u, v);
+    //if det > 0.0f { t = F32_MAX; }
+    //else
+    if min(u, v) < 0.0 || (u+v) > 1.0 || t < RAY_ESPILON { t = F32_MAX; }
+    return vec4f(t, u, v, det);
 }
 
 struct HitInfo
@@ -1065,8 +1066,8 @@ struct HitInfo
 const INVALID_HIT: HitInfo = HitInfo(F32_MAX, vec2f(), 0, 0, false);
 
 const MAX_TLAS_DEPTH: u32 = 20;  // This supports 2^MAX_TLAS_DEPTH objects.
-const TLAS_STACK_SIZE: u32 = (MAX_TLAS_DEPTH + 1) * 8 * 8;  // shared memory
-var<workgroup> tlas_stack: array<u32, TLAS_STACK_SIZE>;     // shared memory
+//const TLAS_STACK_SIZE: u32 = (MAX_TLAS_DEPTH + 1) * 8 * 8;  // shared memory
+//var<workgroup> tlas_stack: array<u32, TLAS_STACK_SIZE>;     // shared memory
 
 struct RayDebugInfo
 {
@@ -1081,19 +1082,18 @@ fn ray_scene_intersection(local_id: vec3u, ray: Ray)->HitInfo
     // Comment/Uncomment to test the performance of shared memory
     // vs local array (registers or global memory)
     // Shared memory is faster (on a GTX 1070).
-    //let offset: u32 = 0u;                                                // local
-    let offset = (local_id.y * 8 + local_id.x) * (MAX_TLAS_DEPTH + 1);  // shared memory
+    let offset: u32 = 0u;                                                // local
+    //let offset = (local_id.y * 8 + local_id.x) * (MAX_TLAS_DEPTH + 1);  // shared memory
 
-    //var tlas_stack: array<u32, 26>;  // local
+    var tlas_stack: array<u32, MAX_TLAS_DEPTH+1>;  // local
     var stack_idx: u32 = 2;
     tlas_stack[0 + offset] = 0u;
     tlas_stack[1 + offset] = 0u;
 
-    // t, u, v
-    var min_hit = vec3f(F32_MAX, 0.0f, 0.0f);
+    // t, u, v, det
+    var min_hit = vec4f(F32_MAX, 0.0f, 0.0f, 0.0f);
     var tri_idx: u32 = 0;
     var instance_idx: u32 = 0;
-    var hit_backside = false;
     while stack_idx > 1
     {
         stack_idx--;
@@ -1116,7 +1116,6 @@ fn ray_scene_intersection(local_id: vec3u, ray: Ray)->HitInfo
                 min_hit      = result.hit;
                 tri_idx      = result.tri_idx;
                 instance_idx = node.instance_idx;
-                hit_backside = false;
             }
         }
         else  // Non-leaf node
@@ -1181,20 +1180,20 @@ fn ray_scene_intersection(local_id: vec3u, ray: Ray)->HitInfo
         hit_info.uv = min_hit.yz;
         hit_info.instance_idx = instance_idx;
         hit_info.tri_idx = tri_idx;
-        hit_info.hit_backside = hit_backside;
+        hit_info.hit_backside = min_hit.w > 0.0f;
     }
 
     return hit_info;
 }
 
 const MAX_BVH_DEPTH: u32 = 25;
-const BVH_STACK_SIZE: u32 = (MAX_BVH_DEPTH + 1) * 8 * 8;  // shared memory
-var<workgroup> bvh_stack: array<u32, BVH_STACK_SIZE>;     // shared memory
+//const BVH_STACK_SIZE: u32 = (MAX_BVH_DEPTH + 1) * 8 * 8;  // shared memory
+//var<workgroup> bvh_stack: array<u32, BVH_STACK_SIZE>;     // shared memory
 
 struct RayMeshIntersectionResult
 {
-    hit: vec3f,  // t, u, v
-    tri_idx: u32
+    hit: vec4f,  // t, u, v, det
+    tri_idx: u32,
 }
 
 // cur_min_hit_dst should be F32_MAX if absent.
@@ -1203,17 +1202,18 @@ fn ray_mesh_intersection(local_id: vec3u, ray: Ray, cur_min_hit_dst: f32, mesh_i
     // Comment/Uncomment to test the performance of shared memory
     // vs local array (registers or global memory)
     // Shared memory is faster (on a GTX 1070).
-    //let offset: u32 = 0u;                                                // local
-    let offset = (local_id.y * 8 + local_id.x) * (MAX_BVH_DEPTH + 1);  // shared memory
+    // NOPE! On full scenes local array is faster, about 2x.
+    let offset: u32 = 0u;                                                // local
+    //let offset = (local_id.y * 8 + local_id.x) * (MAX_BVH_DEPTH + 1);  // shared memory
 
-    //var bvh_stack: array<u32, 26>;  // local
-    var stack_idx: u32 = 2;
+    var bvh_stack: array<u32, MAX_BVH_DEPTH+1>;  // local
+    var stack_idx = 2u;
     bvh_stack[0 + offset] = 0u;
     bvh_stack[1 + offset] = 0u;
 
     // t, u, v
-    var min_hit = vec3f(cur_min_hit_dst, 0.0f, 0.0f);
-    var tri_idx: u32 = 0;
+    var min_hit = vec4f(cur_min_hit_dst, 0.0f, 0.0f, 0.0f);
+    var tri_idx = 0u;
     while stack_idx > 1
     {
         stack_idx--;
@@ -1225,10 +1225,10 @@ fn ray_mesh_intersection(local_id: vec3u, ray: Ray, cur_min_hit_dst: f32, mesh_i
             let tri_count = node.tri_count;
             for(var i: u32 = tri_begin; i < tri_begin + tri_count; i++)
             {
-                let v0: vec3f = verts_pos_array[mesh_idx].data[indices_array[mesh_idx].data[i*3 + 0]];
-                let v1: vec3f = verts_pos_array[mesh_idx].data[indices_array[mesh_idx].data[i*3 + 1]];
-                let v2: vec3f = verts_pos_array[mesh_idx].data[indices_array[mesh_idx].data[i*3 + 2]];
-                let hit: vec3f = ray_tri_dst(ray, v0, v1, v2);
+                let v0 = verts_pos_array[mesh_idx].data[indices_array[mesh_idx].data[i*3 + 0]];
+                let v1 = verts_pos_array[mesh_idx].data[indices_array[mesh_idx].data[i*3 + 1]];
+                let v2 = verts_pos_array[mesh_idx].data[indices_array[mesh_idx].data[i*3 + 2]];
+                let hit = ray_tri_dst(ray, v0, v1, v2);
                 if hit.x < min_hit.x
                 {
                     min_hit = hit;
@@ -1348,24 +1348,31 @@ fn compute_tangents_from_uv(instance_idx: u32, p0: vec3f, p1: vec3f, p2: vec3f, 
 }
 
 // Get extra vertex attributes, with default fallback values if absent.
-fn get_vert_normal(instance_idx: u32, tri_idx: u32, uv: vec2f) -> vec3f
+fn get_vert_normal(instance_idx: u32, tri_idx: u32, uv: vec2f, hit_backside: bool) -> vec3f
 {
     let mesh_idx = instances[instance_idx].mesh_idx;
     let mesh_info = mesh_infos[mesh_idx];
 
-    if mesh_info.normals_buf_idx == SENTINEL_IDX {
-        return compute_tri_geom_normal(instance_idx, tri_idx);
+    var normal = vec3f();
+    if mesh_info.normals_buf_idx == SENTINEL_IDX
+    {
+        normal = compute_tri_geom_normal(instance_idx, tri_idx);
+    }
+    else
+    {
+        let n0 = verts_normal_array[mesh_info.normals_buf_idx].data[indices_array[mesh_idx].data[tri_idx*3 + 0]];
+        let n1 = verts_normal_array[mesh_info.normals_buf_idx].data[indices_array[mesh_idx].data[tri_idx*3 + 1]];
+        let n2 = verts_normal_array[mesh_info.normals_buf_idx].data[indices_array[mesh_idx].data[tri_idx*3 + 2]];
+        let w = 1.0f - uv.x - uv.y;
+        let normal_local = normalize(n0*w + n1*uv.x + n2*uv.y);
+
+        let transform = instances[instance_idx].transpose_inverse_transform;
+        let normal_mat = mat3x3f(transform[0].xyz, transform[1].xyz, transform[2].xyz);
+        normal = normalize(normal_mat * normal_local);
     }
 
-    let n0 = verts_normal_array[mesh_info.normals_buf_idx].data[indices_array[mesh_idx].data[tri_idx*3 + 0]];
-    let n1 = verts_normal_array[mesh_info.normals_buf_idx].data[indices_array[mesh_idx].data[tri_idx*3 + 1]];
-    let n2 = verts_normal_array[mesh_info.normals_buf_idx].data[indices_array[mesh_idx].data[tri_idx*3 + 2]];
-    let w = 1.0f - uv.x - uv.y;
-    let normal_local = normalize(n0*w + n1*uv.x + n2*uv.y);
-
-    let transform = instances[instance_idx].transpose_inverse_transform;
-    let normal_mat = mat3x3f(transform[0].xyz, transform[1].xyz, transform[2].xyz);
-    return normalize(normal_mat * normal_local);
+    //if hit_backside { normal = -normal; }
+    return normal;
 }
 
 fn get_vert_color(instance_idx: u32, tri_idx: u32, uv: vec2f) -> vec4f
@@ -1381,6 +1388,18 @@ fn get_vert_color(instance_idx: u32, tri_idx: u32, uv: vec2f) -> vec4f
     let c2 = verts_color_array[mesh_info.colors_buf_idx].data[indices_array[mesh_idx].data[tri_idx*3 + 2]];
     let w = 1.0f - uv.x - uv.y;
     return c0*w + c1*uv.x + c2*uv.y;
+}
+
+// Hack to guard from floating point imprecision.
+fn clamp_radiance(radiance: vec3f) -> vec3f
+{
+    var res = radiance;
+    if !vec3f_is_finite(res) { res = vec3f(0.0f); }
+
+    if all(res > vec3f(max_radiance)) {
+        res *= max_radiance / max(res.x, max(res.y, res.z));
+    }
+    return res;
 }
 
 //////////////////////////////////////////////
@@ -1463,7 +1482,7 @@ fn sample_refractive(color: vec3f, ior: f32, roughness: f32, normal: vec3f, outg
                      rnl: f32, rn: vec2f) -> vec3f
 {
     let entering  = dot(normal, outgoing) >= 0;
-    let up_normal = select(normal, -normal, dot(normal, outgoing) <= 0.0f);
+    let up_normal = select(-normal, normal, entering);
     let halfway   = sample_microfacet(roughness, up_normal, rn, true);
     // let halfway = sample_microfacet(roughness, up_normal, outgoing, rn, true);
     if rnl < fresnel_dielectric(select(1.0f / ior, ior, entering), halfway, outgoing)
@@ -1608,7 +1627,7 @@ fn eval_refractive(color: vec3f, ior: f32, roughness: f32,
     normal: vec3f, outgoing: vec3f, incoming: vec3f) -> vec3f
 {
     let entering  = dot(normal, outgoing) >= 0;
-    let up_normal = select(normal, -normal, dot(normal, outgoing) <= 0);
+    let up_normal = select(-normal, normal, entering);
     let rel_ior   = select(1.0f / ior, ior, entering);
     if dot(normal, incoming) * dot(normal, outgoing) >= 0
     {
@@ -1733,7 +1752,7 @@ fn sample_refractive_pdf(color: vec3f, ior: f32, roughness: f32, normal: vec3f,
                          outgoing: vec3f, incoming: vec3f) -> f32
 {
     let entering  = dot(normal, outgoing) >= 0;
-    let up_normal = select(normal, -normal, dot(normal, outgoing) <= 0.0f);
+    let up_normal = select(-normal, normal, entering);
     let rel_ior   = select(1.0f / ior, ior, entering);
     if dot(normal, incoming) * dot(normal, outgoing) >= 0.0f
     {
@@ -1829,7 +1848,7 @@ fn sample_refractive_delta(color: vec3f, ior: f32, normal: vec3f, outgoing: vec3
 {
     if abs(ior - 1) < 1e-3 { return -outgoing; }
     let entering  = dot(normal, outgoing) >= 0;
-    let up_normal = select(normal, -normal, dot(normal, outgoing) <= 0.0f);
+    let up_normal = select(-normal, normal, entering);
     let rel_ior   = select(1.0f / ior, ior, entering);
     if rnl < fresnel_dielectric(rel_ior, up_normal, outgoing) {
         return reflect_(outgoing, up_normal);
@@ -1882,7 +1901,7 @@ fn eval_refractive_delta(color: vec3f, ior: f32, normal: vec3f, outgoing: vec3f,
         return select(vec3f(0.0f), vec3f(1.0f), dot(normal, incoming) * dot(normal, outgoing) <= 0);
     }
     let entering  = dot(normal, outgoing) >= 0;
-    let up_normal = select(normal, -normal, dot(normal, outgoing) <= 0.0f);
+    let up_normal = select(-normal, normal, entering);
     let rel_ior   = select(1.0f / ior, ior, entering);
     if dot(normal, incoming) * dot(normal, outgoing) >= 0.0f {
         return vec3f(1.0f) * fresnel_dielectric(rel_ior, up_normal, outgoing);
@@ -1940,7 +1959,7 @@ fn sample_refractive_delta_pdf(color: vec3f, ior: f32, normal: vec3f, outgoing: 
         return select(0.0f, 1.0f, dot(normal, incoming) * dot(normal, outgoing) < 0.0f);
     }
     let entering  = dot(normal, outgoing) >= 0;
-    let up_normal = select(normal, -normal, dot(normal, outgoing) <= 0.0f);
+    let up_normal = select(-normal, normal, entering);
     let rel_ior   = select(1.0f / ior, ior, entering);
     if dot(normal, incoming) * dot(normal, outgoing) >= 0.0f {
         return fresnel_dielectric(rel_ior, up_normal, outgoing);
@@ -1967,7 +1986,7 @@ fn basis_fromz(v: vec3f) -> mat3x3f
     let b    = z.x * z.y * a;
     let x    = vec3f(1.0f + sign * z.x * z.x * a, sign * b, -sign * z.x);
     let y    = vec3f(b, sign + z.y * z.y * a, -z.y);
-    return mat3x3f(x, y, z);  // TODO: Does this do what i think it does?
+    return mat3x3f(x, y, z);
 }
 
 fn copysignf(mag: f32, sgn: f32) -> f32 { return select(mag, -mag, sgn < 0.0f); }
@@ -2016,9 +2035,6 @@ fn sample_lights(pos: vec3f, normal: vec3f, outgoing: vec3f) -> vec3f
         let env_tex_size = textureDimensions(textures[env_tex_idx]);
 
         let sample = sample_env_alias_table(env_idx);
-        let coords = vec2u(sample % env_tex_size.x, sample / env_tex_size.x);
-        let uv = (vec2f(coords) + 0.5f) / vec2f(env_tex_size);
-
         let incoming = env_idx_to_dir(sample, env_idx);
 
         if !same_hemisphere(up_normal, outgoing, incoming) { return vec3f(0.0f); }
@@ -2070,12 +2086,14 @@ fn sample_lights_pdf(local_id: vec3u, pos: vec3f, incoming: vec3f) -> f32
 
         let pixel_coords = dir_to_env_coords(incoming, i);
         let pixel_idx = pixel_coords.y * env_tex_size.x + pixel_coords.x;
+
         let prob = env_alias_tables[i].data[pixel_idx].prob;
+        //let s = sample_environment(incoming, i);
+        //let prob = max(s.x, max(s.y, s.z)) / 3104071.8;
 
         let solid_angle = (2.0f * PI / f32(env_tex_size.x)) *
                           (PI / f32(env_tex_size.y)) *
                           sin(PI * (f32(pixel_coords.y) + 0.5f) / f32(env_tex_size.y));
-
         pdf += prob / solid_angle;
     }
 
