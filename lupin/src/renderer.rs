@@ -250,6 +250,8 @@ pub const MAX_ENVS:      u32 = 10;
 pub const MAX_TEXTURES:  u32 = 15000;
 pub const MAX_SAMPLERS:  u32 = 32;
 pub const NUM_STORAGE_BUFFERS_PER_MESH: u32 = 7;
+// NOTE: Coupled to shader.
+pub const WORKGROUP_SIZE: u32 = 4;
 
 /// This will need to be used when creating the device.
 pub fn get_required_device_spec()->wgpu::DeviceDescriptor<'static>
@@ -525,7 +527,8 @@ pub struct AccumulationParams<'a>
 #[derive(Copy, Clone, Debug)]
 pub struct TileParams
 {
-    pub tile_size: u32,  // In pixels.
+    /// In number of GPU workgroups.
+    pub tile_size: u32,
 }
 
 impl Default for TileParams
@@ -533,7 +536,7 @@ impl Default for TileParams
     fn default() -> Self
     {
         return Self {
-            tile_size: 256,
+            tile_size: 128,
         };
     }
 }
@@ -571,6 +574,10 @@ pub struct PathtraceDesc<'a>
     pub render_target: &'a wgpu::Texture,
     pub resources: &'a PathtraceResources,
     pub accum_params: &'a AccumulationParams<'a>,
+    /// For tiled rendering. This makes it possible to break up a single pathtrace
+    /// call. Useful when your scene is particularly big and you have real-time things
+    /// running in your application (e.g. a GUI). For big scenes this is recommended,
+    /// because if the shader takes too long to execute most OSs will perform a driver reset.
     pub tile_params: &'a TileParams,
     pub camera_params: &'a CameraParams,
     pub camera_transform: Mat3x4,
@@ -612,10 +619,8 @@ pub fn pathtrace_scene(device: &wgpu::Device, queue: &wgpu::Queue, desc: &Pathtr
         pathtracer_push_constants(&mut pass, desc, None, Default::default());
 
         // NOTE: This is tied to the corresponding value in the shader
-        const WORKGROUP_SIZE_X: u32 = 4;
-        const WORKGROUP_SIZE_Y: u32 = 4;
-        let num_workers_x = (render_target.width() + WORKGROUP_SIZE_X - 1) / WORKGROUP_SIZE_X;
-        let num_workers_y = (render_target.height() + WORKGROUP_SIZE_Y - 1) / WORKGROUP_SIZE_Y;
+        let num_workers_x = (render_target.width() + WORKGROUP_SIZE - 1) / WORKGROUP_SIZE;
+        let num_workers_y = (render_target.height() + WORKGROUP_SIZE - 1) / WORKGROUP_SIZE;
         pass.dispatch_workgroups(num_workers_x, num_workers_y, 1);
     }
 
@@ -623,14 +628,14 @@ pub fn pathtrace_scene(device: &wgpu::Device, queue: &wgpu::Queue, desc: &Pathtr
 }
 
 /// Partial pathtracing. This makes it possible to break up a single pathtrace
-/// call. Useful when the scene is particularly big and you have real-time things
+/// call. Useful when your scene is particularly big and you have real-time things
 /// running in your application (e.g. a GUI).
 pub fn pathtrace_scene_tiles(device: &wgpu::Device, queue: &wgpu::Queue, desc: &PathtraceDesc, tile_counter: &mut u32, tiles_to_render: u32)
 {
-    let num_tiles_x = (desc.render_target.width().max(1) - 1)  / desc.tile_params.tile_size + 1;
-    let num_tiles_y = (desc.render_target.height().max(1) - 1) / desc.tile_params.tile_size + 1;
+    let num_tiles_x = (desc.render_target.width().max(1) - 1)  / (desc.tile_params.tile_size * WORKGROUP_SIZE) + 1;
+    let num_tiles_y = (desc.render_target.height().max(1) - 1) / (desc.tile_params.tile_size * WORKGROUP_SIZE) + 1;
     let total_tiles = num_tiles_x * num_tiles_y;
-    assert!(/* *tile_counter >= 0 && */ *tile_counter < total_tiles, "tile_counter out of range!");
+    assert!(*tile_counter < total_tiles, "tile_counter out of range!");
 
     // TODO: Check format and usage of render target params and others.
 
@@ -660,16 +665,17 @@ pub fn pathtrace_scene_tiles(device: &wgpu::Device, queue: &wgpu::Queue, desc: &
 
         for i in *tile_counter..u32::min(*tile_counter + tiles_to_render, total_tiles)
         {
+            let offset_x = (i % num_tiles_x) * tile_size * WORKGROUP_SIZE;
+            let offset_y = (i / num_tiles_x) * tile_size * WORKGROUP_SIZE;
+
             let mut push_constants = PushConstants::default();
-            push_constants.id_offset = [ (i % num_tiles_x) * tile_size, (i / num_tiles_x) * tile_size, ];
+            push_constants.id_offset = [ offset_x, offset_y ];
             push_constants.accum_counter = accum_params.accum_counter;
             pathtracer_push_constants(&mut pass, desc, None, push_constants);
 
             // NOTE: This is tied to the corresponding value in the shader
-            const WORKGROUP_SIZE_X: u32 = 4;
-            const WORKGROUP_SIZE_Y: u32 = 4;
-            let num_workers_x = (tile_size + WORKGROUP_SIZE_X - 1) / WORKGROUP_SIZE_X;
-            let num_workers_y = (tile_size + WORKGROUP_SIZE_Y - 1) / WORKGROUP_SIZE_Y;
+            let num_workers_x = tile_size; //u32::max(tile_size, 1);
+            let num_workers_y = tile_size; //u32::max(tile_size, 1);
             pass.dispatch_workgroups(num_workers_x, num_workers_y, 1);
         }
     }
