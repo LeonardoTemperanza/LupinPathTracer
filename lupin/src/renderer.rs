@@ -536,7 +536,7 @@ impl Default for TileParams
     fn default() -> Self
     {
         return Self {
-            tile_size: 128,
+            tile_size: 100,
         };
     }
 }
@@ -632,8 +632,10 @@ pub fn pathtrace_scene(device: &wgpu::Device, queue: &wgpu::Queue, desc: &Pathtr
 /// running in your application (e.g. a GUI).
 pub fn pathtrace_scene_tiles(device: &wgpu::Device, queue: &wgpu::Queue, desc: &PathtraceDesc, tile_counter: &mut u32, tiles_to_render: u32)
 {
-    let num_tiles_x = (desc.render_target.width().max(1) - 1)  / (desc.tile_params.tile_size * WORKGROUP_SIZE) + 1;
-    let num_tiles_y = (desc.render_target.height().max(1) - 1) / (desc.tile_params.tile_size * WORKGROUP_SIZE) + 1;
+    let target_width = desc.render_target.width();
+    let target_height = desc.render_target.height();
+    let num_tiles_x = (u32::max(1, target_width) - 1)  / (desc.tile_params.tile_size * WORKGROUP_SIZE) + 1;
+    let num_tiles_y = (u32::max(1, target_height) - 1) / (desc.tile_params.tile_size * WORKGROUP_SIZE) + 1;
     let total_tiles = num_tiles_x * num_tiles_y;
     assert!(*tile_counter < total_tiles, "tile_counter out of range!");
 
@@ -673,9 +675,8 @@ pub fn pathtrace_scene_tiles(device: &wgpu::Device, queue: &wgpu::Queue, desc: &
             push_constants.accum_counter = accum_params.accum_counter;
             pathtracer_push_constants(&mut pass, desc, None, push_constants);
 
-            // NOTE: This is tied to the corresponding value in the shader
-            let num_workers_x = tile_size; //u32::max(tile_size, 1);
-            let num_workers_y = tile_size; //u32::max(tile_size, 1);
+            let num_workers_x = u32::min(tile_size, (target_width - offset_x) / WORKGROUP_SIZE);
+            let num_workers_y = u32::min(tile_size, (target_height - offset_y) / WORKGROUP_SIZE);
             pass.dispatch_workgroups(num_workers_x, num_workers_y, 1);
         }
     }

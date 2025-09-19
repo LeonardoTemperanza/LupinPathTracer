@@ -539,7 +539,7 @@ impl<'a> AppState<'a>
                             tile_params: &Default::default(),
                             camera_params: &self.camera_params,
                             camera_transform: self.cam_transform,
-                        }, &mut self.tile_idx, 3);
+                        }, &mut self.tile_idx, 1);
                     }
 
                     lp::tonemap_and_fit_aspect(&self.device, &self.queue, &lp::TonemapDesc {
