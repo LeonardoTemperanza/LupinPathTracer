@@ -453,8 +453,8 @@ impl<'a> AppState<'a>
                         prev_frame: Some(&self.output_textures[self.output_tex_back]),
                         accum_counter: self.accum_counter,
                     },
-                    tile_params: &Default::default(),
-                    camera_params: &self.camera_params,
+                    tile_params: Some(&Default::default()),
+                    camera_params: self.camera_params,
                     camera_transform: self.cam_transform,
                 });
                 lp::blit_texture_and_fit_aspect(&self.device, &self.queue, &self.tonemap_resources,
@@ -470,8 +470,8 @@ impl<'a> AppState<'a>
                         prev_frame: Some(&self.output_textures[self.output_tex_back]),
                         accum_counter: self.accum_counter,
                     },
-                    tile_params: &Default::default(),
-                    camera_params: &self.camera_params,
+                    tile_params: Some(&Default::default()),
+                    camera_params: self.camera_params,
                     camera_transform: self.cam_transform,
                 });
                 lp::blit_texture_and_fit_aspect(&self.device, &self.queue, &self.tonemap_resources,
@@ -491,8 +491,8 @@ impl<'a> AppState<'a>
                                 prev_frame: Some(&self.output_textures[self.output_tex_back]),
                                 accum_counter: self.accum_counter,
                             },
-                            tile_params: &Default::default(),
-                            camera_params: &self.camera_params,
+                            tile_params: Some(&Default::default()),
+                            camera_params: self.camera_params,
                             camera_transform: self.cam_transform,
                         });
                         lp::blit_texture_and_fit_aspect(&self.device, &self.queue, &self.tonemap_resources,
@@ -510,10 +510,10 @@ impl<'a> AppState<'a>
                                     prev_frame: Some(&self.output_textures[self.output_tex_back]),
                                     accum_counter: self.accum_counter,
                                 },
-                                tile_params: &Default::default(),
-                                camera_params: &self.camera_params,
+                                tile_params: None,
+                                camera_params: self.camera_params,
                                 camera_transform: self.cam_transform,
-                            });
+                            }, None);
                         }
 
                         lp::tonemap_and_fit_aspect(&self.device, &self.queue, &lp::TonemapDesc {
@@ -528,7 +528,7 @@ impl<'a> AppState<'a>
                 {
                     if self.accum_counter < self.max_accums
                     {
-                        lp::pathtrace_scene_tiles(&self.device, &self.queue, &lp::PathtraceDesc {
+                        lp::pathtrace_scene(&self.device, &self.queue, &lp::PathtraceDesc {
                             scene: &self.scene,
                             render_target: &self.output_textures[self.output_tex_front],
                             resources: &self.pathtrace_resources,
@@ -536,10 +536,10 @@ impl<'a> AppState<'a>
                                 prev_frame: Some(&self.output_textures[self.output_tex_back]),
                                 accum_counter: self.accum_counter,
                             },
-                            tile_params: &Default::default(),
-                            camera_params: &self.camera_params,
+                            tile_params: Some(&Default::default()),
+                            camera_params: self.camera_params,
                             camera_transform: self.cam_transform,
-                        }, &mut self.tile_idx, 1);
+                        }, Some(&mut self.tile_idx));
                     }
 
                     lp::tonemap_and_fit_aspect(&self.device, &self.queue, &lp::TonemapDesc {
@@ -589,8 +589,8 @@ impl<'a> AppState<'a>
                         prev_frame: Some(&self.output_textures[self.output_tex_back]),
                         accum_counter: self.accum_counter,
                     },
-                    tile_params: &Default::default(),
-                    camera_params: &self.camera_params,
+                    tile_params: Some(&Default::default()),
+                    camera_params: self.camera_params,
                     camera_transform: self.cam_transform,
                 }, &debug_desc);
 
@@ -614,8 +614,8 @@ impl<'a> AppState<'a>
                         prev_frame: Some(&self.output_textures[self.output_tex_back]),
                         accum_counter: self.accum_counter,
                     },
-                    tile_params: &Default::default(),
-                    camera_params: &self.camera_params,
+                    tile_params: Some(&Default::default()),
+                    camera_params: self.camera_params,
                     camera_transform: self.cam_transform,
                 }, &debug_desc);
 
@@ -639,8 +639,8 @@ impl<'a> AppState<'a>
                         prev_frame: Some(&self.output_textures[self.output_tex_back]),
                         accum_counter: self.accum_counter,
                     },
-                    tile_params: &Default::default(),
-                    camera_params: &self.camera_params,
+                    tile_params: Some(&Default::default()),
+                    camera_params: self.camera_params,
                     camera_transform: self.cam_transform,
                 }, &debug_desc);
 

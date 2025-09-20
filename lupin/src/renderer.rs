@@ -578,76 +578,24 @@ pub struct PathtraceDesc<'a>
     /// call. Useful when your scene is particularly big and you have real-time things
     /// running in your application (e.g. a GUI). For big scenes this is recommended,
     /// because if the shader takes too long to execute most OSs will perform a driver reset.
-    pub tile_params: &'a TileParams,
-    pub camera_params: &'a CameraParams,
+    pub tile_params: Option<&'a TileParams>,
+    pub camera_params: CameraParams,
     pub camera_transform: Mat3x4,
 }
 
-/// Pathtrace the entire image. For big scenes pathtrace_scene_tiles is recommended, because
-/// if the shader takes too long to execute most OSs will perform a driver reset.
-pub fn pathtrace_scene(device: &wgpu::Device, queue: &wgpu::Queue, desc: &PathtraceDesc)
+/// * `tile_idx` - Current tile. Will be updated by the function. If absent, 0 will be used instead.
+pub fn pathtrace_scene(device: &wgpu::Device, queue: &wgpu::Queue, desc: &PathtraceDesc, tile_idx: Option<&mut u32>)
 {
-    let num_tiles_x = (desc.render_target.width().max(1) - 1)  / desc.tile_params.tile_size + 1;
-    let num_tiles_y = (desc.render_target.height().max(1) - 1) / desc.tile_params.tile_size + 1;
-    let total_tiles = num_tiles_x * num_tiles_y;
-
     // TODO: Check format and usage of render target params and others.
 
     let scene = desc.scene;
     let render_target = desc.render_target;
-    let resources = desc.resources;
-    let accum_params = desc.accum_params;
-    let camera_params = desc.camera_params;
-    let camera_transform = desc.camera_transform;
-
-    let scene_bindgroup = create_pathtracer_scene_bindgroup(device, queue, resources, scene);
-    let settings_bindgroup = create_pathtracer_settings_bindgroup(device, queue, resources, accum_params.prev_frame);
-    let output_bindgroup = create_pathtracer_output_bindgroup(device, queue, resources, Some(render_target), None, None);
-
-    let mut encoder = device.create_command_encoder(&Default::default());
-    {
-        let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-            label: None,
-            timestamp_writes: None
-        });
-
-        pass.set_pipeline(&resources.pipeline);
-        pass.set_bind_group(0, &scene_bindgroup, &[]);
-        pass.set_bind_group(1, &settings_bindgroup, &[]);
-        pass.set_bind_group(2, &output_bindgroup, &[]);
-
-        pathtracer_push_constants(&mut pass, desc, None, Default::default());
-
-        // NOTE: This is tied to the corresponding value in the shader
-        let num_workers_x = (render_target.width() + WORKGROUP_SIZE - 1) / WORKGROUP_SIZE;
-        let num_workers_y = (render_target.height() + WORKGROUP_SIZE - 1) / WORKGROUP_SIZE;
-        pass.dispatch_workgroups(num_workers_x, num_workers_y, 1);
-    }
-
-    queue.submit(Some(encoder.finish()));
-}
-
-/// Partial pathtracing. This makes it possible to break up a single pathtrace
-/// call. Useful when your scene is particularly big and you have real-time things
-/// running in your application (e.g. a GUI).
-pub fn pathtrace_scene_tiles(device: &wgpu::Device, queue: &wgpu::Queue, desc: &PathtraceDesc, tile_counter: &mut u32, tiles_to_render: u32)
-{
     let target_width = desc.render_target.width();
     let target_height = desc.render_target.height();
-    let num_tiles_x = (u32::max(1, target_width) - 1)  / (desc.tile_params.tile_size * WORKGROUP_SIZE) + 1;
-    let num_tiles_y = (u32::max(1, target_height) - 1) / (desc.tile_params.tile_size * WORKGROUP_SIZE) + 1;
-    let total_tiles = num_tiles_x * num_tiles_y;
-    assert!(*tile_counter < total_tiles, "tile_counter out of range!");
-
-    // TODO: Check format and usage of render target params and others.
-
-    let scene = desc.scene;
-    let render_target = desc.render_target;
     let resources = desc.resources;
     let accum_params = desc.accum_params;
     let camera_params = desc.camera_params;
     let camera_transform = desc.camera_transform;
-    let tile_size = desc.tile_params.tile_size;
 
     let scene_bindgroup = create_pathtracer_scene_bindgroup(device, queue, resources, scene);
     let settings_bindgroup = create_pathtracer_settings_bindgroup(device, queue, resources, accum_params.prev_frame);
@@ -665,26 +613,47 @@ pub fn pathtrace_scene_tiles(device: &wgpu::Device, queue: &wgpu::Queue, desc: &
         pass.set_bind_group(1, &settings_bindgroup, &[]);
         pass.set_bind_group(2, &output_bindgroup, &[]);
 
-        for i in *tile_counter..u32::min(*tile_counter + tiles_to_render, total_tiles)
+        if let Some(tile_params) = desc.tile_params  // Tiled rendering.
         {
-            let offset_x = (i % num_tiles_x) * tile_size * WORKGROUP_SIZE;
-            let offset_y = (i / num_tiles_x) * tile_size * WORKGROUP_SIZE;
+            let tile_counter = tile_idx.as_ref().map_or(0, |v| **v);
+            let tiles_to_render = 1;
+            let tile_size = tile_params.tile_size;
+            let num_tiles_x = (u32::max(1, target_width) - 1)  / (tile_size * WORKGROUP_SIZE) + 1;
+            let num_tiles_y = (u32::max(1, target_height) - 1) / (tile_size * WORKGROUP_SIZE) + 1;
+            let total_tiles = num_tiles_x * num_tiles_y;
+            assert!(tile_counter < total_tiles, "tile_counter out of range!");
 
-            let mut push_constants = PushConstants::default();
-            push_constants.id_offset = [ offset_x, offset_y ];
-            push_constants.accum_counter = accum_params.accum_counter;
-            pathtracer_push_constants(&mut pass, desc, None, push_constants);
+            for i in tile_counter..u32::min(tile_counter + tiles_to_render, total_tiles)
+            {
+                let offset_x = (i % num_tiles_x) * tile_size * WORKGROUP_SIZE;
+                let offset_y = (i / num_tiles_x) * tile_size * WORKGROUP_SIZE;
 
-            let num_workers_x = u32::min(tile_size, (target_width - offset_x) / WORKGROUP_SIZE);
-            let num_workers_y = u32::min(tile_size, (target_height - offset_y) / WORKGROUP_SIZE);
+                let mut push_constants = PushConstants::default();
+                push_constants.id_offset = [ offset_x, offset_y ];
+                push_constants.accum_counter = accum_params.accum_counter;
+                pathtracer_push_constants(&mut pass, desc, None, push_constants);
+
+                let num_workers_x = u32::min(tile_size, (target_width - offset_x) / WORKGROUP_SIZE);
+                let num_workers_y = u32::min(tile_size, (target_height - offset_y) / WORKGROUP_SIZE);
+                pass.dispatch_workgroups(num_workers_x, num_workers_y, 1);
+            }
+
+            // Advance tile_counter.
+            if let Some(tile_idx) = tile_idx {
+                *tile_idx = u32::min(*tile_idx + tiles_to_render, total_tiles) % (total_tiles);
+            }
+        }
+        else  // Full-screen rendering.
+        {
+            pathtracer_push_constants(&mut pass, desc, None, Default::default());
+
+            let num_workers_x = (render_target.width() + WORKGROUP_SIZE - 1) / WORKGROUP_SIZE;
+            let num_workers_y = (render_target.height() + WORKGROUP_SIZE - 1) / WORKGROUP_SIZE;
             pass.dispatch_workgroups(num_workers_x, num_workers_y, 1);
         }
     }
 
     queue.submit(Some(encoder.finish()));
-
-    // Advance tile_counter.
-    *tile_counter = u32::min(*tile_counter + tiles_to_render, total_tiles) % (total_tiles);
 }
 
 pub enum DebugVizType

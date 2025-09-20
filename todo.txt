@@ -6,12 +6,11 @@ UI
     make RAY_EPSILON and MAX_RADIANCE adjustable
 pathtracer
     add RAY_EPSILON and MAX_RADIANCE to override constants (or push constants?)
-    change tiles so that they're specified in workgroup size instead
-    don't dispatch workgroups if they're not going to be used
     homogenize the different visualization types (add tiling for those, etc.)
     Albedo doesn't account for alpha.
 
+    denoising (oidn)
     look into how to integrate ray queries
 loader
     improve json parser
-    make all scenes loadable
+    make all scenes loadable ------- IMPORTANT
