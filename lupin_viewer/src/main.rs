@@ -176,6 +176,8 @@ pub struct AppState<'a>
     pub keep_aspect_ratio: bool,
     pub ui_panel_width: u32,
     pub cam_speed_multiplier: f32,
+    pub tiled_rendering: bool,
+    pub tile_params: lp::TileParams,
 
     // Camera
     pub cam_pos: lp::Vec3,
@@ -298,6 +300,8 @@ impl<'a> AppState<'a>
             keep_aspect_ratio: true,
             ui_panel_width: 0,
             cam_speed_multiplier: 1.0,
+            tiled_rendering: true,
+            tile_params: Default::default(),
 
             // Camera
             cam_pos: Default::default(),
@@ -440,40 +444,33 @@ impl<'a> AppState<'a>
             h: swapchain.size().height as f32,
         };
 
-        // TODO: @cleanup PathtraceDesc is repeated many times.
+        let desc_template = lp::PathtraceDesc {
+            scene: &self.scene,
+            render_target: &self.output_textures[self.output_tex_front],
+            resources: &self.pathtrace_resources,
+            accum_params: &lp::AccumulationParams {
+                prev_frame: Some(&self.output_textures[self.output_tex_back]),
+                accum_counter: self.accum_counter,
+            },
+            tile_params: Some(&self.tile_params),
+            camera_params: self.camera_params,
+            camera_transform: self.cam_transform,
+        };
         match self.render_type
         {
             RenderType::Albedo =>
             {
-                lp::raycast_albedo(&self.device, &self.queue, &lp::PathtraceDesc {
-                    scene: &self.scene,
-                    render_target: &self.output_rgba8_unorm,
-                    resources: &self.pathtrace_resources,
-                    accum_params: &lp::AccumulationParams {
-                        prev_frame: Some(&self.output_textures[self.output_tex_back]),
-                        accum_counter: self.accum_counter,
-                    },
-                    tile_params: Some(&Default::default()),
-                    camera_params: self.camera_params,
-                    camera_transform: self.cam_transform,
-                });
+                let mut desc = desc_template;
+                desc.render_target = &self.output_rgba8_unorm;
+                lp::raycast_albedo(&self.device, &self.queue, &desc);
                 lp::blit_texture_and_fit_aspect(&self.device, &self.queue, &self.tonemap_resources,
                                                 &self.output_rgba8_unorm, &swapchain, Some(viewport));
             }
             RenderType::Normals =>
             {
-                lp::raycast_normals(&self.device, &self.queue, &lp::PathtraceDesc {
-                    scene: &self.scene,
-                    render_target: &self.output_rgba8_snorm,
-                    resources: &self.pathtrace_resources,
-                    accum_params: &lp::AccumulationParams {
-                        prev_frame: Some(&self.output_textures[self.output_tex_back]),
-                        accum_counter: self.accum_counter,
-                    },
-                    tile_params: Some(&Default::default()),
-                    camera_params: self.camera_params,
-                    camera_transform: self.cam_transform,
-                });
+                let mut desc = desc_template;
+                desc.render_target = &self.output_rgba8_snorm;
+                lp::raycast_normals(&self.device, &self.queue, &desc);
                 lp::blit_texture_and_fit_aspect(&self.device, &self.queue, &self.tonemap_resources,
                                                 &self.output_rgba8_snorm, &swapchain, Some(viewport));
             }
@@ -483,18 +480,9 @@ impl<'a> AppState<'a>
                 {
                     if self.show_normals_when_moving
                     {
-                        lp::raycast_normals(&self.device, &self.queue, &lp::PathtraceDesc {
-                            scene: &self.scene,
-                            render_target: &self.output_rgba8_snorm,
-                            resources: &self.pathtrace_resources,
-                            accum_params: &lp::AccumulationParams {
-                                prev_frame: Some(&self.output_textures[self.output_tex_back]),
-                                accum_counter: self.accum_counter,
-                            },
-                            tile_params: Some(&Default::default()),
-                            camera_params: self.camera_params,
-                            camera_transform: self.cam_transform,
-                        });
+                        let mut desc = desc_template;
+                        desc.render_target = &self.output_rgba8_snorm;
+                        lp::raycast_normals(&self.device, &self.queue, &desc);
                         lp::blit_texture_and_fit_aspect(&self.device, &self.queue, &self.tonemap_resources,
                                                         &self.output_rgba8_snorm, &swapchain, Some(viewport));
                     }
@@ -502,18 +490,9 @@ impl<'a> AppState<'a>
                     {
                         if self.accum_counter < self.max_accums
                         {
-                            lp::pathtrace_scene(&self.device, &self.queue, &lp::PathtraceDesc {
-                                scene: &self.scene,
-                                render_target: &self.output_textures[self.output_tex_front],
-                                resources: &self.pathtrace_resources,
-                                accum_params: &lp::AccumulationParams {
-                                    prev_frame: Some(&self.output_textures[self.output_tex_back]),
-                                    accum_counter: self.accum_counter,
-                                },
-                                tile_params: None,
-                                camera_params: self.camera_params,
-                                camera_transform: self.cam_transform,
-                            }, None);
+                            let mut desc = desc_template;
+                            desc.tile_params = None;
+                            lp::pathtrace_scene(&self.device, &self.queue, &desc, None);
                         }
 
                         lp::tonemap_and_fit_aspect(&self.device, &self.queue, &lp::TonemapDesc {
@@ -526,20 +505,15 @@ impl<'a> AppState<'a>
                 }
                 else
                 {
-                    if self.accum_counter < self.max_accums
+                    if !self.tiled_rendering
                     {
-                        lp::pathtrace_scene(&self.device, &self.queue, &lp::PathtraceDesc {
-                            scene: &self.scene,
-                            render_target: &self.output_textures[self.output_tex_front],
-                            resources: &self.pathtrace_resources,
-                            accum_params: &lp::AccumulationParams {
-                                prev_frame: Some(&self.output_textures[self.output_tex_back]),
-                                accum_counter: self.accum_counter,
-                            },
-                            tile_params: Some(&Default::default()),
-                            camera_params: self.camera_params,
-                            camera_transform: self.cam_transform,
-                        }, Some(&mut self.tile_idx));
+                        let mut desc = desc_template;
+                        desc.tile_params = None;
+                        lp::pathtrace_scene(&self.device, &self.queue, &desc, None);
+                    }
+                    else if self.accum_counter < self.max_accums
+                    {
+                        lp::pathtrace_scene(&self.device, &self.queue, &desc_template, Some(&mut self.tile_idx));
                     }
 
                     lp::tonemap_and_fit_aspect(&self.device, &self.queue, &lp::TonemapDesc {
@@ -581,19 +555,9 @@ impl<'a> AppState<'a>
                     first_hit_only: !self.debug_viz.multibounce,
                 };
 
-                lp::pathtrace_scene_debug(&self.device, &self.queue, &lp::PathtraceDesc {
-                    scene: &self.scene,
-                    render_target: &self.output_rgba8_unorm,
-                    resources: &self.pathtrace_resources,
-                    accum_params: &lp::AccumulationParams {
-                        prev_frame: Some(&self.output_textures[self.output_tex_back]),
-                        accum_counter: self.accum_counter,
-                    },
-                    tile_params: Some(&Default::default()),
-                    camera_params: self.camera_params,
-                    camera_transform: self.cam_transform,
-                }, &debug_desc);
-
+                let mut desc = desc_template;
+                desc.render_target = &self.output_rgba8_unorm;
+                lp::pathtrace_scene_debug(&self.device, &self.queue, &desc, &debug_desc);
                 lp::blit_texture_and_fit_aspect(&self.device, &self.queue, &self.tonemap_resources,
                                                &self.output_rgba8_unorm, &swapchain, Some(viewport));
             }
@@ -606,19 +570,9 @@ impl<'a> AppState<'a>
                     first_hit_only: !self.debug_viz.multibounce,
                 };
 
-                lp::pathtrace_scene_debug(&self.device, &self.queue, &lp::PathtraceDesc {
-                    scene: &self.scene,
-                    render_target: &self.output_rgba8_unorm,
-                    resources: &self.pathtrace_resources,
-                    accum_params: &lp::AccumulationParams {
-                        prev_frame: Some(&self.output_textures[self.output_tex_back]),
-                        accum_counter: self.accum_counter,
-                    },
-                    tile_params: Some(&Default::default()),
-                    camera_params: self.camera_params,
-                    camera_transform: self.cam_transform,
-                }, &debug_desc);
-
+                let mut desc = desc_template;
+                desc.render_target = &self.output_rgba8_unorm;
+                lp::pathtrace_scene_debug(&self.device, &self.queue, &desc, &debug_desc);
                 lp::blit_texture_and_fit_aspect(&self.device, &self.queue, &self.tonemap_resources,
                                               &self.output_rgba8_unorm, &swapchain, Some(viewport));
             }
@@ -631,19 +585,9 @@ impl<'a> AppState<'a>
                     first_hit_only: !self.debug_viz.multibounce,
                 };
 
-                lp::pathtrace_scene_debug(&self.device, &self.queue, &lp::PathtraceDesc {
-                    scene: &self.scene,
-                    render_target: &self.output_rgba8_unorm,
-                    resources: &self.pathtrace_resources,
-                    accum_params: &lp::AccumulationParams {
-                        prev_frame: Some(&self.output_textures[self.output_tex_back]),
-                        accum_counter: self.accum_counter,
-                    },
-                    tile_params: Some(&Default::default()),
-                    camera_params: self.camera_params,
-                    camera_transform: self.cam_transform,
-                }, &debug_desc);
-
+                let mut desc = desc_template;
+                desc.render_target = &self.output_rgba8_unorm;
+                lp::pathtrace_scene_debug(&self.device, &self.queue, &desc, &debug_desc);
                 lp::blit_texture_and_fit_aspect(&self.device, &self.queue, &self.tonemap_resources,
                                                 &self.output_rgba8_unorm, &swapchain, Some(viewport));
             }
@@ -825,6 +769,17 @@ impl<'a> AppState<'a>
                         ui.label("Max accumulations");
                     });
 
+                    let response = ui.checkbox(&mut self.tiled_rendering, "Tiled Rendering");
+                    if response.changed() { self.reset_accumulation(); }
+                    if self.tiled_rendering
+                    {
+                        ui.horizontal(|ui| {
+                            let response = ui.add(egui::DragValue::new(&mut self.tile_params.tile_size).range(10..=512).speed(1));
+                            if response.changed() { self.reset_accumulation(); }
+                            ui.label("Tile size");
+                        });
+                    }
+
                     egui::CollapsingHeader::new("Stats").id_salt("stats_pathtrace").show(ui, |ui| {
                         ui.label(format!("Iteration: {:?}", self.accum_counter));
                         ui.label(format!("Tile: {:?}", self.tile_idx));
@@ -898,6 +853,9 @@ impl<'a> AppState<'a>
                             {
                                 (self.scene, self.scene_cameras) = res;
                                 self.reset_accumulation();
+                                if !self.scene_cameras.is_empty() {
+                                    self.switch_to_cam(0);
+                                }
                             }
                             else
                             {

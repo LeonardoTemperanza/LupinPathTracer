@@ -568,6 +568,7 @@ impl Default for CameraParams
     }
 }
 
+#[derive(Clone, Copy)]
 pub struct PathtraceDesc<'a>
 {
     pub scene: &'a Scene,
