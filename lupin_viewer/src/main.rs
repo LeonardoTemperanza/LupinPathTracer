@@ -1030,6 +1030,7 @@ impl<'a> AppState<'a>
                 ui.selectable_value(&mut self.render_type, RenderType::Falsecolor(MatType), "Material Type");
                 ui.selectable_value(&mut self.render_type, RenderType::Falsecolor(IsDelta), "Is Delta");
                 ui.selectable_value(&mut self.render_type, RenderType::Falsecolor(Instance), "Instance");
+                ui.selectable_value(&mut self.render_type, RenderType::Falsecolor(Tri), "Triangle");
                 ui.selectable_value(&mut self.render_type, RenderType::Debug(BVHTriChecks), "Triangle checks (Debug)");
                 ui.selectable_value(&mut self.render_type, RenderType::Debug(BVHAABBChecks), "Box checks (Debug)");
                 ui.selectable_value(&mut self.render_type, RenderType::Debug(NumBounces), "Number of bounces (Debug)");
