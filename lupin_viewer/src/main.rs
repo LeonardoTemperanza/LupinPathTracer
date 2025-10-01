@@ -144,7 +144,7 @@ fn to_tonemap_kind(op: lp::TonemapOperator) -> TonemapKind
     }
 }
 
-#[derive(Default, Debug, Copy, Clone)]
+#[derive(Default, Debug, Copy, Clone, PartialEq)]
 pub struct DebugVizInfo
 {
     pub multibounce: bool,
@@ -705,6 +705,8 @@ impl<'a> AppState<'a>
                     let rt_changed = self.ui_render_type(ui);
                     if rt_changed { self.reset_accumulation(); }
 
+                    let old_debug_desc = self.debug_viz;
+
                     match self.render_type
                     {
                         RenderType::Pathtrace =>
@@ -740,6 +742,10 @@ impl<'a> AppState<'a>
                             self.ui_heatmap_params(ui);
                         }
                         _ => {}
+                    }
+
+                    if self.debug_viz != old_debug_desc {
+                        self.reset_accumulation();
                     }
 
                     ui.horizontal(|ui| {
