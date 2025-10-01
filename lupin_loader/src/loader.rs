@@ -1036,9 +1036,9 @@ pub fn load_scene_yoctogl_v24(path: &std::path::Path, device: &wgpu::Device, que
     for info in &tex_load_infos
     {
         // TODO: This is not needed anymore because we do the srgb->linear conversion in the shader.
-        let mut uses = 0;
-        if info.used_for_color { uses += 1; }
-        if info.used_for_data  { uses += 1; }
+        //let mut uses = 0;
+        //if info.used_for_color { uses += 1; }
+        //if info.used_for_data  { uses += 1; }
 
         let path = std::path::Path::new(&info.path);
         let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
@@ -1058,9 +1058,9 @@ pub fn load_scene_yoctogl_v24(path: &std::path::Path, device: &wgpu::Device, que
         if env.emission_tex_idx == lp::SENTINEL_IDX { continue; }
         let info = &tex_load_infos[env.emission_tex_idx as usize];
 
-        let mut uses = 0;
-        if info.used_for_color { uses += 1; }
-        if info.used_for_data  { uses += 1; }
+        //let mut uses = 0;
+        //if info.used_for_color { uses += 1; }
+        //if info.used_for_data  { uses += 1; }
         // This shouldn't happen but it does, I guess we'll just load in SRGB.
         // assert!(uses <= 1);
 
@@ -1737,7 +1737,7 @@ fn load_mesh_ply(path: &std::path::Path, scene: &mut lp::SceneCPU) -> Result<u32
     if nx_buf.present || ny_buf.present || nz_buf.present
     {
         assert!(nx_buf.present && ny_buf.present && nz_buf.present);
-        let mut normals = buf_extract_vec3_as_vec4(p.buf, &nx_buf, &ny_buf, &nz_buf, num_verts);
+        let normals = buf_extract_vec3_as_vec4(p.buf, &nx_buf, &ny_buf, &nz_buf, num_verts);
 
         //for normal in &mut normals {
         //    *normal = lp::normalize_vec3(normal);
@@ -1878,7 +1878,7 @@ fn ply_extract_indices(buf: &[u8], num_faces: u32) -> Vec<u32>
         let num_indices = s.read_u8();
         assert!(num_indices >= 3);
 
-        let mut idx0 = s.read_u32();
+        let     idx0 = s.read_u32();
         let mut idx1 = s.read_u32();
         let mut idx2 = s.read_u32();
 
@@ -2023,7 +2023,7 @@ pub fn download_texture(device: &wgpu::Device, queue: &wgpu::Queue, texture: &wg
         let buffer_slice = buffer.slice(..);
         let (tx, rx) = std::sync::mpsc::channel();
         buffer_slice.map_async(wgpu::MapMode::Read, move |res| tx.send(res).unwrap());
-        device.poll(wgpu::PollType::Wait);
+        device.poll(wgpu::PollType::Wait).expect("Device wait failed.");
         rx.recv().unwrap().unwrap();
     }
 
@@ -2071,7 +2071,7 @@ pub fn download_texture(device: &wgpu::Device, queue: &wgpu::Queue, texture: &wg
     return pixels;
 }
 
-struct TextureCPU
+pub struct TextureCPU
 {
     pub data: Vec::<lp::Vec4>,
     pub width: u32,
@@ -2106,6 +2106,7 @@ pub fn load_texture_cpu(path: &std::path::Path) -> Result<TextureCPU, image::Ima
 
 /// Detects file format from its extension. Supports rgba8_unorm, rgba16f.
 /// NOTE: Currently drops alpha.
+// TODO: This breaks with some texture dimensions... Probably a wgpu thing.
 pub fn save_texture(device: &wgpu::Device, queue: &wgpu::Queue, path: &std::path::Path, texture: &wgpu::Texture) -> Result<(), image::ImageError>
 {
     let format = texture.format();
@@ -2157,7 +2158,7 @@ pub fn save_texture(device: &wgpu::Device, queue: &wgpu::Queue, path: &std::path
     // Map synchronously.
     let buffer_slice = output_buffer.slice(..);
     buffer_slice.map_async(wgpu::MapMode::Read, |_| {});
-    device.poll(wgpu::PollType::Wait);
+    device.poll(wgpu::PollType::Wait).expect("Device wait failed.");
 
     let data = buffer_slice.get_mapped_range();
 

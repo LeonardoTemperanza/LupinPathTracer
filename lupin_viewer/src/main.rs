@@ -118,16 +118,12 @@ fn main()
     }).unwrap();
 }
 
-#[derive(Default, Debug, PartialEq, Clone, Copy)]
+#[derive(Debug, PartialEq, Clone, Copy)]
 pub enum RenderType
 {
-    #[default]
-    Albedo,
-    Normals,
     Pathtrace,
-    TriChecks,
-    AABBChecks,
-    NumBounces,
+    Falsecolor(lp::FalsecolorType),
+    Debug(lp::DebugVizType),
 }
 
 #[derive(PartialEq, Eq, Clone, Copy, Debug)]
@@ -164,6 +160,7 @@ pub struct AppState<'a>
 
     // UI
     pub render_type: RenderType,
+    pub pathtrace_type: lp::PathtraceType,
     pub max_accums: u32,
     pub max_bounces: u32,
     pub samples_per_pixel: u32,
@@ -192,16 +189,14 @@ pub struct AppState<'a>
     pub selected_cam: i32,  // If -1, no cam is selected (free-roam).
 
     // Textures
-    pub output_textures: [wgpu::Texture; 2],
-    pub output_rgba8_unorm: wgpu::Texture,
-    pub output_rgba8_snorm: wgpu::Texture,
+    pub output_hdr: DoubleBufferedTexture,
+    pub output_rgba8_unorm: DoubleBufferedTexture,
+    pub output_rgba8_snorm: DoubleBufferedTexture,
 
     // Saved state for accumulation
     pub prev_cam_transform: lp::Mat3x4,
     pub accum_counter: u32,
     pub tile_idx: u32,
-    pub output_tex_front: usize,
-    pub output_tex_back: usize,
 }
 
 impl<'a> AppState<'a>
@@ -226,38 +221,20 @@ impl<'a> AppState<'a>
         //let (scene, scene_cameras) = (lpl::build_scene_empty(&device, &queue), Vec::<SceneCamera>::new());
         //let (scene, scene_cameras) = lpl::load_scene_json(std::path::Path::new("yocto-scenes/bathroom1/bathroom1.json"), &device, &queue).unwrap();
 
-        let output_textures = [
-            device.create_texture(&wgpu::TextureDescriptor {
-                label: None,
-                size: wgpu::Extent3d { width: width as u32, height: height as u32, depth_or_array_layers: 1 },
-                mip_level_count: 1,
-                sample_count: 1,
-                dimension: wgpu::TextureDimension::D2,
-                format: wgpu::TextureFormat::Rgba16Float,
-                usage: wgpu::TextureUsages::STORAGE_BINDING |
-                       wgpu::TextureUsages::TEXTURE_BINDING |
-                       wgpu::TextureUsages::COPY_SRC |
-                       wgpu::TextureUsages::COPY_DST |
-                       wgpu::TextureUsages::RENDER_ATTACHMENT,
-                view_formats: &[]
-            }),
-            device.create_texture(&wgpu::TextureDescriptor {
-                label: None,
-                size: wgpu::Extent3d { width: width as u32, height: height as u32, depth_or_array_layers: 1 },
-                mip_level_count: 1,
-                sample_count: 1,
-                dimension: wgpu::TextureDimension::D2,
-                format: wgpu::TextureFormat::Rgba16Float,
-                usage: wgpu::TextureUsages::STORAGE_BINDING |
-                       wgpu::TextureUsages::TEXTURE_BINDING |
-                       wgpu::TextureUsages::COPY_SRC |
-                       wgpu::TextureUsages::COPY_DST |
-                       wgpu::TextureUsages::RENDER_ATTACHMENT,
-                view_formats: &[]
-            })
-        ];
+        let output_hdr = DoubleBufferedTexture::create(device, &wgpu::TextureDescriptor {
+            label: None,
+            size: wgpu::Extent3d { width: width as u32, height: height as u32, depth_or_array_layers: 1 },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba16Float,
+            usage: wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::TEXTURE_BINDING |
+                   wgpu::TextureUsages::COPY_SRC | wgpu::TextureUsages::COPY_DST |
+                   wgpu::TextureUsages::RENDER_ATTACHMENT,
+            view_formats: &[]
+        });
 
-        let output_rgba8_unorm = device.create_texture(&wgpu::TextureDescriptor {
+        let output_rgba8_unorm = DoubleBufferedTexture::create(device, &wgpu::TextureDescriptor {
             label: None,
             size: wgpu::Extent3d { width: width as u32, height: height as u32, depth_or_array_layers: 1 },
             mip_level_count: 1,
@@ -265,10 +242,11 @@ impl<'a> AppState<'a>
             dimension: wgpu::TextureDimension::D2,
             format: wgpu::TextureFormat::Rgba8Unorm,
             usage: wgpu::TextureUsages::STORAGE_BINDING |
-                   wgpu::TextureUsages::TEXTURE_BINDING,
+                   wgpu::TextureUsages::TEXTURE_BINDING |
+                   wgpu::TextureUsages::RENDER_ATTACHMENT,
             view_formats: &[]
         });
-        let output_rgba8_snorm = device.create_texture(&wgpu::TextureDescriptor {
+        let output_rgba8_snorm = DoubleBufferedTexture::create(device, &wgpu::TextureDescriptor {
             label: None,
             size: wgpu::Extent3d { width: width as u32, height: height as u32, depth_or_array_layers: 1 },
             mip_level_count: 1,
@@ -286,7 +264,8 @@ impl<'a> AppState<'a>
             window: window,
 
             // UI
-            render_type: Default::default(),
+            render_type: RenderType::Falsecolor(lp::FalsecolorType::Albedo),
+            pathtrace_type: Default::default(),
             samples_per_pixel: DEFAULT_SAMPLES_PER_PIXEL,
             max_bounces: DEFAULT_MAX_BOUNCES,
             max_accums: 200,
@@ -315,7 +294,7 @@ impl<'a> AppState<'a>
             scene_cameras,
 
             // Textures
-            output_textures,
+            output_hdr,
             output_rgba8_unorm,
             output_rgba8_snorm,
 
@@ -323,8 +302,6 @@ impl<'a> AppState<'a>
             prev_cam_transform: lp::Mat3x4::zeros(),
             accum_counter: 0,
             tile_idx: 0,
-            output_tex_front: 1,
-            output_tex_back: 0,
         };
     }
 
@@ -444,152 +421,177 @@ impl<'a> AppState<'a>
             h: swapchain.size().height as f32,
         };
 
-        let desc_template = lp::PathtraceDesc {
+        let desc_hdr = lp::PathtraceDesc {
             scene: &self.scene,
-            render_target: &self.output_textures[self.output_tex_front],
+            render_target: self.output_hdr.front(),
             resources: &self.pathtrace_resources,
             accum_params: &lp::AccumulationParams {
-                prev_frame: Some(&self.output_textures[self.output_tex_back]),
+                prev_frame: Some(self.output_hdr.back()),
                 accum_counter: self.accum_counter,
             },
             tile_params: Some(&self.tile_params),
             camera_params: self.camera_params,
             camera_transform: self.cam_transform,
         };
+        let desc_unorm = lp::PathtraceDesc {
+            scene: &self.scene,
+            render_target: self.output_rgba8_unorm.front(),
+            resources: &self.pathtrace_resources,
+            accum_params: &lp::AccumulationParams {
+                prev_frame: Some(self.output_rgba8_unorm.back()),
+                accum_counter: self.accum_counter,
+            },
+            tile_params: Some(&self.tile_params),
+            camera_params: self.camera_params,
+            camera_transform: self.cam_transform,
+        };
+        let desc_snorm = lp::PathtraceDesc {
+            scene: &self.scene,
+            render_target: self.output_rgba8_snorm.front(),
+            resources: &self.pathtrace_resources,
+            accum_params: &lp::AccumulationParams {
+                prev_frame: Some(self.output_rgba8_snorm.back()),
+                accum_counter: self.accum_counter,
+            },
+            tile_params: Some(&self.tile_params),
+            camera_params: self.camera_params,
+            camera_transform: self.cam_transform,
+        };
+
+        let mut desc_hdr_no_tiles = desc_hdr;
+        desc_hdr_no_tiles.tile_params = None;
+
+        let tonemap_desc = lp::TonemapDesc {
+            resources: &self.tonemap_resources,
+            hdr_texture: self.output_hdr.front(),
+            render_target: &swapchain,
+            tonemap_params: &self.tonemap_params
+        };
+
+        let mut using_hdr = false;
+        let mut using_rgba8unorm = false;
+        let mut using_rgba8snorm = false;
+
         match self.render_type
         {
-            RenderType::Albedo =>
+            RenderType::Falsecolor(falsecolor_type) =>
             {
-                let mut desc = desc_template;
-                desc.render_target = &self.output_rgba8_unorm;
-                lp::raycast_albedo(&self.device, &self.queue, &desc);
-                lp::blit_texture_and_fit_aspect(&self.device, &self.queue, &self.tonemap_resources,
-                                                &self.output_rgba8_unorm, &swapchain, Some(viewport));
-            }
-            RenderType::Normals =>
-            {
-                let mut desc = desc_template;
-                desc.render_target = &self.output_rgba8_snorm;
-                lp::raycast_normals(&self.device, &self.queue, &desc);
-                lp::blit_texture_and_fit_aspect(&self.device, &self.queue, &self.tonemap_resources,
-                                                &self.output_rgba8_snorm, &swapchain, Some(viewport));
+                if falsecolor_type == lp::FalsecolorType::Normals
+                {
+                    lp::pathtrace_scene_falsecolor(self.device, self.queue, &desc_snorm, falsecolor_type, Some(&mut self.tile_idx));
+                    lp::blit_texture_and_fit_aspect(&self.device, &self.queue, &self.tonemap_resources,
+                                                    &self.output_rgba8_snorm.front(), &swapchain, Some(viewport));
+
+                    using_rgba8snorm = true;
+                }
+                else
+                {
+                    lp::pathtrace_scene_falsecolor(self.device, self.queue, &desc_unorm, falsecolor_type, Some(&mut self.tile_idx));
+                    lp::blit_texture_and_fit_aspect(&self.device, &self.queue, &self.tonemap_resources,
+                                                    &self.output_rgba8_unorm.front(), &swapchain, Some(viewport));
+
+                    using_rgba8unorm = true;
+                }
             }
             RenderType::Pathtrace =>
             {
+                if self.controlling_camera && self.show_normals_when_moving {
+                    using_rgba8unorm = true;
+                } else {
+                    using_hdr = true;
+                }
+
                 if self.controlling_camera
                 {
                     if self.show_normals_when_moving
                     {
-                        let mut desc = desc_template;
-                        desc.render_target = &self.output_rgba8_snorm;
-                        lp::raycast_normals(&self.device, &self.queue, &desc);
-                        lp::blit_texture_and_fit_aspect(&self.device, &self.queue, &self.tonemap_resources,
-                                                        &self.output_rgba8_snorm, &swapchain, Some(viewport));
+                        //let mut desc = desc_template;
+                        //desc.render_target = &self.output_rgba8_snorm;
+                        //lp::raycast_normals(&self.device, &self.queue, &desc);
+                        //lp::blit_texture_and_fit_aspect(&self.device, &self.queue, &self.tonemap_resources,
+                        //                                &self.output_rgba8_snorm, &swapchain, Some(viewport));
                     }
                     else
                     {
                         if self.accum_counter < self.max_accums
                         {
-                            let mut desc = desc_template;
-                            desc.tile_params = None;
-                            lp::pathtrace_scene(&self.device, &self.queue, &desc, None);
+                            lp::pathtrace_scene(&self.device, &self.queue, &desc_hdr_no_tiles, self.pathtrace_type, None);
                         }
 
-                        lp::tonemap_and_fit_aspect(&self.device, &self.queue, &lp::TonemapDesc {
-                            resources: &self.tonemap_resources,
-                            hdr_texture: &self.output_textures[self.output_tex_front],
-                            render_target: &swapchain,
-                            tonemap_params: &self.tonemap_params,
-                        }, Some(viewport));
+                        lp::tonemap_and_fit_aspect(&self.device, &self.queue, &tonemap_desc, Some(viewport));
                     }
                 }
                 else
                 {
                     if !self.tiled_rendering
                     {
-                        let mut desc = desc_template;
+                        let mut desc = desc_hdr;
                         desc.tile_params = None;
-                        lp::pathtrace_scene(&self.device, &self.queue, &desc, None);
+                        lp::pathtrace_scene(&self.device, &self.queue, &desc, self.pathtrace_type, None);
                     }
                     else if self.accum_counter < self.max_accums
                     {
-                        lp::pathtrace_scene(&self.device, &self.queue, &desc_template, Some(&mut self.tile_idx));
+                        lp::pathtrace_scene(&self.device, &self.queue, &desc_hdr, self.pathtrace_type, Some(&mut self.tile_idx));
                     }
 
-                    lp::tonemap_and_fit_aspect(&self.device, &self.queue, &lp::TonemapDesc {
-                        resources: &self.tonemap_resources,
-                        hdr_texture: &self.output_textures[self.output_tex_front],
-                        render_target: &swapchain,
-                        tonemap_params: &self.tonemap_params,
-                    }, Some(viewport));
-                }
+                    lp::tonemap_and_fit_aspect(&self.device, &self.queue, &tonemap_desc, Some(viewport));
 
-                // Swap output textures
-                if self.accum_counter < self.max_accums
-                {
-                    if self.tile_idx == 0
+                    // Swap output textures
+                    if self.accum_counter < self.max_accums
                     {
-                        let tmp = self.output_tex_back;
-                        self.output_tex_back  = self.output_tex_front;
-                        self.output_tex_front = tmp;
+                        if self.tile_idx == 0
+                        {
+                            // Copy the contents of the front buffer onto the back buffer,
+                            // so that when we swap buffers it won't be as jarring.
+                            self.output_hdr.copy_front_to_back(self.device, self.queue);
+                            self.output_hdr.flip();
 
-                        // Copy the contents of the front buffer onto the back buffer,
-                        // so that when we swap buffers it won't be as jarring.
-                        let blitter = wgpu::util::TextureBlitter::new(self.device, wgpu::TextureFormat::Rgba16Float);
-                        let mut encoder = self.device.create_command_encoder(&Default::default());
-                        let src = self.output_textures[self.output_tex_back ].create_view(&Default::default());
-                        let dst = self.output_textures[self.output_tex_front].create_view(&Default::default());
-                        blitter.copy(self.device, &mut encoder, &src, &dst);
-                        self.queue.submit(Some(encoder.finish()));
-
-                        self.accum_counter = (self.accum_counter + 1).min(self.max_accums);
+                            self.accum_counter = (self.accum_counter + 1).min(self.max_accums);
+                        }
                     }
                 }
             }
-            RenderType::TriChecks =>
+            RenderType::Debug(debug_viz_type) =>
             {
                 let debug_desc = lp::DebugVizDesc {
-                    viz_type: lp::DebugVizType::BVHTriChecks,
+                    viz_type: debug_viz_type,
                     heatmap_min: self.debug_viz.heatmap_min,
                     heatmap_max: self.debug_viz.heatmap_max,
                     first_hit_only: !self.debug_viz.multibounce,
                 };
 
-                let mut desc = desc_template;
-                desc.render_target = &self.output_rgba8_unorm;
-                lp::pathtrace_scene_debug(&self.device, &self.queue, &desc, &debug_desc);
+                lp::pathtrace_scene_debug(&self.device, &self.queue, &desc_unorm, &debug_desc, Some(&mut self.tile_idx));
                 lp::blit_texture_and_fit_aspect(&self.device, &self.queue, &self.tonemap_resources,
-                                               &self.output_rgba8_unorm, &swapchain, Some(viewport));
+                                                self.output_rgba8_unorm.front(), &swapchain, Some(viewport));
+
+                using_rgba8unorm = true;
             }
-            RenderType::AABBChecks =>
-            {
-                let debug_desc = lp::DebugVizDesc {
-                    viz_type: lp::DebugVizType::BVHAABBChecks,
-                    heatmap_min: self.debug_viz.heatmap_min,
-                    heatmap_max: self.debug_viz.heatmap_max,
-                    first_hit_only: !self.debug_viz.multibounce,
-                };
+        }
 
-                let mut desc = desc_template;
-                desc.render_target = &self.output_rgba8_unorm;
-                lp::pathtrace_scene_debug(&self.device, &self.queue, &desc, &debug_desc);
-                lp::blit_texture_and_fit_aspect(&self.device, &self.queue, &self.tonemap_resources,
-                                              &self.output_rgba8_unorm, &swapchain, Some(viewport));
-            }
-            RenderType::NumBounces =>
+        // Swap output textures
+        if self.accum_counter < self.max_accums
+        {
+            if self.tile_idx == 0
             {
-                let debug_desc = lp::DebugVizDesc {
-                    viz_type: lp::DebugVizType::NumBounces,
-                    heatmap_min: self.debug_viz.heatmap_min,
-                    heatmap_max: self.debug_viz.heatmap_max,
-                    first_hit_only: !self.debug_viz.multibounce,
-                };
+                // Copy the contents of the front buffer onto the back buffer,
+                // so that when we swap buffers it won't be as jarring.
+                if using_hdr
+                {
+                    self.output_hdr.copy_front_to_back(self.device, self.queue);
+                    self.output_hdr.flip();
+                }
+                else if using_rgba8unorm
+                {
+                    self.output_rgba8_unorm.copy_front_to_back(self.device, self.queue);
+                    self.output_rgba8_unorm.flip();
+                }
+                else if using_rgba8snorm
+                {
+                    //self.output_rgba8_snorm.copy_front_to_back(self.device, self.queue);
+                    self.output_rgba8_snorm.flip();
+                }
 
-                let mut desc = desc_template;
-                desc.render_target = &self.output_rgba8_unorm;
-                lp::pathtrace_scene_debug(&self.device, &self.queue, &desc, &debug_desc);
-                lp::blit_texture_and_fit_aspect(&self.device, &self.queue, &self.tonemap_resources,
-                                                &self.output_rgba8_unorm, &swapchain, Some(viewport));
+                self.accum_counter = (self.accum_counter + 1).min(self.max_accums);
             }
         }
     }
@@ -678,10 +680,9 @@ impl<'a> AppState<'a>
     fn resize_output_textures(&mut self, new_width: u32, new_height: u32)
     {
         self.reset_accumulation();
-        resize_texture(&self.device, &mut self.output_textures[0], new_width, new_height);
-        resize_texture(&self.device, &mut self.output_textures[1], new_width, new_height);
-        resize_texture(&self.device, &mut self.output_rgba8_unorm, new_width, new_height);
-        resize_texture(&self.device, &mut self.output_rgba8_snorm, new_width, new_height);
+        self.output_hdr.resize(self.device, new_width, new_height);
+        self.output_rgba8_unorm.resize(self.device, new_width, new_height);
+        self.output_rgba8_snorm.resize(self.device, new_width, new_height);
     }
 
     fn update_ui(&mut self, egui_ctx: &egui::Context)
@@ -699,44 +700,46 @@ impl<'a> AppState<'a>
                 ui.heading("Visualization:");
                 ui.add_space(4.0);
                 {
-                    let changed = self.ui_render_type(ui);
+                    let pt_changed = self.ui_pathtrace_type(ui);
+                    if pt_changed { self.reset_accumulation(); }
+                    let rt_changed = self.ui_render_type(ui);
+                    if rt_changed { self.reset_accumulation(); }
 
                     match self.render_type
                     {
-                        RenderType::Albedo => {}
-                        RenderType::Normals => {}
                         RenderType::Pathtrace =>
                         {
                             ui.checkbox(&mut self.show_normals_when_moving, "Show normals when moving");
                         }
-                        RenderType::TriChecks =>
+                        RenderType::Debug(lp::DebugVizType::BVHTriChecks) =>
                         {
                             ui.checkbox(&mut self.debug_viz.multibounce, "Multiple bounces");
 
-                            if changed {
+                            if rt_changed {
                                 (self.debug_viz.heatmap_min, self.debug_viz.heatmap_max) = default_tri_check_heatmap_params();
                             }
 
                             self.ui_heatmap_params(ui);
                         }
-                        RenderType::AABBChecks =>
+                        RenderType::Debug(lp::DebugVizType::BVHAABBChecks) =>
                         {
                             ui.checkbox(&mut self.debug_viz.multibounce, "Multiple bounces");
 
-                            if changed {
+                            if rt_changed {
                                 (self.debug_viz.heatmap_min, self.debug_viz.heatmap_max) = default_aabb_check_heatmap_params();
                             }
 
                             self.ui_heatmap_params(ui);
                         }
-                        RenderType::NumBounces =>
+                        RenderType::Debug(lp::DebugVizType::NumBounces) =>
                         {
-                            if changed {
+                            if rt_changed {
                                 (self.debug_viz.heatmap_min, self.debug_viz.heatmap_max) = default_num_bounces_heatmap_params();
                             }
 
                             self.ui_heatmap_params(ui);
                         }
+                        _ => {}
                     }
 
                     ui.horizontal(|ui| {
@@ -903,8 +906,8 @@ impl<'a> AppState<'a>
                 ui.heading("Result image:");
                 ui.add_space(4.0);
                 {
-                    let mut output_res_x = self.output_textures[self.output_tex_back].size().width;
-                    let mut output_res_y = self.output_textures[self.output_tex_back].size().height;
+                    let mut output_res_x = self.output_hdr.back().size().width;
+                    let mut output_res_y = self.output_hdr.back().size().height;
                     let old_output_res_x = output_res_x;
                     let old_output_res_y = output_res_y;
 
@@ -942,7 +945,7 @@ impl<'a> AppState<'a>
                         {
                             let res = lpl::save_texture(self.device, self.queue,
                                                         &path,
-                                                        &self.output_textures[self.output_tex_front]);
+                                                        self.output_hdr.front());
                             if let Err(err) = res {
                                 println!("Failed to save texture: {}", err);
                             }
@@ -956,8 +959,8 @@ impl<'a> AppState<'a>
                             .add_filter("LDR Image", &["png", "jpg", "jpeg"])
                             .save_file()
                         {
-                            let width  = self.output_textures[self.output_tex_back].size().width;
-                            let height = self.output_textures[self.output_tex_back].size().height;
+                            let width  = self.output_hdr.back().size().width;
+                            let height = self.output_hdr.back().size().height;
 
                             // Create texture
                             let tmp_tex = self.device.create_texture(&wgpu::TextureDescriptor {
@@ -976,7 +979,7 @@ impl<'a> AppState<'a>
 
                             lp::tonemap_and_fit_aspect(&self.device, &self.queue, &lp::TonemapDesc {
                                 resources: &self.tonemap_resources,
-                                hdr_texture: &self.output_textures[self.output_tex_front],
+                                hdr_texture: self.output_hdr.front(),
                                 render_target: &tmp_tex,
                                 tonemap_params: &self.tonemap_params,
                             }, None);
@@ -1002,18 +1005,44 @@ impl<'a> AppState<'a>
 
     fn ui_render_type(&mut self, ui: &mut egui::Ui) -> bool
     {
+        use lp::FalsecolorType::*;
+        use lp::DebugVizType::*;
+
         let old_render_type = self.render_type;
         egui::ComboBox::from_label("Visualization")
             .selected_text(format!("{:?}", self.render_type))
             .show_ui(ui, |ui| {
-                ui.selectable_value(&mut self.render_type, RenderType::Albedo, "Albedo");
-                ui.selectable_value(&mut self.render_type, RenderType::Normals, "Normals");
                 ui.selectable_value(&mut self.render_type, RenderType::Pathtrace, "Pathtrace");
-                ui.selectable_value(&mut self.render_type, RenderType::TriChecks, "Triangle checks (Debug)");
-                ui.selectable_value(&mut self.render_type, RenderType::AABBChecks, "Box checks (Debug)");
-                ui.selectable_value(&mut self.render_type, RenderType::NumBounces, "Number of bounces (Debug)");
+                ui.selectable_value(&mut self.render_type, RenderType::Falsecolor(Albedo), "Albedo");
+                ui.selectable_value(&mut self.render_type, RenderType::Falsecolor(Normals), "Normals");
+                ui.selectable_value(&mut self.render_type, RenderType::Falsecolor(NormalsUnsigned), "Normals (Unsigned)");
+                ui.selectable_value(&mut self.render_type, RenderType::Falsecolor(FrontFacing), "Front Facing");
+                ui.selectable_value(&mut self.render_type, RenderType::Falsecolor(Emission), "Emission");
+                ui.selectable_value(&mut self.render_type, RenderType::Falsecolor(Roughness), "Roughness");
+                ui.selectable_value(&mut self.render_type, RenderType::Falsecolor(Metallic), "Metallic");
+                ui.selectable_value(&mut self.render_type, RenderType::Falsecolor(Opacity), "Opacity");
+                ui.selectable_value(&mut self.render_type, RenderType::Falsecolor(MatType), "Material Type");
+                ui.selectable_value(&mut self.render_type, RenderType::Falsecolor(IsDelta), "Is Delta");
+                ui.selectable_value(&mut self.render_type, RenderType::Falsecolor(Instance), "Instance");
+                ui.selectable_value(&mut self.render_type, RenderType::Debug(BVHTriChecks), "Triangle checks (Debug)");
+                ui.selectable_value(&mut self.render_type, RenderType::Debug(BVHAABBChecks), "Box checks (Debug)");
+                ui.selectable_value(&mut self.render_type, RenderType::Debug(NumBounces), "Number of bounces (Debug)");
             });
         return self.render_type != old_render_type;
+    }
+
+    fn ui_pathtrace_type(&mut self, ui: &mut egui::Ui) -> bool
+    {
+        let old_pathtrace_type = self.pathtrace_type;
+        egui::ComboBox::from_label("Pathtrace Algorithm")
+            .selected_text(format!("{:?}", self.pathtrace_type))
+            .show_ui(ui, |ui| {
+                ui.selectable_value(&mut self.pathtrace_type, lp::PathtraceType::Standard, "Standard");
+                ui.selectable_value(&mut self.pathtrace_type, lp::PathtraceType::MIS, "MIS");
+                ui.selectable_value(&mut self.pathtrace_type, lp::PathtraceType::Naive, "Naive");
+                ui.selectable_value(&mut self.pathtrace_type, lp::PathtraceType::Direct, "Direct");
+            });
+        return self.pathtrace_type != old_pathtrace_type;
     }
 
     fn ui_heatmap_params(&mut self, ui: &mut egui::Ui)
@@ -1185,4 +1214,68 @@ fn ui_min_max(ui: &mut egui::Ui, string: &str, min: &mut f32, max: &mut f32, ran
                 .speed(0.1),
         );
     });
+}
+
+pub struct DoubleBufferedTexture
+{
+    pub textures: [wgpu::Texture; 2],
+    pub front_idx: usize,
+    pub back_idx: usize
+}
+
+impl<'a> DoubleBufferedTexture
+{
+    pub fn create(device: &wgpu::Device, desc: &wgpu::TextureDescriptor) -> DoubleBufferedTexture
+    {
+        return Self {
+            textures: [
+                device.create_texture(desc),
+                device.create_texture(desc),
+            ],
+            front_idx: 0,
+            back_idx: 1,
+        }
+    }
+
+    pub fn front(&'a self) -> &'a wgpu::Texture
+    {
+        return &self.textures[self.front_idx];
+    }
+
+    pub fn back(&'a self) -> &'a wgpu::Texture
+    {
+        return &self.textures[self.back_idx];
+    }
+
+    pub fn copy_front_to_back(&self, device: &wgpu::Device, queue: &wgpu::Queue)
+    {
+        assert!(self.textures[0].format() == self.textures[1].format());
+
+        let format = self.textures[0].format();
+        let blitter = wgpu::util::TextureBlitter::new(device, format);
+        let mut encoder = device.create_command_encoder(&Default::default());
+        let src = self.textures[self.front_idx].create_view(&Default::default());
+        let dst = self.textures[self.back_idx].create_view(&Default::default());
+        blitter.copy(device, &mut encoder, &src, &dst);
+        queue.submit(Some(encoder.finish()));
+    }
+
+    pub fn flip(&mut self)
+    {
+        let tmp = self.front_idx;
+        self.front_idx = self.back_idx;
+        self.back_idx = tmp;
+    }
+
+    pub fn resize(&mut self, device: &wgpu::Device, width: u32, height: u32)
+    {
+        resize_texture(device, &mut self.textures[0], width, height);
+        resize_texture(device, &mut self.textures[1], width, height);
+    }
+
+    // TODO
+    pub fn fill_black(&mut self, device: &wgpu::Device)
+    {
+
+    }
 }

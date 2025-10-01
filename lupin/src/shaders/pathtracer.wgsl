@@ -48,6 +48,9 @@ struct PushConstants
     // Debug params
     heatmap_min: f32,
     heatmap_max: f32,
+
+    falsecolor_type: u32,
+    pathtrace_type: u32,
 }
 
 var<push_constant> constants: PushConstants;
@@ -179,10 +182,34 @@ const FLAG_DEBUG_AABB_CHECKS: u32       = 1 << 4;
 const FLAG_DEBUG_NUM_BOUNCES: u32       = 1 << 5;
 const FLAG_DEBUG_FIRST_HIT_ONLY: u32    = 1 << 6;
 
+// Falsecolor enum
+const FALSECOLOR_ALBEDO: u32       = 0;
+const FALSECOLOR_NORMALS: u32      = 1;
+const FALSECOLOR_NORMALS_UNSIGNED: u32 = 2;
+const FALSECOLOR_FRONTFACING: u32  = 3;
+const FALSECOLOR_EMISSION: u32     = 4;
+const FALSECOLOR_ROUGHNESS: u32     = 5;
+const FALSECOLOR_METALLIC: u32     = 6;
+const FALSECOLOR_OPACITY: u32     = 7;
+const FALSECOLOR_MAT_TYPE: u32     = 8;
+const FALSECOLOR_IS_DELTA: u32     = 9;
+const FALSECOLOR_INSTANCE: u32     = 10;
+const FALSECOLOR_TRI: u32          = 11;
+
+// Pathtrace type enum
+const PATHTRACE_TYPE_STANDARD: u32 = 0;
+const PATHTRACE_TYPE_MIS: u32 = 1;
+const PATHTRACE_TYPE_NAIVE: u32 = 2;
+const PATHTRACE_TYPE_DIRECT: u32 = 3;
+
 //////////////////////////////////////////////
 // Entrypoints
 //////////////////////////////////////////////
 
+// All entrypoints support tiling and progressive rendering.
+// They all perform montecarlo integration over the surface of a pixel.
+
+// Performs montecarlo pathtracing. (TODO: Add ability to change pathtrace function)
 @compute
 @workgroup_size(WORKGROUP_SIZE_X, WORKGROUP_SIZE_Y, 1)
 fn pathtrace_main(@builtin(local_invocation_id) local_id: vec3u, @builtin(global_invocation_id) global_id_: vec3u)
@@ -192,12 +219,52 @@ fn pathtrace_main(@builtin(local_invocation_id) local_id: vec3u, @builtin(global
     init_rng(global_id.y * output_dim.x + global_id.x);
 
     var color = vec3f(0.0f);
-    for(var sample: u32 = 0; sample < SAMPLES_PER_PIXEL; sample++)
+
+    switch constants.pathtrace_type
     {
-        let pixel_offset = random_vec2f() - 0.5f;
-        let camera_ray = compute_camera_ray(global_id, output_dim, pixel_offset);
-        color += clamp_radiance(pathtrace(local_id, camera_ray));
+        case PATHTRACE_TYPE_STANDARD:
+        {
+            for(var sample: u32 = 0; sample < SAMPLES_PER_PIXEL; sample++)
+            {
+                let pixel_offset = random_vec2f() - 0.5f;
+                let camera_ray = compute_camera_ray(global_id, output_dim, pixel_offset);
+                color += clamp_radiance(pathtrace(camera_ray));
+            }
+            break;
+        }
+        case PATHTRACE_TYPE_MIS:
+        {
+            for(var sample: u32 = 0; sample < SAMPLES_PER_PIXEL; sample++)
+            {
+                let pixel_offset = random_vec2f() - 0.5f;
+                let camera_ray = compute_camera_ray(global_id, output_dim, pixel_offset);
+                color += clamp_radiance(pathtrace_mis(camera_ray));
+            }
+            break;
+        }
+        case PATHTRACE_TYPE_NAIVE:
+        {
+            for(var sample: u32 = 0; sample < SAMPLES_PER_PIXEL; sample++)
+            {
+                let pixel_offset = random_vec2f() - 0.5f;
+                let camera_ray = compute_camera_ray(global_id, output_dim, pixel_offset);
+                color += clamp_radiance(pathtrace_naive(camera_ray));
+            }
+            break;
+        }
+        case PATHTRACE_TYPE_DIRECT:
+        {
+            for(var sample: u32 = 0; sample < SAMPLES_PER_PIXEL; sample++)
+            {
+                let pixel_offset = random_vec2f() - 0.5f;
+                let camera_ray = compute_camera_ray(global_id, output_dim, pixel_offset);
+                color += clamp_radiance(pathtrace_direct(camera_ray));
+            }
+            break;
+        }
+        default: { break; }
     }
+
     color /= f32(SAMPLES_PER_PIXEL);
     color = max(color, vec3f(0.0f));
 
@@ -217,6 +284,169 @@ fn pathtrace_main(@builtin(local_invocation_id) local_id: vec3u, @builtin(global
     write_debug_color(global_id, output_dim);
 }
 
+// Used to visualize different aspects of a scene. Some of these
+// visualizations are useful for AI denoisers such as OIDN.
+@compute
+@workgroup_size(WORKGROUP_SIZE_X, WORKGROUP_SIZE_Y, 1)
+fn pathtrace_falsecolor_main(@builtin(local_invocation_id) local_id: vec3u, @builtin(global_invocation_id) global_id_: vec3u)
+{
+    let global_id = global_id_.xy + constants.id_offset;
+    let output_dim = max(textureDimensions(output_rgba8unorm).xy, textureDimensions(output_rgba8snorm).xy);
+    init_rng(global_id.y * output_dim.x + global_id.x);
+
+    var color = vec3f(0.0f);
+    for(var sample: u32 = 0; sample < SAMPLES_PER_PIXEL; sample++)
+    {
+        let pixel_offset = random_vec2f() - 0.5f;
+        let camera_ray = compute_camera_ray(global_id, output_dim, pixel_offset);
+        let sample_color = vec3f();
+
+        switch constants.falsecolor_type
+        {
+            case FALSECOLOR_ALBEDO:
+            {
+                let hit = skip_alpha_stochastically(camera_ray);
+                if hit.dst != F32_MAX
+                {
+                    let mat_point = get_material_point(hit);
+                    color += mat_point.color.rgb;
+                }
+                break;
+            }
+            case FALSECOLOR_NORMALS:
+            {
+                let hit = skip_alpha_stochastically(camera_ray);
+                if hit.dst != F32_MAX
+                {
+                    let normal = compute_shading_normal(hit);
+                    color += normal;
+                }
+                break;
+            }
+            case FALSECOLOR_NORMALS_UNSIGNED:
+            {
+                let hit = skip_alpha_stochastically(camera_ray);
+                if hit.dst != F32_MAX
+                {
+                    let normal = compute_shading_normal(hit);
+                    color += normal * 0.5f + 0.5f;
+                }
+                break;
+            }
+            case FALSECOLOR_FRONTFACING:
+            {
+                let hit = skip_alpha_stochastically(camera_ray);
+                if hit.dst != F32_MAX {
+                    color += f32(!hit.hit_backside);
+                }
+                break;
+            }
+            case FALSECOLOR_EMISSION:
+            {
+                let hit = skip_alpha_stochastically(camera_ray);
+                if hit.dst != F32_MAX
+                {
+                    let mat_point = get_material_point(hit);
+                    color += mat_point.emission.rgb;
+                }
+                break;
+            }
+            case FALSECOLOR_ROUGHNESS:
+            {
+                let hit = skip_alpha_stochastically(camera_ray);
+                if hit.dst != F32_MAX
+                {
+                    let mat_point = get_material_point(hit);
+                    color += vec3f(mat_point.roughness);
+                }
+                break;
+            }
+            case FALSECOLOR_METALLIC:
+            {
+                let hit = skip_alpha_stochastically(camera_ray);
+                if hit.dst != F32_MAX
+                {
+                    let mat_point = get_material_point(hit);
+                    color += vec3f(mat_point.metallic);
+                }
+                break;
+            }
+            case FALSECOLOR_OPACITY:
+            {
+                let hit = ray_scene_intersection(camera_ray);
+                if hit.dst != F32_MAX
+                {
+                    let mat_point = get_material_point(hit);
+                    color += vec3f(mat_point.opacity);
+                }
+                break;
+            }
+            case FALSECOLOR_MAT_TYPE:
+            {
+                let hit = ray_scene_intersection(camera_ray);
+                let mat_idx = instances[hit.instance_idx].mat_idx;
+                if hit.dst != F32_MAX {
+                    color += hash_color(mat_idx);
+                }
+                break;
+            }
+            case FALSECOLOR_IS_DELTA:
+            {
+                let hit = ray_scene_intersection(camera_ray);
+                if hit.dst != F32_MAX
+                {
+                    let mat_point = get_material_point(hit);
+                    color += f32(is_mat_delta(mat_point));
+                }
+                break;
+            }
+            case FALSECOLOR_INSTANCE:
+            {
+                let hit = ray_scene_intersection(camera_ray);
+                if hit.dst != F32_MAX
+                {
+                    let mat_point = get_material_point(hit);
+                    color += hash_color(hit.instance_idx);
+                }
+                break;
+            }
+            case FALSECOLOR_TRI:
+            {
+                let hit = ray_scene_intersection(camera_ray);
+                if hit.dst != F32_MAX
+                {
+                    let mat_point = get_material_point(hit);
+                    color += hash_color(hit.tri_idx);
+                }
+                break;
+            }
+            default: { break; }
+        }
+
+        color += sample_color;
+    }
+    color /= f32(SAMPLES_PER_PIXEL);
+    color = max(color, vec3f(0.0f));
+
+    // Progressive rendering.
+    if constants.accum_counter != 0
+    {
+        let weight = 1.0f / f32(constants.accum_counter);
+        let prev_color = textureLoad(prev_frame, global_id.xy, 0).rgb;
+        color = prev_color * (1.0f - weight) + color * weight;
+        color = max(color, vec3f(0.0f));
+    }
+
+    if all(global_id < output_dim) {
+        if constants.falsecolor_type == FALSECOLOR_NORMALS {
+            textureStore(output_rgba8snorm, global_id.xy, vec4f(color, 1.0f));
+        } else {
+            textureStore(output_rgba8unorm, global_id.xy, vec4f(color, 1.0f));
+        }
+    }
+}
+
+// Debug visualizations.
 @compute
 @workgroup_size(WORKGROUP_SIZE_X, WORKGROUP_SIZE_Y, 1)
 fn pathtrace_debug_main(@builtin(local_invocation_id) local_id: vec3u, @builtin(global_invocation_id) global_id_: vec3u)
@@ -234,9 +464,9 @@ fn pathtrace_debug_main(@builtin(local_invocation_id) local_id: vec3u, @builtin(
     let debug_num_bounces = (constants.flags & FLAG_DEBUG_NUM_BOUNCES) != 0;
 
     if first_hit_only && !debug_num_bounces {
-        ray_scene_intersection(local_id, camera_ray);
+        ray_scene_intersection(camera_ray);
     } else {
-        pathtrace(local_id, camera_ray);
+        pathtrace(camera_ray);
     }
 
     var val = 0.0f;
@@ -248,103 +478,19 @@ fn pathtrace_debug_main(@builtin(local_invocation_id) local_id: vec3u, @builtin(
         val = f32(DEBUG_NUM_BOUNCES);
     }
 
-    let color = get_heatmap_color(val, constants.heatmap_min, constants.heatmap_max);
+    var color = get_heatmap_color(val, constants.heatmap_min, constants.heatmap_max);
+
+    // Progressive rendering.
+    if constants.accum_counter != 0
+    {
+        let weight = 1.0f / f32(constants.accum_counter);
+        let prev_color = textureLoad(prev_frame, global_id.xy, 0).rgb;
+        color = prev_color * (1.0f - weight) + color * weight;
+        color = max(color, vec3f(0.0f));
+    }
 
     if all(global_id < output_dim) {
         textureStore(output_rgba8unorm, global_id.xy, vec4f(color, 1.0f));
-    }
-}
-
-@compute
-@workgroup_size(WORKGROUP_SIZE_X, WORKGROUP_SIZE_Y, 1)
-fn gbuffer_albedo_main(@builtin(local_invocation_id) local_id: vec3u, @builtin(global_invocation_id) global_id_: vec3u)
-{
-    let global_id = global_id_.xy + constants.id_offset;
-    let output_dim = textureDimensions(output_rgba8unorm).xy;
-    init_rng(global_id.y * output_dim.x + global_id.x);
-
-    const NUM_AA_SAMPLES_PER_DIR: u32 = 1;  // Antialiasing samples.
-    var color = vec3f(0.0f);
-    for(var sample_y: u32 = 0; sample_y < NUM_AA_SAMPLES_PER_DIR; sample_y++)
-    {
-        for(var sample_x: u32 = 0; sample_x < NUM_AA_SAMPLES_PER_DIR; sample_x++)
-        {
-            let offset_x = f32(sample_x) / f32(NUM_AA_SAMPLES_PER_DIR);
-            let offset_y = f32(sample_y) / f32(NUM_AA_SAMPLES_PER_DIR);
-            let pixel_offset = vec2f(offset_x, offset_y) - 0.5f * 0.9f;
-            let camera_ray = compute_camera_ray(global_id, output_dim, pixel_offset);
-
-            let hit = ray_scene_intersection(local_id, camera_ray);
-            if hit.dst != F32_MAX
-            {
-                let mat_point = get_material_point(hit);
-                color += mat_point.color.rgb;
-                //color += vec3f(mat_point.opacity);
-                //color += hit.normal * 0.5f + 0.5f;
-                //color += vec3f(mat_point.roughness);
-                //color += vec3f(mat_point.metallic);
-
-                // Debug tangents
-                /*
-                let instance = instances[hit.instance_idx];
-                let mesh_info = mesh_infos[instance.mesh_idx];
-                let mesh_idx = instance.mesh_idx;
-                let tri_idx = hit.tri_idx;
-                if mesh_info.texcoords_buf_idx != SENTINEL_IDX
-                {
-                    let uv0 = verts_texcoord_array[mesh_info.texcoords_buf_idx].data[indices_array[mesh_idx].data[tri_idx*3 + 0]];
-                    let uv1 = verts_texcoord_array[mesh_info.texcoords_buf_idx].data[indices_array[mesh_idx].data[tri_idx*3 + 1]];
-                    let uv2 = verts_texcoord_array[mesh_info.texcoords_buf_idx].data[indices_array[mesh_idx].data[tri_idx*3 + 2]];
-                    let p0  = verts_pos_array[mesh_idx].data[indices_array[mesh_idx].data[tri_idx*3 + 0]];
-                    let p1  = verts_pos_array[mesh_idx].data[indices_array[mesh_idx].data[tri_idx*3 + 1]];
-                    let p2  = verts_pos_array[mesh_idx].data[indices_array[mesh_idx].data[tri_idx*3 + 2]];
-                    let tangents = compute_tangents_from_uv(hit.instance_idx, p0, p1, p2, uv0, uv1, uv2);
-                    color += tangents.bitangent * 0.5f + 0.5f;
-                }
-                */
-            }
-        }
-    }
-    color /= f32(NUM_AA_SAMPLES_PER_DIR * NUM_AA_SAMPLES_PER_DIR);
-    color = clamp(color, vec3f(0.0f), vec3f(1.0f));
-
-    if all(global_id < output_dim) {
-        textureStore(output_rgba8unorm, global_id.xy, vec4f(color, 1.0f));
-    }
-}
-
-@compute
-@workgroup_size(WORKGROUP_SIZE_X, WORKGROUP_SIZE_Y, 1)
-fn gbuffer_normals_main(@builtin(local_invocation_id) local_id: vec3u, @builtin(global_invocation_id) global_id_: vec3u)
-{
-    let global_id = global_id_.xy + constants.id_offset;
-    let output_dim = textureDimensions(output_rgba8snorm).xy;
-    init_rng(global_id.y * output_dim.x + global_id.x);
-
-    const NUM_AA_SAMPLES_PER_DIR: u32 = 1;  // Antialiasing samples.
-    var color = vec3f(0.0f);
-    for(var sample_y: u32 = 0; sample_y < NUM_AA_SAMPLES_PER_DIR; sample_y++)
-    {
-        for(var sample_x: u32 = 0; sample_x < NUM_AA_SAMPLES_PER_DIR; sample_x++)
-        {
-            let offset_x = f32(sample_x) / f32(NUM_AA_SAMPLES_PER_DIR);
-            let offset_y = f32(sample_y) / f32(NUM_AA_SAMPLES_PER_DIR);
-            let pixel_offset = vec2f(offset_x, offset_y) - 0.5f * 0.9f;
-            let camera_ray = compute_camera_ray(global_id, output_dim, pixel_offset);
-
-            let hit = ray_scene_intersection(local_id, camera_ray);
-            if hit.dst != F32_MAX
-            {
-                let normal = compute_shading_normal(hit);
-                color += normal * 0.5f + 0.5f;
-            }
-        }
-    }
-    color /= f32(NUM_AA_SAMPLES_PER_DIR * NUM_AA_SAMPLES_PER_DIR);
-    color = clamp(color, vec3f(-1.0f), vec3f(1.0f));
-
-    if all(global_id < output_dim) {
-        textureStore(output_rgba8snorm, global_id.xy, vec4f(color, 1.0f));
     }
 }
 
@@ -388,6 +534,55 @@ fn compute_camera_ray(global_id: vec2u, output_dim: vec2u, pixel_offset: vec2f) 
     }
 }
 
+fn skip_alpha_stochastically(start_ray: Ray) -> HitInfo
+{
+    var hit = HitInfo();
+    var ray = start_ray;
+    for(var opacity_bounce = 0u; opacity_bounce < MAX_OPACITY_BOUNCES; opacity_bounce++)
+    {
+        hit = ray_scene_intersection(ray);
+        let mat_point = get_material_point(hit);
+        if mat_point.opacity < 1.0f && random_f32() >= mat_point.opacity {
+            ray.ori = ray.ori + ray.dir * hit.dst;
+        } else {
+            break;
+        }
+    }
+
+    return hit;
+}
+
+fn hash_color(id: u32) -> vec3f
+{
+    var res = vec3f();
+
+    var local_state = id;
+
+    // TODO: @cleanup
+    {
+        local_state = local_state * 747796405u + 2891336453u;
+        var result: u32 = ((local_state >> ((local_state >> 28u) + 4u)) ^ local_state) * 277803737u;
+        result = (result >> 22u) ^ result;
+        res.x = f32(result) / 4294967295.0f;
+    }
+
+    {
+        local_state = local_state * 747796405u + 2891336453u;
+        var result: u32 = ((local_state >> ((local_state >> 28u) + 4u)) ^ local_state) * 277803737u;
+        result = (result >> 22u) ^ result;
+        res.y = f32(result) / 4294967295.0f;
+    }
+
+    {
+        local_state = local_state * 747796405u + 2891336453u;
+        var result: u32 = ((local_state >> ((local_state >> 28u) + 4u)) ^ local_state) * 277803737u;
+        result = (result >> 22u) ^ result;
+        res.z = f32(result) / 4294967295.0f;
+    }
+
+    return res;
+}
+
 //////////////////////////////////////////////
 // Pathtracing
 //////////////////////////////////////////////
@@ -397,7 +592,10 @@ fn compute_camera_ray(global_id: vec2u, output_dim: vec2u, pixel_offset: vec2f) 
 
 var<private> DEBUG_NUM_BOUNCES: u32 = 0;
 
-fn pathtrace_naive(local_id: vec3u, start_ray: Ray) -> vec3f
+// This is the "poor man's MIS". It's a bit slower than
+// proper MIS but handles more cases. It can exhibit firefly
+// artifacts, which is the main reason for clamp_radiance().
+fn pathtrace(start_ray: Ray) -> vec3f
 {
     var ray = start_ray;
     var weight = vec3f(1.0f);  // Multiplicative terms.
@@ -405,7 +603,107 @@ fn pathtrace_naive(local_id: vec3u, start_ray: Ray) -> vec3f
     var opacity_bounce: u32 = 0;
     for(var bounce = 0u; bounce <= MAX_BOUNCES; bounce++)
     {
-        let hit = ray_scene_intersection(local_id, ray);
+        let hit = ray_scene_intersection(ray);
+        if hit.dst == F32_MAX  // Missed.
+        {
+            radiance += weight * sample_environments(ray.dir);
+            break;
+        }
+
+        // Ray hit something.
+        if DEBUG {
+            DEBUG_NUM_BOUNCES++;
+        }
+
+        let hit_pos = ray.ori + ray.dir * hit.dst;
+        let outgoing = -ray.dir;
+
+        let instance = instances[hit.instance_idx];
+        let mat = materials[instance.mat_idx];
+        let mat_point = get_material_point(hit);
+
+        // Handle coverage.
+        if mat_point.opacity < 1.0f && random_f32() >= mat_point.opacity
+        {
+            opacity_bounce++;
+            if opacity_bounce >= MAX_OPACITY_BOUNCES { break; }
+            ray.ori = hit_pos;
+            bounce--;
+            continue;
+        }
+
+        let normal = compute_shading_normal(hit);
+
+        // Accumulate emission.
+        radiance += weight * mat_point.emission /** f32(dot(normal, outgoing) >= 0.0f) */;
+
+        // Compute next direction.
+        var incoming = vec3f();
+        if !is_mat_delta(mat_point)
+        {
+            const light_prob = 0.5f;
+            const bsdf_prob = 1.0f - light_prob;
+            if random_f32() < bsdf_prob
+            {
+                let rnd0 = random_f32();
+                let rnd1 = random_vec2f();
+                incoming = sample_bsdfcos(mat_point, normal, outgoing, rnd0, rnd1);
+            }
+            else
+            {
+                incoming = sample_lights(hit_pos, normal, outgoing);
+            }
+
+            if all(incoming == vec3f(0.0f)) { break; }
+
+            let prob = bsdf_prob  * sample_bsdfcos_pdf(mat_point, normal, outgoing, incoming) +
+                       light_prob * sample_lights_pdf(hit_pos, incoming);
+            weight *= eval_bsdfcos(mat_point, normal, outgoing, incoming) / prob;
+        }
+        else
+        {
+            incoming = sample_delta(mat_point, normal, outgoing, random_f32());
+            weight *= eval_delta(mat_point, normal, outgoing, incoming) /
+                      sample_delta_pdf(mat_point, normal, outgoing, incoming);
+        }
+
+        ray.ori = hit_pos;
+        ray.dir = incoming;
+        ray.inv_dir = 1.0f / ray.dir;
+
+        // Check weight.
+        if all(weight == vec3f(0.0f)) || !vec3f_is_finite(weight) { break; }
+
+        // Russian roulette.
+        if bounce > 3
+        {
+            let survive_prob = min(0.99f, max(weight.x, max(weight.y, weight.z)));
+            if random_f32() >= survive_prob { break; }
+            weight *= 1.0f / survive_prob;
+        }
+    }
+
+    return radiance;
+}
+
+// Classic MIS. The fastest converging option, but a bit more
+// prone to artifacts.
+fn pathtrace_mis(start_ray: Ray) -> vec3f
+{
+    return vec3f();
+}
+
+// BSDF-sampling only. This is only viable in very specific scenes.
+// Does not exhibit any form of firefly artifacts. Generally very slow.
+fn pathtrace_naive(start_ray: Ray) -> vec3f
+{
+    var ray = start_ray;
+    var weight = vec3f(1.0f);  // Multiplicative terms.
+    var radiance = vec3f(0.0f);
+    var opacity_bounce: u32 = 0;
+    for(var bounce = 0u; bounce <= MAX_BOUNCES; bounce++)
+    {
+        let hit = ray_scene_intersection(ray);
         if hit.dst == F32_MAX  // Missed.
         {
             radiance += weight * sample_environments(ray.dir);
@@ -428,7 +726,7 @@ fn pathtrace_naive(local_id: vec3u, start_ray: Ray) -> vec3f
         if mat_point.opacity < 1.0f && random_f32() >= mat_point.opacity
         {
             opacity_bounce++;
-            if opacity_bounce > 128 { break; }
+            if opacity_bounce >= MAX_OPACITY_BOUNCES { break; }
             ray.ori = hit_pos;
             bounce--;
             continue;
@@ -477,95 +775,10 @@ fn pathtrace_naive(local_id: vec3u, start_ray: Ray) -> vec3f
     return radiance;
 }
 
-fn pathtrace(local_id: vec3u, start_ray: Ray) -> vec3f
+// Does light sampling only.
+fn pathtrace_direct(start_ray: Ray) -> vec3f
 {
-    var ray = start_ray;
-    var weight = vec3f(1.0f);  // Multiplicative terms.
-    var radiance = vec3f(0.0f);
-    var opacity_bounce: u32 = 0;
-    for(var bounce = 0u; bounce <= MAX_BOUNCES; bounce++)
-    {
-        let hit = ray_scene_intersection(local_id, ray);
-        if hit.dst == F32_MAX  // Missed.
-        {
-            radiance += weight * sample_environments(ray.dir);
-            break;
-        }
-
-        // Ray hit something.
-        if DEBUG {
-            DEBUG_NUM_BOUNCES++;
-        }
-
-        let hit_pos = ray.ori + ray.dir * hit.dst;
-        let outgoing = -ray.dir;
-
-        let instance = instances[hit.instance_idx];
-        let mat = materials[instance.mat_idx];
-        let mat_point = get_material_point(hit);
-
-        // Handle coverage.
-        if mat_point.opacity < 1.0f && random_f32() >= mat_point.opacity
-        {
-            opacity_bounce++;
-            if opacity_bounce > 128 { break; }
-            ray.ori = hit_pos;
-            bounce--;
-            continue;
-        }
-
-        let normal = compute_shading_normal(hit);
-
-        // Accumulate emission.
-        radiance += weight * mat_point.emission /** f32(dot(normal, outgoing) >= 0.0f) */;
-
-        // Compute next direction.
-        var incoming = vec3f();
-        if !is_mat_delta(mat_point)
-        {
-            const light_prob = 0.5f;
-            const bsdf_prob = 1.0f - light_prob;
-            if random_f32() < bsdf_prob
-            {
-                let rnd0 = random_f32();
-                let rnd1 = random_vec2f();
-                incoming = sample_bsdfcos(mat_point, normal, outgoing, rnd0, rnd1);
-            }
-            else
-            {
-                incoming = sample_lights(hit_pos, normal, outgoing);
-            }
-
-            if all(incoming == vec3f(0.0f)) { break; }
-
-            let prob = bsdf_prob  * sample_bsdfcos_pdf(mat_point, normal, outgoing, incoming) +
-                       light_prob * sample_lights_pdf(local_id, hit_pos, incoming);
-            weight *= eval_bsdfcos(mat_point, normal, outgoing, incoming) / prob;
-        }
-        else
-        {
-            incoming = sample_delta(mat_point, normal, outgoing, random_f32());
-            weight *= eval_delta(mat_point, normal, outgoing, incoming) /
-                      sample_delta_pdf(mat_point, normal, outgoing, incoming);
-        }
-
-        ray.ori = hit_pos;
-        ray.dir = incoming;
-        ray.inv_dir = 1.0f / ray.dir;
-
-        // Check weight.
-        if all(weight == vec3f(0.0f)) || !vec3f_is_finite(weight) { break; }
-
-        // Russian roulette.
-        if bounce > 3
-        {
-            let survive_prob = min(0.99f, max(weight.x, max(weight.y, weight.z)));
-            if random_f32() >= survive_prob { break; }
-            weight *= 1.0f / survive_prob;
-        }
-    }
-
-    return radiance;
+    return vec3f();
 }
 
 struct MaterialPoint
@@ -584,6 +797,7 @@ struct MaterialPoint
 }
 
 const MIN_ROUGHNESS: f32 = 0.03f * 0.03f;
+const MAX_OPACITY_BOUNCES: u32 = 128;
 
 fn get_material_point(hit: HitInfo) -> MaterialPoint
 {
@@ -1078,18 +1292,12 @@ struct RayDebugInfo
 
 var<private> RAY_DEBUG_INFO: RayDebugInfo = RayDebugInfo();
 
-fn ray_scene_intersection(local_id: vec3u, ray: Ray)->HitInfo
+fn ray_scene_intersection(ray: Ray)->HitInfo
 {
-    // Comment/Uncomment to test the performance of shared memory
-    // vs local array (registers or global memory)
-    // Shared memory is faster (on a GTX 1070).
-    let offset: u32 = 0u;                                                // local
-    //let offset = (local_id.y * 8 + local_id.x) * (MAX_TLAS_DEPTH + 1);  // shared memory
-
     var tlas_stack: array<u32, MAX_TLAS_DEPTH+1>;  // local
     var stack_idx: u32 = 2;
-    tlas_stack[0 + offset] = 0u;
-    tlas_stack[1 + offset] = 0u;
+    tlas_stack[0] = 0u;
+    tlas_stack[1] = 0u;
 
     // t, u, v, det
     var min_hit = vec4f(F32_MAX, 0.0f, 0.0f, 0.0f);
@@ -1098,7 +1306,7 @@ fn ray_scene_intersection(local_id: vec3u, ray: Ray)->HitInfo
     while stack_idx > 1
     {
         stack_idx--;
-        let node = tlas_nodes[tlas_stack[stack_idx + offset]];
+        let node = tlas_nodes[tlas_stack[stack_idx]];
 
         if node.left_right == 0u  // Leaf node
         {
@@ -1111,7 +1319,7 @@ fn ray_scene_intersection(local_id: vec3u, ray: Ray)->HitInfo
             ray_trans.dir = (vec4f(ray_trans.dir, 0.0f) * instance.transpose_inverse_transform).xyz;
             ray_trans.inv_dir = 1.0f / ray_trans.dir;
 
-            let result = ray_mesh_intersection(local_id, ray_trans, min_hit.x, instance.mesh_idx);
+            let result = ray_mesh_intersection(ray_trans, min_hit.x, instance.mesh_idx);
             if result.hit.x < min_hit.x
             {
                 min_hit      = result.hit;
@@ -1147,13 +1355,13 @@ fn ray_scene_intersection(local_id: vec3u, ray: Ray)->HitInfo
             {
                 if push_right
                 {
-                    tlas_stack[stack_idx + offset] = right_child;
+                    tlas_stack[stack_idx] = right_child;
                     stack_idx++;
                 }
 
                 if push_left
                 {
-                    tlas_stack[stack_idx + offset] = left_child;
+                    tlas_stack[stack_idx] = left_child;
                     stack_idx++;
                 }
             }
@@ -1161,13 +1369,13 @@ fn ray_scene_intersection(local_id: vec3u, ray: Ray)->HitInfo
             {
                 if push_left
                 {
-                    tlas_stack[stack_idx + offset] = left_child;
+                    tlas_stack[stack_idx] = left_child;
                     stack_idx++;
                 }
 
                 if push_right
                 {
-                    tlas_stack[stack_idx + offset] = right_child;
+                    tlas_stack[stack_idx] = right_child;
                     stack_idx++;
                 }
             }
@@ -1198,19 +1406,12 @@ struct RayMeshIntersectionResult
 }
 
 // cur_min_hit_dst should be F32_MAX if absent.
-fn ray_mesh_intersection(local_id: vec3u, ray: Ray, cur_min_hit_dst: f32, mesh_idx: u32) -> RayMeshIntersectionResult
+fn ray_mesh_intersection(ray: Ray, cur_min_hit_dst: f32, mesh_idx: u32) -> RayMeshIntersectionResult
 {
-    // Comment/Uncomment to test the performance of shared memory
-    // vs local array (registers or global memory)
-    // Shared memory is faster (on a GTX 1070).
-    // NOPE! On full scenes local array is faster, about 2x.
-    let offset: u32 = 0u;                                                // local
-    //let offset = (local_id.y * 8 + local_id.x) * (MAX_BVH_DEPTH + 1);  // shared memory
-
     var bvh_stack: array<u32, MAX_BVH_DEPTH+1>;  // local
     var stack_idx = 2u;
-    bvh_stack[0 + offset] = 0u;
-    bvh_stack[1 + offset] = 0u;
+    bvh_stack[0] = 0u;
+    bvh_stack[1] = 0u;
 
     // t, u, v
     var min_hit = vec4f(cur_min_hit_dst, 0.0f, 0.0f, 0.0f);
@@ -1218,7 +1419,7 @@ fn ray_mesh_intersection(local_id: vec3u, ray: Ray, cur_min_hit_dst: f32, mesh_i
     while stack_idx > 1
     {
         stack_idx--;
-        let node = bvh_nodes_array[mesh_idx].data[bvh_stack[stack_idx + offset]];
+        let node = bvh_nodes_array[mesh_idx].data[bvh_stack[stack_idx]];
 
         if node.tri_count > 0u  // Leaf node
         {
@@ -1269,13 +1470,13 @@ fn ray_mesh_intersection(local_id: vec3u, ray: Ray, cur_min_hit_dst: f32, mesh_i
             {
                 if push_right
                 {
-                    bvh_stack[stack_idx + offset] = right_child;
+                    bvh_stack[stack_idx] = right_child;
                     stack_idx++;
                 }
 
                 if push_left
                 {
-                    bvh_stack[stack_idx + offset] = left_child;
+                    bvh_stack[stack_idx] = left_child;
                     stack_idx++;
                 }
             }
@@ -1283,13 +1484,13 @@ fn ray_mesh_intersection(local_id: vec3u, ray: Ray, cur_min_hit_dst: f32, mesh_i
             {
                 if push_left
                 {
-                    bvh_stack[stack_idx + offset] = left_child;
+                    bvh_stack[stack_idx] = left_child;
                     stack_idx++;
                 }
 
                 if push_right
                 {
-                    bvh_stack[stack_idx + offset] = right_child;
+                    bvh_stack[stack_idx] = right_child;
                     stack_idx++;
                 }
             }
@@ -1299,7 +1500,7 @@ fn ray_mesh_intersection(local_id: vec3u, ray: Ray, cur_min_hit_dst: f32, mesh_i
     return RayMeshIntersectionResult(min_hit, tri_idx);
 }
 
-fn ray_instance_intersection(local_id: vec3u, ray: Ray, cur_min_hit_dst: f32, instance_idx: u32) -> RayMeshIntersectionResult
+fn ray_instance_intersection(ray: Ray, cur_min_hit_dst: f32, instance_idx: u32) -> RayMeshIntersectionResult
 {
     let instance = instances[instance_idx];
 
@@ -1307,7 +1508,7 @@ fn ray_instance_intersection(local_id: vec3u, ray: Ray, cur_min_hit_dst: f32, in
     let trans_mat4 = mat4x4f(vec4f(test[0], 0.0f), vec4f(test[1], 0.0f), vec4f(test[2], 0.0f), vec4f(test[3], 1.0f));
 
     let ray_trans = transform_ray_without_normalizing_direction(ray, trans_mat4);
-    let result = ray_mesh_intersection(local_id, ray_trans, cur_min_hit_dst, instance.mesh_idx);
+    let result = ray_mesh_intersection(ray_trans, cur_min_hit_dst, instance.mesh_idx);
     return result;
 }
 
@@ -2054,7 +2255,7 @@ fn sample_lights(pos: vec3f, normal: vec3f, outgoing: vec3f) -> vec3f
     }
 }
 
-fn sample_lights_pdf(local_id: vec3u, pos: vec3f, incoming: vec3f) -> f32
+fn sample_lights_pdf(pos: vec3f, incoming: vec3f) -> f32
 {
     var pdf = 0.0f;
 
@@ -2071,7 +2272,7 @@ fn sample_lights_pdf(local_id: vec3u, pos: vec3f, incoming: vec3f) -> f32
         for(var bounce = 0u; bounce < 100; bounce++)
         {
             var ray = Ray(next_pos, incoming, 1.0f / incoming);
-            let hit_info = ray_instance_intersection(local_id, ray, F32_MAX, instance_idx);
+            let hit_info = ray_instance_intersection(ray, F32_MAX, instance_idx);
             let hit_dst = hit_info.hit.x;
             let hit_uv  = hit_info.hit.yz;
             if hit_dst == F32_MAX { break; }  // No intersection.
