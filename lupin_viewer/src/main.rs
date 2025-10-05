@@ -535,20 +535,6 @@ impl<'a> AppState<'a>
                     }
 
                     lp::tonemap_and_fit_aspect(&self.device, &self.queue, &tonemap_desc, Some(viewport));
-
-                    // Swap output textures
-                    if self.accum_counter < self.max_accums
-                    {
-                        if self.tile_idx == 0
-                        {
-                            // Copy the contents of the front buffer onto the back buffer,
-                            // so that when we swap buffers it won't be as jarring.
-                            self.output_hdr.copy_front_to_back(self.device, self.queue);
-                            self.output_hdr.flip();
-
-                            self.accum_counter = (self.accum_counter + 1).min(self.max_accums);
-                        }
-                    }
                 }
             }
             RenderType::Debug(debug_viz_type) =>

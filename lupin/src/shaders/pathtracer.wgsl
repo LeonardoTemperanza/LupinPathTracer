@@ -280,8 +280,6 @@ fn pathtrace_main(@builtin(local_invocation_id) local_id: vec3u, @builtin(global
     if all(global_id < output_dim) {
         textureStore(output_hdr, global_id.xy, vec4f(color, 1.0f));
     }
-
-    write_debug_color(global_id, output_dim);
 }
 
 // Used to visualize different aspects of a scene. Some of these
@@ -604,7 +602,7 @@ fn pathtrace(start_ray: Ray) -> vec3f
     for(var bounce = 0u; bounce <= MAX_BOUNCES; bounce++)
     {
         let hit = ray_scene_intersection(ray);
-        if hit.dst == F32_MAX  // Missed.
+        if !hit.hit
         {
             radiance += weight * sample_environments(ray.dir);
             break;
@@ -663,6 +661,7 @@ fn pathtrace(start_ray: Ray) -> vec3f
         else
         {
             incoming = sample_delta(mat_point, normal, outgoing, random_f32());
+            if all(incoming == vec3f(0.0f)) { break; }
             weight *= eval_delta(mat_point, normal, outgoing, incoming) /
                       sample_delta_pdf(mat_point, normal, outgoing, incoming);
         }
@@ -704,7 +703,7 @@ fn pathtrace_naive(start_ray: Ray) -> vec3f
     for(var bounce = 0u; bounce <= MAX_BOUNCES; bounce++)
     {
         let hit = ray_scene_intersection(ray);
-        if hit.dst == F32_MAX  // Missed.
+        if !hit.hit
         {
             radiance += weight * sample_environments(ray.dir);
             break;
@@ -752,7 +751,6 @@ fn pathtrace_naive(start_ray: Ray) -> vec3f
         {
             incoming = sample_delta(mat_point, normal, outgoing, random_f32());
             if all(incoming == vec3f(0.0f)) { break; }
-
             weight *= eval_delta(mat_point, normal, outgoing, incoming) / sample_delta_pdf(mat_point, normal, outgoing, incoming);
         }
 
@@ -775,10 +773,137 @@ fn pathtrace_naive(start_ray: Ray) -> vec3f
     return radiance;
 }
 
-// Does light sampling only.
+// Does both light sampling and bsdf sampling on the same iteration.
 fn pathtrace_direct(start_ray: Ray) -> vec3f
 {
-    return vec3f();
+    var ray = start_ray;
+    var weight = vec3f(1.0f);  // Multiplicative terms.
+    var radiance = vec3f(0.0f);
+    var opacity_bounce: u32 = 0;
+
+    var next_emission = true;
+
+    for(var bounce = 0u; bounce <= MAX_BOUNCES; bounce++)
+    {
+        let hit = ray_scene_intersection(ray);
+        if !hit.hit
+        {
+            if next_emission {
+                radiance += weight * sample_environments(ray.dir);
+            }
+            break;
+        }
+
+        // Ray hit something.
+        if DEBUG {
+            DEBUG_NUM_BOUNCES++;
+        }
+
+        let hit_pos = ray.ori + ray.dir * hit.dst;
+        let outgoing = -ray.dir;
+
+        let instance = instances[hit.instance_idx];
+        let mat = materials[instance.mat_idx];
+        let mat_point = get_material_point(hit);
+
+        // Handle coverage.
+        if mat_point.opacity < 1.0f && random_f32() >= mat_point.opacity
+        {
+            opacity_bounce++;
+            if opacity_bounce >= MAX_OPACITY_BOUNCES { break; }
+            ray.ori = hit_pos;
+            bounce--;
+            continue;
+        }
+
+        let normal = compute_shading_normal(hit);
+
+        // Accumulate emission.
+        if next_emission {
+            radiance += weight * mat_point.emission /** f32(dot(normal, outgoing) >= 0.0f) */;
+        }
+
+        // Direct light.
+        if !is_mat_delta(mat_point)
+        {
+            let incoming = sample_lights(hit_pos, normal, outgoing);
+            let pdf = sample_lights_pdf(hit_pos, incoming);
+            let bsdfcos = eval_bsdfcos(mat_point, normal, outgoing, incoming);
+            if all(bsdfcos != vec3f(0.0f)) && pdf > 0.0f
+            {
+                let light_ray = Ray(hit_pos, incoming, 1.0f / incoming);
+                let light_hit = ray_scene_intersection(light_ray);
+                var emission = vec3f();
+                if light_hit.hit
+                {
+                    let light_mat_point = get_material_point(light_hit);
+                    emission = light_mat_point.emission;
+                }
+                else
+                {
+                    emission = sample_environments(incoming);
+                }
+
+                radiance += weight * bsdfcos * emission / pdf;
+            }
+
+            next_emission = false;
+        }
+        else
+        {
+            next_emission = true;
+        }
+
+        // Compute next direction.
+        var incoming = vec3f();
+        if !is_mat_delta(mat_point)
+        {
+            const light_prob = 0.5f;
+            const bsdf_prob = 1.0f - light_prob;
+            if random_f32() < bsdf_prob
+            {
+                let rnd0 = random_f32();
+                let rnd1 = random_vec2f();
+                incoming = sample_bsdfcos(mat_point, normal, outgoing, rnd0, rnd1);
+            }
+            else
+            {
+                incoming = sample_lights(hit_pos, normal, outgoing);
+            }
+
+            if all(incoming == vec3f(0.0f)) { break; }
+
+            let prob = bsdf_prob  * sample_bsdfcos_pdf(mat_point, normal, outgoing, incoming) +
+                       light_prob * sample_lights_pdf(hit_pos, incoming);
+            weight *= eval_bsdfcos(mat_point, normal, outgoing, incoming) / prob;
+        }
+        else
+        {
+            incoming = sample_delta(mat_point, normal, outgoing, random_f32());
+            if all(incoming == vec3f(0.0f)) { break; }
+            weight *= eval_delta(mat_point, normal, outgoing, incoming) /
+                      sample_delta_pdf(mat_point, normal, outgoing, incoming);
+        }
+
+        // TODO: Update volume stack.
+
+        ray.ori = hit_pos;
+        ray.dir = incoming;
+        ray.inv_dir = 1.0f / ray.dir;
+
+        // Check weight.
+        if all(weight == vec3f(0.0f)) || !vec3f_is_finite(weight) { break; }
+
+        // Russian roulette.
+        if bounce > 3
+        {
+            let survive_prob = min(0.99f, max(weight.x, max(weight.y, weight.z)));
+            if random_f32() >= survive_prob { break; }
+            weight *= 1.0f / survive_prob;
+        }
+    }
+
+    return radiance;
 }
 
 struct MaterialPoint
@@ -1271,14 +1396,13 @@ fn ray_tri_dst(ray: Ray, v0: vec3f, v1: vec3f, v2: vec3f)->vec4f
 
 struct HitInfo
 {
-    dst: f32,  // Null if == F32_MAX
+    hit: bool,  // Rest of the fields are invalid if false.
+    dst: f32,
     uv: vec2f,
     instance_idx: u32,
     tri_idx: u32,
     hit_backside: bool,
 }
-
-const INVALID_HIT: HitInfo = HitInfo(F32_MAX, vec2f(), 0, 0, false);
 
 const MAX_TLAS_DEPTH: u32 = 20;  // This supports 2^MAX_TLAS_DEPTH objects.
 //const TLAS_STACK_SIZE: u32 = (MAX_TLAS_DEPTH + 1) * 8 * 8;  // shared memory
@@ -1382,9 +1506,10 @@ fn ray_scene_intersection(ray: Ray)->HitInfo
         }
     }
 
-    var hit_info: HitInfo = INVALID_HIT;
+    var hit_info = HitInfo();
     if min_hit.x != F32_MAX
     {
+        hit_info.hit = true;
         hit_info.dst = min_hit.x;
         hit_info.uv = min_hit.yz;
         hit_info.instance_idx = instance_idx;
@@ -2638,19 +2763,4 @@ fn get_heatmap_color(val: f32, min: f32, max: f32) -> vec3f
 
     color = pow(factor * color, vec3f(gamma));
     return color;
-}
-
-// For quick printf-like debugging.
-
-var<private> debug_color = vec3f();
-var<private> debug_enable = false;
-
-fn write_debug_color(global_id: vec2u, output_dim: vec2u)
-{
-    if debug_enable
-    {
-        if all(global_id < output_dim) {
-            textureStore(output_hdr, global_id.xy, vec4f(debug_color, 1.0f));
-        }
-    }
 }

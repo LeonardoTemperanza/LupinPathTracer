@@ -557,6 +557,7 @@ impl Default for CameraParams
     }
 }
 
+// NOTE: Coupled to shader.
 #[repr(u32)]
 #[derive(Default, Copy, Clone, Debug, PartialEq)]
 pub enum PathtraceType
@@ -570,9 +571,10 @@ pub enum PathtraceType
     /// prone to artifacts.
     MIS = 1,
     /// BSDF-sampling only. This is only viable in very specific scenes.
-    /// Does not exhibit any form of firefly artifacts. Generally very slow.
+    /// Does not exhibit any form of firefly artifacts, but it may take a
+    /// very long time to converge to the reference. Generally very slow.
     Naive = 2,
-    /// Does light sampling only.
+    /// Like standard, but casts an extra ray at each bounce for light sampling.
     Direct = 3,
 }
 
@@ -664,22 +666,31 @@ pub fn pathtrace_scene(device: &wgpu::Device, queue: &wgpu::Queue, desc: &Pathtr
     queue.submit(Some(encoder.finish()));
 }
 
+// NOTE: Coupled to shader code.
 #[repr(u32)]
 #[derive(Default, Clone, Copy, Debug, PartialEq)]
 pub enum FalsecolorType
 {
     #[default]
+    /// Albedo GBuffer, useful for denoising. Stored as linear, not SRGB.
     Albedo = 0,
+    /// Normal GBuffer, useful for denoising. Requires rgba8_snorm.
     Normals = 1,
+    /// Normal GBuffer, but this op is performed on each pixel: color = normal * 0.5 + 0.5.
     NormalsUnsigned = 2,
+    /// 0 (black) if back-facing, 1 (white) if front-facing.
     FrontFacing = 3,
     Emission = 4,
     Roughness = 5,
     Metallic = 6,
     Opacity = 7,
+    /// Each material will be given its own (hashed) color.
     MatType = 8,
+    /// 1 (white) for delta materials, 0 (black) for everything else.
     IsDelta = 9,
+    /// Each instance will be given its own (hashed) color.
     Instance = 10,
+    /// Each triangle will be given its own (hashed) color.
     Tri = 11,
 }
 
