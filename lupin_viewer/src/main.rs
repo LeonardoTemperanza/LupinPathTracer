@@ -9,14 +9,6 @@
 
 use std::time::Instant;
 
-pub use winit::
-{
-    window::*,
-    event::*,
-    dpi::*,
-    event_loop::*
-};
-
 use ::egui::FontDefinitions;
 
 pub use lupin as lp;
@@ -29,6 +21,117 @@ pub use ui::*;
 
 pub use lupin_loader as lpl;
 
+fn main()
+{
+    let native_options = eframe::NativeOptions {
+        viewport: egui::ViewportBuilder::default()
+            .with_inner_size([400.0, 300.0])
+            .with_min_inner_size([300.0, 220.0]),
+        ..Default::default()
+    };
+
+    eframe::run_native("Lupin Viewer", native_options, Box::new(|cc| Ok(Box::new(App::new(cc)))));
+}
+
+pub struct App
+{
+    // Example stuff:
+    label: String,
+    value: f32,
+}
+
+impl Default for App
+{
+    fn default() -> Self {
+        Self {
+            // Example stuff:
+            label: "Hello World!".to_owned(),
+            value: 2.7,
+        }
+    }
+}
+
+impl App
+{
+    /// Called once before the first frame.
+    pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
+        // This is also where you can customize the look and feel of egui using
+        // `cc.egui_ctx.set_visuals` and `cc.egui_ctx.set_fonts`.
+
+        Default::default()
+    }
+}
+
+impl eframe::App for App
+{
+    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame)
+    {
+        // Put your widgets into a `SidePanel`, `TopBottomPanel`, `CentralPanel`, `Window` or `Area`.
+        // For inspiration and more examples, go to https://emilk.github.io/egui
+
+        egui::TopBottomPanel::top("top_panel").show(ctx, |ui| {
+            // The top panel is often a good place for a menu bar:
+
+            egui::MenuBar::new().ui(ui, |ui| {
+                // NOTE: no File->Quit on web pages!
+                let is_web = cfg!(target_arch = "wasm32");
+                if !is_web {
+                    ui.menu_button("File", |ui| {
+                        if ui.button("Quit").clicked() {
+                            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                        }
+                    });
+                    ui.add_space(16.0);
+                }
+
+                egui::widgets::global_theme_preference_buttons(ui);
+            });
+        });
+
+        egui::CentralPanel::default().show(ctx, |ui| {
+            // The central panel the region left after adding TopPanel's and SidePanel's
+            ui.heading("eframe template");
+
+            ui.horizontal(|ui| {
+                ui.label("Write something: ");
+                ui.text_edit_singleline(&mut self.label);
+            });
+
+            ui.add(egui::Slider::new(&mut self.value, 0.0..=10.0).text("value"));
+            if ui.button("Increment").clicked() {
+                self.value += 1.0;
+            }
+
+            ui.separator();
+
+            ui.add(egui::github_link_file!(
+                "https://github.com/emilk/eframe_template/blob/main/",
+                "Source code."
+            ));
+
+            ui.with_layout(egui::Layout::bottom_up(egui::Align::LEFT), |ui| {
+                powered_by_egui_and_eframe(ui);
+                egui::warn_if_debug_build(ui);
+            });
+        });
+    }
+}
+
+fn powered_by_egui_and_eframe(ui: &mut egui::Ui) {
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = 0.0;
+        ui.label("Powered by ");
+        ui.hyperlink_to("egui", "https://github.com/emilk/egui");
+        ui.label(" and ");
+        ui.hyperlink_to(
+            "eframe",
+            "https://github.com/emilk/egui/tree/master/crates/eframe",
+        );
+        ui.label(".");
+    });
+}
+
+/*
 fn main()
 {
     let event_loop = EventLoop::new().unwrap();
@@ -117,6 +220,10 @@ fn main()
         }
     }).unwrap();
 }
+
+*/
+
+/*
 
 #[derive(Debug, PartialEq, Clone, Copy)]
 pub enum RenderType
@@ -1272,3 +1379,5 @@ impl<'a> DoubleBufferedTexture
 
     }
 }
+
+*/

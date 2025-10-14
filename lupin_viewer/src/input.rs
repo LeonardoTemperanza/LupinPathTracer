@@ -1,6 +1,8 @@
 
 // System for quickly polling inputs per frame.
 
+/*
+
 use winit::event::*;
 
 pub enum Key
@@ -163,3 +165,5 @@ pub fn process_input_event(input: &mut Input, event: &winit::event::Event<()>)
         }
     }
 }
+
+*/

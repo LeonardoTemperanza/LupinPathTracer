@@ -269,6 +269,7 @@ pub fn get_required_device_spec()->wgpu::DeviceDescriptor<'static>
                            wgpu::Features::SAMPLED_TEXTURE_AND_STORAGE_BUFFER_ARRAY_NON_UNIFORM_INDEXING |
                            wgpu::Features::PARTIALLY_BOUND_BINDING_ARRAY |
                            wgpu::Features::PUSH_CONSTANTS,
+        experimental_features: wgpu::ExperimentalFeatures::disabled(),
         required_limits: wgpu::Limits {
             max_storage_buffers_per_shader_stage: MAX_MESHES * NUM_STORAGE_BUFFERS_PER_MESH + MAX_ENVS + 64,
             max_binding_array_elements_per_shader_stage: MAX_MESHES * NUM_STORAGE_BUFFERS_PER_MESH + MAX_ENVS + MAX_TEXTURES + 64,
