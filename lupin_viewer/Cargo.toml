@@ -8,7 +8,9 @@ lupin = { path = "../lupin" }
 lupin_loader = { path = "../lupin_loader" }
 
 # GUI
-eframe = "0.33.0"
-egui  = "0.33.0"
+eframe = { version = "0.33.0", default-features = false, features = [
+    "wgpu", "default_fonts"
+]}
+egui = "0.33.0"
 egui-wgpu  = "0.33.0"
 rfd = "0.14"  # File dialog

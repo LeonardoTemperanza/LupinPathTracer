@@ -1,12 +1,13 @@
 
 use crate::base::*;
+use crate::renderer::*;
 
 // Windowing libraries tipically implement the Into<wgpu::SurfaceTarget> trait,
 // if not you can easily implement it yourself
 pub fn init_default_wgpu_context<'a>(device_desc: wgpu::DeviceDescriptor,
                              surface_config: &wgpu::SurfaceConfiguration,
                              window: impl Into<wgpu::SurfaceTarget<'a>>,
-                             window_width: i32, window_height: i32)->(wgpu::Device, wgpu::Queue, wgpu::Surface<'a>, wgpu::Adapter)
+                             window_width: i32, window_height: i32)->(wgpu::Instance, wgpu::Device, wgpu::Queue, wgpu::Surface<'a>, wgpu::Adapter)
 {
     let instance_desc = wgpu::InstanceDescriptor {
         #[cfg(target_os = "windows")]
@@ -31,14 +32,14 @@ pub fn init_default_wgpu_context<'a>(device_desc: wgpu::DeviceDescriptor,
     };
     let adapter = wait_for(instance.request_adapter(&adapter_options)).expect("Failed to get adapter");
 
-    let (device, queue) = wait_for(adapter.request_device(&device_desc)).expect("Failed to get device");
+    let (device, queue) = create_device(&adapter);
 
     surface.configure(&device, &surface_config);
 
-    return (device, queue, surface, adapter);
+    return (instance, device, queue, surface, adapter);
 }
 
-pub fn init_default_wgpu_context_no_window(device_desc: wgpu::DeviceDescriptor)->(wgpu::Device, wgpu::Queue, wgpu::Adapter)
+pub fn init_default_wgpu_context_no_window() -> (wgpu::Instance, wgpu::Device, wgpu::Queue, wgpu::Adapter)
 {
     let instance_desc = wgpu::InstanceDescriptor {
         #[cfg(target_os = "windows")]
@@ -61,9 +62,9 @@ pub fn init_default_wgpu_context_no_window(device_desc: wgpu::DeviceDescriptor)-
     };
     let adapter = wait_for(instance.request_adapter(&adapter_options)).expect("Failed to get adapter");
 
-    let (device, queue) = wait_for(adapter.request_device(&device_desc)).expect("Failed to get device");
+    let (device, queue) = create_device(&adapter);
 
-    return (device, queue, adapter);
+    return (instance, device, queue, adapter);
 }
 
 pub fn upload_storage_buffer(device: &wgpu::Device, queue: &wgpu::Queue, buf: &[u8])->wgpu::Buffer

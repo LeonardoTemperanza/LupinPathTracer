@@ -23,14 +23,39 @@ pub use lupin_loader as lpl;
 
 fn main()
 {
+    const INIT_WIN_WIDTH: u32 = 800;
+    const INIT_WIN_HEIGHT: u32 = 800;
+
+    let mut surface_config = wgpu::SurfaceConfiguration {
+        usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+        format: wgpu::TextureFormat::Rgba8Unorm,
+        width: INIT_WIN_WIDTH as u32,
+        height: INIT_WIN_HEIGHT as u32,
+        present_mode: wgpu::PresentMode::AutoNoVsync,  // Disabling vsync makes it so tiled rendering isn't slowed down.
+        desired_maximum_frame_latency: 0,
+        alpha_mode: wgpu::CompositeAlphaMode::Auto,
+        view_formats: vec![],
+    };
+    let (instance, device, queue, adapter) = lp::init_default_wgpu_context_no_window();
+
     let native_options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
-            .with_inner_size([400.0, 300.0])
+            .with_inner_size([INIT_WIN_WIDTH as f32, INIT_WIN_HEIGHT as f32])
             .with_min_inner_size([300.0, 220.0]),
+        renderer: eframe::Renderer::Wgpu,
+        wgpu_options: eframe::egui_wgpu::WgpuConfiguration {
+            wgpu_setup: eframe::egui_wgpu::WgpuSetup::Existing(eframe::egui_wgpu::WgpuSetupExisting {
+                instance: instance.clone(),
+                adapter: adapter.clone(),
+                device: device.clone(),
+                queue: queue.clone(),
+            }),
+            ..Default::default()
+        },
         ..Default::default()
     };
 
-    eframe::run_native("Lupin Viewer", native_options, Box::new(|cc| Ok(Box::new(App::new(cc)))));
+    eframe::run_native("Lupin Viewer", native_options, Box::new(|cc| Ok(Box::new(App::new(cc))))).unwrap();
 }
 
 pub struct App
@@ -64,7 +89,7 @@ impl App
 
 impl eframe::App for App
 {
-    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame)
+    fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame)
     {
         // Put your widgets into a `SidePanel`, `TopBottomPanel`, `CentralPanel`, `Window` or `Area`.
         // For inspiration and more examples, go to https://emilk.github.io/egui
@@ -114,6 +139,14 @@ impl eframe::App for App
                 egui::warn_if_debug_build(ui);
             });
         });
+
+        ctx.input(|i| {
+            if i.key_down(egui::Key::W) {
+                println!("W key pressed");
+            }
+        });
+
+        let render_state = frame.wgpu_render_state().unwrap();
     }
 }
 
@@ -223,8 +256,6 @@ fn main()
 
 */
 
-/*
-
 #[derive(Debug, PartialEq, Clone, Copy)]
 pub enum RenderType
 {
@@ -263,7 +294,6 @@ pub struct AppState<'a>
 {
     pub device: &'a wgpu::Device,
     pub queue: &'a wgpu::Queue,
-    pub window: &'a winit::window::Window,
 
     // UI
     pub render_type: RenderType,
@@ -308,10 +338,12 @@ pub struct AppState<'a>
 
 impl<'a> AppState<'a>
 {
-    pub fn new(device: &'a wgpu::Device, queue: &'a wgpu::Queue, window: &'a winit::window::Window) -> Self
+    pub fn new(device: &'a wgpu::Device, queue: &'a wgpu::Queue) -> Self
     {
         const DEFAULT_SAMPLES_PER_PIXEL: u32 = 5;
         const DEFAULT_MAX_BOUNCES: u32 = 8;
+        const DEFAULT_OUTPUT_WIDTH: u32 = 1920;
+        const DEFAULT_OUTPUT_HEIGHT: u32 = 1080;
 
         let pathtrace_resources = lp::build_pathtrace_resources(&device, &lp::BakedPathtraceParams {
             with_runtime_checks: false,
@@ -320,9 +352,6 @@ impl<'a> AppState<'a>
         });
         let tonemap_resources = lp::build_tonemap_resources(&device);
 
-        let width = window.inner_size().width;
-        let height = window.inner_size().height;
-
         let (scene, scene_cameras) = (lpl::build_scene(&device, &queue), Vec::<lpl::SceneCamera>::new());
         //let (scene, scene_cameras) = lpl::build_scene_cornell_box(&device, &queue);
         //let (scene, scene_cameras) = (lpl::build_scene_empty(&device, &queue), Vec::<SceneCamera>::new());
@@ -330,7 +359,7 @@ impl<'a> AppState<'a>
 
         let output_hdr = DoubleBufferedTexture::create(device, &wgpu::TextureDescriptor {
             label: None,
-            size: wgpu::Extent3d { width: width as u32, height: height as u32, depth_or_array_layers: 1 },
+            size: wgpu::Extent3d { width: DEFAULT_OUTPUT_WIDTH, height: DEFAULT_OUTPUT_HEIGHT, depth_or_array_layers: 1 },
             mip_level_count: 1,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
@@ -343,7 +372,7 @@ impl<'a> AppState<'a>
 
         let output_rgba8_unorm = DoubleBufferedTexture::create(device, &wgpu::TextureDescriptor {
             label: None,
-            size: wgpu::Extent3d { width: width as u32, height: height as u32, depth_or_array_layers: 1 },
+            size: wgpu::Extent3d { width: DEFAULT_OUTPUT_WIDTH, height: DEFAULT_OUTPUT_HEIGHT, depth_or_array_layers: 1 },
             mip_level_count: 1,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
@@ -355,7 +384,7 @@ impl<'a> AppState<'a>
         });
         let output_rgba8_snorm = DoubleBufferedTexture::create(device, &wgpu::TextureDescriptor {
             label: None,
-            size: wgpu::Extent3d { width: width as u32, height: height as u32, depth_or_array_layers: 1 },
+            size: wgpu::Extent3d { width: DEFAULT_OUTPUT_WIDTH, height: DEFAULT_OUTPUT_HEIGHT, depth_or_array_layers: 1 },
             mip_level_count: 1,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
@@ -368,7 +397,6 @@ impl<'a> AppState<'a>
         return Self {
             device: device,
             queue: queue,
-            window: window,
 
             // UI
             render_type: RenderType::Falsecolor(lp::FalsecolorType::Albedo),
@@ -412,7 +440,7 @@ impl<'a> AppState<'a>
         };
     }
 
-    pub fn update_and_render(&mut self, egui_ctx: &egui::Context, egui_state: &mut egui_winit::State, egui_renderer: &mut egui_wgpu::Renderer, swapchain: &wgpu::Texture, input: &Input, delta_time: f32)
+    pub fn update_and_render(&mut self, egui_ctx: &egui::Context, /*egui_state: &mut egui_winit::State, egui_renderer: &mut egui_wgpu::Renderer, */ swapchain: &wgpu::Texture, input: &Input, delta_time: f32)
     {
         // Update
         if self.selected_cam == -1  // Free-roam
@@ -431,13 +459,15 @@ impl<'a> AppState<'a>
         }
 
         // Consume the accumulated egui inputs
-        let egui_input = egui_state.take_egui_input(&self.window);
+        // let egui_input = egui_state.take_egui_input(&self.window);
 
         // Update UI
+        /*
         let egui_output = egui_ctx.run(egui_input, |ui|
         {
             self.update_ui(egui_ctx);
         });
+        */
 
         if self.should_rebuild_pathtrace_resources
         {
@@ -453,9 +483,10 @@ impl<'a> AppState<'a>
         // Render scene
         self.render_scene(swapchain);
 
-        self.render_egui(egui_ctx, egui_state, egui_renderer, swapchain, egui_output);
+        // self.render_egui(egui_ctx, egui_state, egui_renderer, swapchain, egui_output);
     }
 
+    /*
     fn render_egui(&mut self, egui_ctx: &egui::Context, egui_state: &mut egui_winit::State, egui_renderer: &mut egui_wgpu::Renderer, swapchain: &wgpu::Texture, egui_output: egui::FullOutput)
     {
         let swapchain_view = swapchain.create_view(&Default::default());
@@ -512,6 +543,7 @@ impl<'a> AppState<'a>
             egui_renderer.free_texture(x)
         }
     }
+    */
 
     fn render_scene(&mut self, swapchain: &wgpu::Texture)
     {
@@ -1379,5 +1411,3 @@ impl<'a> DoubleBufferedTexture
 
     }
 }
-
-*/

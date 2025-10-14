@@ -1,10 +1,6 @@
 
 // System for quickly polling inputs per frame.
 
-/*
-
-use winit::event::*;
-
 pub enum Key
 {
     W = 0,  // NOTE: Do not change this.
@@ -60,6 +56,7 @@ pub struct ButtonState
     pub released: bool
 }
 
+/*
 pub fn begin_input_events(input: &mut Input)
 {
     // Zero out mouse delta

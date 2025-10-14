@@ -256,34 +256,6 @@ pub const NUM_STORAGE_BUFFERS_PER_MESH: u32 = 7;
 // NOTE: Coupled to shader.
 pub const WORKGROUP_SIZE: u32 = 4;
 
-/// This will need to be used when creating the device.
-pub fn get_required_device_spec()->wgpu::DeviceDescriptor<'static>
-{
-    // The main feature we need is the possibility to define arrays of buffer,
-    // texture and sampler bindings, and to index them with non-uniform values.
-    return wgpu::DeviceDescriptor {
-        label: None,
-        required_features: wgpu::Features::TEXTURE_BINDING_ARRAY |
-                           wgpu::Features::BUFFER_BINDING_ARRAY  |
-                           wgpu::Features::STORAGE_RESOURCE_BINDING_ARRAY |
-                           wgpu::Features::SAMPLED_TEXTURE_AND_STORAGE_BUFFER_ARRAY_NON_UNIFORM_INDEXING |
-                           wgpu::Features::PARTIALLY_BOUND_BINDING_ARRAY |
-                           wgpu::Features::PUSH_CONSTANTS,
-        experimental_features: wgpu::ExperimentalFeatures::disabled(),
-        required_limits: wgpu::Limits {
-            max_storage_buffers_per_shader_stage: MAX_MESHES * NUM_STORAGE_BUFFERS_PER_MESH + MAX_ENVS + 64,
-            max_binding_array_elements_per_shader_stage: MAX_MESHES * NUM_STORAGE_BUFFERS_PER_MESH + MAX_ENVS + MAX_TEXTURES + 64,
-            max_binding_array_sampler_elements_per_shader_stage: MAX_SAMPLERS,
-            max_sampled_textures_per_shader_stage: MAX_TEXTURES + 64,
-            max_samplers_per_shader_stage: MAX_SAMPLERS + 8,
-            max_push_constant_size: MAX_PUSH_CONSTANTS_SIZE,
-            ..Default::default()
-        },
-        memory_hints: Default::default(),
-        trace: Default::default(),
-    };
-}
-
 // Shader params
 
 pub struct PathtraceResources
@@ -1352,4 +1324,44 @@ fn get_push_constants_tiled(desc: &PathtraceDesc, pathtrace_type: Option<Pathtra
     push_constants.id_offset = [ offset_x, offset_y ];
 
     return push_constants;
+}
+
+pub fn create_device(adapter: &wgpu::Adapter) -> (wgpu::Device, wgpu::Queue)
+{
+    // The main feature we need is the possibility to define arrays of buffer,
+    // texture and sampler bindings, and to index them with non-uniform values.
+    // We can optionally use ray queries for faster ray traversal.
+
+    let opt_features = wgpu::Features::EXPERIMENTAL_RAY_QUERY;
+    let mut supported_opt_features = wgpu::Features::empty();
+    for opt_feature in opt_features.iter()
+    {
+        if adapter.features().contains(opt_feature) {
+            supported_opt_features |= opt_feature;
+        }
+    }
+
+    let device_desc = wgpu::DeviceDescriptor {
+        label: None,
+        required_features: wgpu::Features::TEXTURE_BINDING_ARRAY |
+                           wgpu::Features::BUFFER_BINDING_ARRAY  |
+                           wgpu::Features::STORAGE_RESOURCE_BINDING_ARRAY |
+                           wgpu::Features::SAMPLED_TEXTURE_AND_STORAGE_BUFFER_ARRAY_NON_UNIFORM_INDEXING |
+                           wgpu::Features::PARTIALLY_BOUND_BINDING_ARRAY |
+                           wgpu::Features::PUSH_CONSTANTS |
+                           supported_opt_features,
+        experimental_features: unsafe { wgpu::ExperimentalFeatures::enabled() },
+        required_limits: wgpu::Limits {
+            max_storage_buffers_per_shader_stage: MAX_MESHES * NUM_STORAGE_BUFFERS_PER_MESH + MAX_ENVS + 64,
+            max_binding_array_elements_per_shader_stage: MAX_MESHES * NUM_STORAGE_BUFFERS_PER_MESH + MAX_ENVS + MAX_TEXTURES + 64,
+            max_binding_array_sampler_elements_per_shader_stage: MAX_SAMPLERS,
+            max_sampled_textures_per_shader_stage: MAX_TEXTURES + 64,
+            max_samplers_per_shader_stage: MAX_SAMPLERS + 8,
+            max_push_constant_size: MAX_PUSH_CONSTANTS_SIZE,
+            ..Default::default()
+        },
+        memory_hints: Default::default(),
+        trace: Default::default(),
+    };
+    return wait_for(adapter.request_device(&device_desc)).expect("Failed to get device");
 }
