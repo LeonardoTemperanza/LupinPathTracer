@@ -2167,11 +2167,18 @@ pub fn save_texture(device: &wgpu::Device, queue: &wgpu::Queue, path: &std::path
         wgpu::TextureFormat::Rgba8Unorm =>
         {
             let mut data_no_alpha = Vec::with_capacity((width * height * 3) as usize);
-            for px in data.chunks_exact(4)
+            for row in 0..height
             {
-                data_no_alpha.push(px[0]);
-                data_no_alpha.push(px[1]);
-                data_no_alpha.push(px[2]);
+                let start = (row * padded_bytes_per_row) as usize;
+                let end = start + unpadded_bytes_per_row as usize;
+                let row_data = &data[start..end];
+
+                for px in row_data.chunks_exact(4)
+                {
+                    data_no_alpha.push(px[0]);
+                    data_no_alpha.push(px[1]);
+                    data_no_alpha.push(px[2]);
+                }
             }
 
             let img = image::ImageBuffer::<image::Rgb<u8>, _>::from_raw(width, height, data_no_alpha).unwrap();
@@ -2185,12 +2192,19 @@ pub fn save_texture(device: &wgpu::Device, queue: &wgpu::Queue, path: &std::path
                 std::slice::from_raw_parts(data.as_ptr() as *const half::f16, data.len() / 2)
             };
 
-            let mut data_f32_no_alpha = Vec::with_capacity((width * height * 3) as usize);
-            for px in data_f16.chunks_exact(4)
+            let mut data_f32_no_alpha = Vec::<f32>::with_capacity((width * height * 3) as usize);
+            for row in 0..height
             {
-                data_f32_no_alpha.push(f32::from(px[0]));
-                data_f32_no_alpha.push(f32::from(px[1]));
-                data_f32_no_alpha.push(f32::from(px[2]));
+                let start = (row * padded_bytes_per_row) as usize;
+                let end = start + unpadded_bytes_per_row as usize;
+                let row_data = &data_f16[start..end];
+
+                for px in row_data.chunks_exact(4)
+                {
+                    data_f32_no_alpha.push(px[0].into());
+                    data_f32_no_alpha.push(px[1].into());
+                    data_f32_no_alpha.push(px[2].into());
+                }
             }
             let img = image::ImageBuffer::<image::Rgb<f32>, _>::from_raw(width, height, data_f32_no_alpha).unwrap();
             let res = img.save(path);
