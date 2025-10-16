@@ -395,9 +395,10 @@ pub fn choose_split(bvh: &[BvhNode], _verts: &[Vec4],
         // Can't split anything here...
         if centroid_min == centroid_max { continue; }
 
-        //const EPS: f32 = 0.001;
-        //centroid_min -= EPS;
-        //centroid_max += EPS;
+        // TODO: Do we really need this or do we have a bug in this function?
+        const EPS: f32 = 0.001;
+        centroid_min -= EPS;
+        centroid_max += EPS;
 
         // Construct bins, for faster cost computation
         let mut bins: [Bin; NUM_BINS] = Default::default();
