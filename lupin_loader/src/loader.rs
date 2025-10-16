@@ -1714,7 +1714,10 @@ fn load_mesh_ply(path: &std::path::Path, scene: &mut lp::SceneCPU) -> Result<u32
                     p.expect_ident("property");
                     p.expect_ident("list");
                     p.expect_ident("uchar");
-                    p.expect_ident("int");
+                    let ident = p.next_ident();
+                    if ident != "uint" && ident != "int" {
+                        return Err(LoadError::InvalidPly);
+                    }
                     p.expect_ident("vertex_indices");
                 }
             }
