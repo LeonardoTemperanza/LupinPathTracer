@@ -478,7 +478,12 @@ impl<'a> AppState<'a>
             {
                 if falsecolor_type == lp::FalsecolorType::Normals
                 {
-                    lp::pathtrace_scene_falsecolor(self.device, self.queue, &desc_snorm, falsecolor_type, Some(&mut self.tile_idx));
+                    let mut desc = desc_snorm;
+                    if !self.tiled_rendering {
+                        desc.tile_params = None;
+                    }
+
+                    lp::pathtrace_scene_falsecolor(self.device, self.queue, &desc, falsecolor_type, Some(&mut self.tile_idx));
                     lp::blit_texture_and_fit_aspect(&self.device, &self.queue, &self.tonemap_resources,
                                                     &self.output_rgba8_snorm.front(), &swapchain, Some(viewport));
 
@@ -486,7 +491,12 @@ impl<'a> AppState<'a>
                 }
                 else
                 {
-                    lp::pathtrace_scene_falsecolor(self.device, self.queue, &desc_unorm, falsecolor_type, Some(&mut self.tile_idx));
+                    let mut desc = desc_unorm;
+                    if !self.tiled_rendering {
+                        desc.tile_params = None;
+                    }
+
+                    lp::pathtrace_scene_falsecolor(self.device, self.queue, &desc, falsecolor_type, Some(&mut self.tile_idx));
                     lp::blit_texture_and_fit_aspect(&self.device, &self.queue, &self.tonemap_resources,
                                                     &self.output_rgba8_unorm.front(), &swapchain, Some(viewport));
 

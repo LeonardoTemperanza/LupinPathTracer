@@ -1678,7 +1678,11 @@ fn load_mesh_ply(path: &std::path::Path, scene: &mut lp::SceneCPU) -> Result<u32
                             "ny" => { ny_buf.present = true; ny_buf.offset = offset; },
                             "nz" => { nz_buf.present = true; nz_buf.offset = offset; },
                             "u"  => { u_buf.present  = true; u_buf.offset  = offset; },
+                            // NOTE: Alternative name for "u"
+                            "s"  => { u_buf.present  = true; u_buf.offset  = offset; },
                             "v"  => { v_buf.present  = true; v_buf.offset  = offset; },
+                            // NOTE: Alternative name for "v"
+                            "t"  => { v_buf.present  = true; v_buf.offset  = offset; },
                             "red"   => { r_buf.present = true; r_buf.offset = offset; },
                             "green" => { g_buf.present = true; g_buf.offset = offset; },
                             "blue"  => { b_buf.present = true; b_buf.offset = offset; },
