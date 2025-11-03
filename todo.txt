@@ -5,11 +5,16 @@ UI
 pathtracer
     add RAY_EPSILON and MAX_RADIANCE to override constants (or push constants?)
 
-    look into how to integrate ray queries
+    ray queries
     denoising (oidn)
 loader
     improve json parser
     make all scenes loadable ------- IMPORTANT
+
+    would be cool:
+        - asynchronous loading with progress bar
+        - parallel loading of textures
+
 misc
     figure out the purpose of the emission direction check in yocto (yocto_cutrace.cu, line 380)
     fix warnings
