@@ -710,7 +710,7 @@ pub fn load_scene_yoctogl_v24(path: &std::path::Path, device: &wgpu::Device, que
         let strlit = p.next_strlit();
         match strlit
         {
-            "cameras" =>
+            b"cameras" =>
             {
                 p.expect_char(':');
                 p.expect_char('[');
@@ -727,27 +727,27 @@ pub fn load_scene_yoctogl_v24(path: &std::path::Path, device: &wgpu::Device, que
                         let strlit = p.next_strlit();
                         match strlit
                         {
-                            "name" =>
+                            b"name" =>
                             {
                                 p.expect_char(':');
                                 let name = p.next_strlit();
                             },
-                            "aspect" =>
+                            b"aspect" =>
                             {
                                 p.expect_char(':');
                                 scene_cam.params.aspect = p.parse_f32();
                             },
-                            "focus" =>
+                            b"focus" =>
                             {
                                 p.expect_char(':');
                                 scene_cam.params.focus = p.parse_f32();
                             },
-                            "frame" =>
+                            b"frame" =>
                             {
                                 p.expect_char(':');
                                 scene_cam.transform = conversion * p.parse_mat3x4f() * conversion;
                             },
-                            "lens" =>
+                            b"lens" =>
                             {
                                 p.expect_char(':');
                                 scene_cam.params.lens = p.parse_f32();
@@ -765,7 +765,7 @@ pub fn load_scene_yoctogl_v24(path: &std::path::Path, device: &wgpu::Device, que
 
                 p.expect_char(']');
             },
-            "environments" =>
+            b"environments" =>
             {
                 p.expect_char(':');
                 p.expect_char('[');
@@ -784,12 +784,17 @@ pub fn load_scene_yoctogl_v24(path: &std::path::Path, device: &wgpu::Device, que
                         let strlit = p.next_strlit();
                         match strlit
                         {
-                            "emission" =>
+                            /*"name" =>
+                            {
+                                p.expect_char(':');
+                                let name = p.next_strlit();
+                            }*/
+                            b"emission" =>
                             {
                                 p.expect_char(':');
                                 env.emission = p.parse_vec3f();
                             }
-                            "emission_tex" =>
+                            b"emission_tex" =>
                             {
                                 p.expect_char(':');
                                 env.emission_tex_idx = p.parse_u32();
@@ -799,7 +804,7 @@ pub fn load_scene_yoctogl_v24(path: &std::path::Path, device: &wgpu::Device, que
                                     tex_load_infos[env.emission_tex_idx as usize].used_for_color = true;
                                 }
                             }
-                            "frame" =>
+                            b"frame" =>
                             {
                                 p.expect_char(':');
                                 env.transform = conversion_mat4 * p.parse_mat3x4f().to_mat4();
@@ -818,7 +823,7 @@ pub fn load_scene_yoctogl_v24(path: &std::path::Path, device: &wgpu::Device, que
 
                 p.expect_char(']');
             },
-            "textures" =>
+            b"textures" =>
             {
                 p.expect_char(':');
                 p.expect_char('[');
@@ -834,13 +839,13 @@ pub fn load_scene_yoctogl_v24(path: &std::path::Path, device: &wgpu::Device, que
                         let strlit = p.next_strlit();
                         match strlit
                         {
-                            "uri" =>
+                            b"uri" =>
                             {
                                 p.expect_char(':');
                                 let path_str = p.next_strlit();
                                 if !path_str.is_empty()
                                 {
-                                    let path = std::path::Path::new(path_str);
+                                    let path = std::path::Path::new(std::str::from_utf8(path_str).unwrap());
                                     let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
                                     let is_hdr = matches!(ext.to_lowercase().as_str(), "hdr" | "exr");
                                     let full_path = parent_dir.join(path);
@@ -849,7 +854,7 @@ pub fn load_scene_yoctogl_v24(path: &std::path::Path, device: &wgpu::Device, que
                                     tex_load_infos[num_parsed_textures].path = String::from(full_path.to_str().unwrap());
                                 }
                             }
-                            "name" =>
+                            b"name" =>
                             {
                                 p.expect_char(':');
                                 let name = p.next_strlit();
@@ -868,7 +873,7 @@ pub fn load_scene_yoctogl_v24(path: &std::path::Path, device: &wgpu::Device, que
 
                 p.expect_char(']');
             },
-            "materials" =>
+            b"materials" =>
             {
                 p.expect_char(':');
                 p.expect_char('[');
@@ -894,7 +899,7 @@ pub fn load_scene_yoctogl_v24(path: &std::path::Path, device: &wgpu::Device, que
 
                 p.expect_char(']');
             },
-            "shapes" =>
+            b"shapes" =>
             {
                 p.expect_char(':');
                 p.expect_char('[');
@@ -910,13 +915,13 @@ pub fn load_scene_yoctogl_v24(path: &std::path::Path, device: &wgpu::Device, que
                         let strlit = p.next_strlit();
                         match strlit
                         {
-                            "uri" =>
+                            b"uri" =>
                             {
                                 p.expect_char(':');
                                 let path_str = p.next_strlit();
                                 if !path_str.is_empty()
                                 {
-                                    let path = std::path::Path::new(path_str);
+                                    let path = std::path::Path::new(std::str::from_utf8(path_str).unwrap());
                                     let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
                                     let full_path = parent_dir.join(path);
 
@@ -936,7 +941,7 @@ pub fn load_scene_yoctogl_v24(path: &std::path::Path, device: &wgpu::Device, que
                                     }
                                 }
                             }
-                            "name" =>
+                            b"name" =>
                             {
                                 p.expect_char(':');
                                 let name = p.next_strlit();
@@ -953,7 +958,7 @@ pub fn load_scene_yoctogl_v24(path: &std::path::Path, device: &wgpu::Device, que
 
                 p.expect_char(']');
             },
-            "instances" =>
+            b"instances" =>
             {
                 p.expect_char(':');
                 p.expect_char('[');
@@ -973,23 +978,23 @@ pub fn load_scene_yoctogl_v24(path: &std::path::Path, device: &wgpu::Device, que
                         let strlit = p.next_strlit();
                         match strlit
                         {
-                            "name" =>
+                            b"name" =>
                             {
                                 p.expect_char(':');
                                 let name = p.next_strlit();
                             },
-                            "frame" =>
+                            b"frame" =>
                             {
                                 p.expect_char(':');
                                 let transform = conversion * p.parse_mat3x4f();
                                 instance.transpose_inverse_transform = transform.inverse().transpose();
                             },
-                            "material" =>
+                            b"material" =>
                             {
                                 p.expect_char(':');
                                 instance.mat_idx = p.parse_u32();
                             },
-                            "shape" =>
+                            b"shape" =>
                             {
                                 p.expect_char(':');
                                 instance.mesh_idx = p.parse_u32();
@@ -1008,7 +1013,7 @@ pub fn load_scene_yoctogl_v24(path: &std::path::Path, device: &wgpu::Device, que
 
                 p.expect_char(']');
             },
-            "asset" =>
+            b"asset" =>
             {
                 p.expect_char(':');
                 p.expect_char('{');
@@ -1097,12 +1102,12 @@ fn parse_material_yocto_v24(p: &mut Parser, tex_load_infos: &mut Vec<TextureLoad
         let strlit = p.next_strlit();
         match strlit
         {
-            "name" =>
+            b"name" =>
             {
                 p.expect_char(':');
                 let name = p.next_strlit();
             }
-            "color" =>
+            b"color" =>
             {
                 p.expect_char(':');
 
@@ -1110,68 +1115,68 @@ fn parse_material_yocto_v24(p: &mut Parser, tex_load_infos: &mut Vec<TextureLoad
                 mat.color = lp::Vec4 { x: color.x, y: color.y, z: color.z, w: mat.color.w };
                 mat.color.w = 1.0;
             },
-            "emission" =>
+            b"emission" =>
             {
                 p.expect_char(':');
 
                 let color = p.parse_vec3f();
                 mat.emission = lp::Vec4 { x: color.x, y: color.y, z: color.z, w: mat.emission.w };
             },
-            "scattering" =>
+            b"scattering" =>
             {
                 p.expect_char(':');
 
                 let color = p.parse_vec3f();
                 mat.scattering = lp::Vec4 { x: color.x, y: color.y, z: color.z, w: mat.scattering.w }
             },
-            "roughness" =>
+            b"roughness" =>
             {
                 p.expect_char(':');
                 mat.roughness = p.parse_f32();
             },
-            "metallic" =>
+            b"metallic" =>
             {
                 p.expect_char(':');
                 mat.metallic = p.parse_f32();
             },
-            "ior" =>
+            b"ior" =>
             {
                 p.expect_char(':');
                 mat.ior = p.parse_f32();
             },
-            "scanisotropy" =>
+            b"scanisotropy" =>
             {
                 p.expect_char(':');
                 mat.sc_anisotropy = p.parse_f32();
             },
-            "trdepth" =>
+            b"trdepth" =>
             {
                 p.expect_char(':');
                 mat.tr_depth = p.parse_f32();
             },
-            "opacity" =>
+            b"opacity" =>
             {
                 p.expect_char(':');
                 mat.color.w = p.parse_f32();
             },
-            "type" =>
+            b"type" =>
             {
                 p.expect_char(':');
                 let mat_type_str = p.next_strlit();
                 match mat_type_str
                 {
-                    "matte" => mat.mat_type = lp::MaterialType::Matte,
-                    "glossy" => mat.mat_type = lp::MaterialType::Glossy,
-                    "reflective" => mat.mat_type = lp::MaterialType::Reflective,
-                    "transparent" => mat.mat_type = lp::MaterialType::Transparent,
-                    "refractive" => mat.mat_type = lp::MaterialType::Refractive,
-                    "subsurface" => mat.mat_type = lp::MaterialType::Subsurface,
-                    "volumetric" => mat.mat_type = lp::MaterialType::Volumetric,
-                    "gltfpbr" => mat.mat_type = lp::MaterialType::GltfPbr,
+                    b"matte" => mat.mat_type = lp::MaterialType::Matte,
+                    b"glossy" => mat.mat_type = lp::MaterialType::Glossy,
+                    b"reflective" => mat.mat_type = lp::MaterialType::Reflective,
+                    b"transparent" => mat.mat_type = lp::MaterialType::Transparent,
+                    b"refractive" => mat.mat_type = lp::MaterialType::Refractive,
+                    b"subsurface" => mat.mat_type = lp::MaterialType::Subsurface,
+                    b"volumetric" => mat.mat_type = lp::MaterialType::Volumetric,
+                    b"gltfpbr" => mat.mat_type = lp::MaterialType::GltfPbr,
                     _ => {}
                 }
             },
-            "color_tex" =>
+            b"color_tex" =>
             {
                 p.expect_char(':');
                 mat.color_tex_idx = p.parse_u32();
@@ -1181,7 +1186,7 @@ fn parse_material_yocto_v24(p: &mut Parser, tex_load_infos: &mut Vec<TextureLoad
                     tex_load_infos[mat.color_tex_idx as usize].used_for_color = true;
                 }
             },
-            "emission_tex" =>
+            b"emission_tex" =>
             {
                 p.expect_char(':');
                 mat.emission_tex_idx = p.parse_u32();
@@ -1191,7 +1196,7 @@ fn parse_material_yocto_v24(p: &mut Parser, tex_load_infos: &mut Vec<TextureLoad
                     tex_load_infos[mat.emission_tex_idx as usize].used_for_color = true;
                 }
             },
-            "roughness_tex" =>
+            b"roughness_tex" =>
             {
                 p.expect_char(':');
                 mat.roughness_tex_idx = p.parse_u32();
@@ -1201,7 +1206,7 @@ fn parse_material_yocto_v24(p: &mut Parser, tex_load_infos: &mut Vec<TextureLoad
                     tex_load_infos[mat.roughness_tex_idx as usize].used_for_data = true;
                 }
             },
-            "scattering_tex" =>
+            b"scattering_tex" =>
             {
                 p.expect_char(':');
                 mat.scattering_tex_idx = p.parse_u32();
@@ -1211,7 +1216,7 @@ fn parse_material_yocto_v24(p: &mut Parser, tex_load_infos: &mut Vec<TextureLoad
                     tex_load_infos[mat.scattering_tex_idx as usize].used_for_data = true;
                 }
             },
-            "normal_tex" =>
+            b"normal_tex" =>
             {
                 p.expect_char(':');
                 mat.normal_tex_idx = p.parse_u32();
@@ -1248,13 +1253,13 @@ impl<'a> Parser<'a>
     }
 
     // Returns strlit without "" chars.
-    fn next_strlit(&mut self) -> &str
+    fn next_strlit(&mut self) -> &[u8]
     {
         self.eat_whitespace();
 
         self.expect_char('\"');
 
-        if self.found_error { return std::str::from_utf8(&self.buf[0..0]).unwrap(); }
+        if self.found_error { return &self.buf[0..0]; }
 
         let trimmed_start = self.buf
             .iter()
@@ -1264,9 +1269,9 @@ impl<'a> Parser<'a>
 
         self.buf = &self.buf[trimmed_start..];
         self.expect_char('"');
-        if self.found_error { return std::str::from_utf8(&self.buf[0..0]).unwrap(); }
+        if self.found_error { return &self.buf[0..0]; }
 
-        return std::str::from_utf8(strlit).unwrap();
+        return strlit;
     }
 
     fn go_to_next_line(&mut self)
@@ -1286,12 +1291,12 @@ impl<'a> Parser<'a>
         }
     }
 
-    fn next_ident(&mut self) -> &str
+    fn next_ident(&mut self) -> &[u8]
     {
         self.eat_whitespace();
 
-        if self.buf.is_empty() { return std::str::from_utf8(&self.buf[0..0]).unwrap(); }
-        if !u8::is_ascii_alphabetic(&self.buf[0]) && self.buf[0] != b'_' { return std::str::from_utf8(&self.buf[0..0]).unwrap(); }
+        if self.buf.is_empty() { return &self.buf[0..0]; }
+        if !u8::is_ascii_alphabetic(&self.buf[0]) && self.buf[0] != b'_' { return &self.buf[0..0]; }
 
         let trimmed_start = self.buf
             .iter()
@@ -1300,12 +1305,12 @@ impl<'a> Parser<'a>
         let token = &self.buf[0..trimmed_start];
 
         self.buf = &self.buf[trimmed_start..];
-        if self.found_error { return std::str::from_utf8(&self.buf[0..0]).unwrap(); }
+        if self.found_error { return &self.buf[0..0]; }
 
-        return std::str::from_utf8(token).unwrap();
+        return token;
     }
 
-    fn expect_ident(&mut self, ident: &str)
+    fn expect_ident(&mut self, ident: &[u8])
     {
         self.eat_whitespace();
 
@@ -1321,15 +1326,15 @@ impl<'a> Parser<'a>
         self.buf = &self.buf[trimmed_start..];
         if self.found_error { return; }
 
-        if std::str::from_utf8(&token).unwrap() != ident { self.found_error = true; }
+        if token != ident { self.found_error = true; println!("Expected {}, got {}.", String::from_utf8_lossy(ident), String::from_utf8_lossy(token)); }
     }
 
-    fn peek_ident(&mut self) -> &str
+    fn peek_ident(&mut self) -> &[u8]
     {
         self.eat_whitespace();
 
-        if self.buf.is_empty() { return std::str::from_utf8(&self.buf[0..0]).unwrap(); }
-        if !u8::is_ascii_alphabetic(&self.buf[0]) && self.buf[0] != b'_' { return std::str::from_utf8(&self.buf[0..0]).unwrap(); }
+        if self.buf.is_empty() { return &self.buf[0..0]; }
+        if !u8::is_ascii_alphabetic(&self.buf[0]) && self.buf[0] != b'_' { return &self.buf[0..0]; }
 
         let trimmed_start = self.buf
             .iter()
@@ -1337,17 +1342,17 @@ impl<'a> Parser<'a>
             .unwrap_or(self.buf.len());
         let token = &self.buf[0..trimmed_start];
 
-        if self.found_error { return std::str::from_utf8(&self.buf[0..0]).unwrap(); }
+        if self.found_error { return &self.buf[0..0]; }
 
-        return std::str::from_utf8(token).unwrap();
+        return token;
     }
 
     fn expect_char(&mut self, c: char)
     {
         self.eat_whitespace();
-        if self.buf.len() == 0 { self.found_error = true; return; }
-        if !c.is_ascii()       { self.found_error = true; return; }
-        if self.buf[0] != c as u8 { self.found_error = true; return; }
+        if self.buf.len() == 0 { self.found_error = true; println!("Expected {}, got EOF.", c); return; }
+        if !c.is_ascii()       { self.found_error = true; println!("Expected {}, got unknown.", c); return; }
+        if self.buf[0] != c as u8 { self.found_error = true; println!("Expected {}, got {}.", c, self.buf[0] as char); return; }
         self.buf = &self.buf[1..];
     }
 
@@ -1419,6 +1424,7 @@ impl<'a> Parser<'a>
         if self.buf.is_empty()
         {
             self.found_error = true;
+            println!("Expected f32, got EOF.");
             return 0.0;
         }
 
@@ -1434,6 +1440,7 @@ impl<'a> Parser<'a>
         if end == 0
         {
             self.found_error = true;
+            println!("Expected f32.");
             return 0.0
         }
 
@@ -1448,12 +1455,14 @@ impl<'a> Parser<'a>
                 Err(_) =>
                 {
                     self.found_error = true;
+                    println!("Expected f32.");
                     return 0.0
                 }
             },
             Err(_) =>
             {
                 self.found_error = true;
+                println!("Expected f32.");
                 return 0.0
             }
         };
@@ -1466,6 +1475,7 @@ impl<'a> Parser<'a>
         if self.buf.is_empty()
         {
             self.found_error = true;
+            println!("Expected u32, got EOF.");
             return 0;
         }
 
@@ -1481,6 +1491,7 @@ impl<'a> Parser<'a>
         if end == 0
         {
             self.found_error = true;
+            println!("Expected u32.");
             return 0
         }
 
@@ -1495,12 +1506,14 @@ impl<'a> Parser<'a>
                 Err(_) =>
                 {
                     self.found_error = true;
+                    println!("Expected u32.");
                     return 0
                 }
             },
             Err(_) =>
             {
                 self.found_error = true;
+                println!("Expected u32.");
                 return 0
             }
         };
@@ -1625,16 +1638,16 @@ fn load_mesh_ply(path: &std::path::Path, scene: &mut lp::SceneCPU) -> Result<u32
     let mut vert_size = 0;
     let indices_offset = 0;
 
-    p.expect_ident("ply");
+    p.expect_ident(b"ply");
 
     loop
     {
         let ident = p.next_ident();
         match ident
         {
-            "format" =>
+            b"format" =>
             {
-                p.expect_ident("binary_little_endian");
+                p.expect_ident(b"binary_little_endian");
                 let major_version = p.parse_u32();
                 p.expect_char('.');
                 let minor_version = p.parse_u32();
@@ -1644,26 +1657,26 @@ fn load_mesh_ply(path: &std::path::Path, scene: &mut lp::SceneCPU) -> Result<u32
                     assert!(false);
                 }
             }
-            "comment" =>
+            b"comment" =>
             {
                 p.go_to_next_line();
             }
-            "element" =>
+            b"element" =>
             {
                 let el_name = p.next_ident();
-                if el_name == "vertex"
+                if el_name == b"vertex"
                 {
                     num_verts = p.parse_u32();
 
                     let mut offset = 0;
 
-                    while p.peek_ident() == "property"
+                    while p.peek_ident() == b"property"
                     {
                         p.next_ident();
 
                         let mut prop_size = 0;
                         let prop_type_str = p.next_ident();
-                        if prop_type_str == "float"
+                        if prop_type_str == b"float"
                         {
                             prop_size = 4;
                         }
@@ -1671,22 +1684,22 @@ fn load_mesh_ply(path: &std::path::Path, scene: &mut lp::SceneCPU) -> Result<u32
                         let prop_name = p.next_ident();
                         match prop_name
                         {
-                            "x"  => { x_buf.present  = true; x_buf.offset  = offset; },
-                            "y"  => { y_buf.present  = true; y_buf.offset  = offset; },
-                            "z"  => { z_buf.present  = true; z_buf.offset  = offset; },
-                            "nx" => { nx_buf.present = true; nx_buf.offset = offset; },
-                            "ny" => { ny_buf.present = true; ny_buf.offset = offset; },
-                            "nz" => { nz_buf.present = true; nz_buf.offset = offset; },
-                            "u"  => { u_buf.present  = true; u_buf.offset  = offset; },
+                            b"x"  => { x_buf.present  = true; x_buf.offset  = offset; },
+                            b"y"  => { y_buf.present  = true; y_buf.offset  = offset; },
+                            b"z"  => { z_buf.present  = true; z_buf.offset  = offset; },
+                            b"nx" => { nx_buf.present = true; nx_buf.offset = offset; },
+                            b"ny" => { ny_buf.present = true; ny_buf.offset = offset; },
+                            b"nz" => { nz_buf.present = true; nz_buf.offset = offset; },
+                            b"u"  => { u_buf.present  = true; u_buf.offset  = offset; },
                             // NOTE: Alternative name for "u"
-                            "s"  => { u_buf.present  = true; u_buf.offset  = offset; },
-                            "v"  => { v_buf.present  = true; v_buf.offset  = offset; },
+                            b"s"  => { u_buf.present  = true; u_buf.offset  = offset; },
+                            b"v"  => { v_buf.present  = true; v_buf.offset  = offset; },
                             // NOTE: Alternative name for "v"
-                            "t"  => { v_buf.present  = true; v_buf.offset  = offset; },
-                            "red"   => { r_buf.present = true; r_buf.offset = offset; },
-                            "green" => { g_buf.present = true; g_buf.offset = offset; },
-                            "blue"  => { b_buf.present = true; b_buf.offset = offset; },
-                            "alpha" => { a_buf.present = true; a_buf.offset = offset; },
+                            b"t"  => { v_buf.present  = true; v_buf.offset  = offset; },
+                            b"red"   => { r_buf.present = true; r_buf.offset = offset; },
+                            b"green" => { g_buf.present = true; g_buf.offset = offset; },
+                            b"blue"  => { b_buf.present = true; b_buf.offset = offset; },
+                            b"alpha" => { a_buf.present = true; a_buf.offset = offset; },
                             _    => {},
                         }
 
@@ -1708,20 +1721,20 @@ fn load_mesh_ply(path: &std::path::Path, scene: &mut lp::SceneCPU) -> Result<u32
                     a_buf.stride = total_size;
                     vert_size = total_size;
                 }
-                else if el_name == "face"
+                else if el_name == b"face"
                 {
                     num_faces = p.parse_u32();
-                    p.expect_ident("property");
-                    p.expect_ident("list");
-                    p.expect_ident("uchar");
+                    p.expect_ident(b"property");
+                    p.expect_ident(b"list");
+                    p.expect_ident(b"uchar");
                     let ident = p.next_ident();
-                    if ident != "uint" && ident != "int" {
+                    if ident != b"uint" && ident != b"int" {
                         return Err(LoadError::InvalidPly);
                     }
-                    p.expect_ident("vertex_indices");
+                    p.expect_ident(b"vertex_indices");
                 }
             }
-            "end_header" => { p.go_to_next_line(); break; }
+            b"end_header" => { p.go_to_next_line(); break; }
             _ => { p.found_error = true; }
         }
 

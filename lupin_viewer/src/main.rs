@@ -216,10 +216,7 @@ impl<'a> AppState<'a>
         let width = window.inner_size().width;
         let height = window.inner_size().height;
 
-        let (scene, scene_cameras) = (lpl::build_scene(&device, &queue), Vec::<lpl::SceneCamera>::new());
-        //let (scene, scene_cameras) = lpl::build_scene_cornell_box(&device, &queue);
-        //let (scene, scene_cameras) = (lpl::build_scene_empty(&device, &queue), Vec::<SceneCamera>::new());
-        //let (scene, scene_cameras) = lpl::load_scene_json(std::path::Path::new("yocto-scenes/bathroom1/bathroom1.json"), &device, &queue).unwrap();
+        let (scene, scene_cameras) = lpl::build_scene_cornell_box(&device, &queue);
 
         let output_hdr = DoubleBufferedTexture::create(device, &wgpu::TextureDescriptor {
             label: None,
@@ -279,7 +276,7 @@ impl<'a> AppState<'a>
             keep_aspect_ratio: true,
             ui_panel_width: 0,
             cam_speed_multiplier: 1.0,
-            tiled_rendering: true,
+            tiled_rendering: false,
             tile_params: Default::default(),
 
             // Camera
