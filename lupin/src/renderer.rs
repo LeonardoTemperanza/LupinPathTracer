@@ -280,6 +280,7 @@ pub fn get_required_device_spec()->wgpu::DeviceDescriptor<'static>
             max_push_constant_size: MAX_PUSH_CONSTANTS_SIZE,
             ..Default::default()
         },
+        experimental_features: unsafe { wgpu::ExperimentalFeatures::enabled() },
         memory_hints: Default::default(),
         trace: Default::default(),
     };

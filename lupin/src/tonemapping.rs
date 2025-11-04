@@ -300,6 +300,7 @@ pub fn tonemap_and_fit_aspect(device: &wgpu::Device, queue: &wgpu::Queue, desc: 
                     load: wgpu::LoadOp::Clear(wgpu::Color { r: 0.0, g: 0.0, b: 0.0, a: 1.0 }),
                     store: wgpu::StoreOp::Store
                 },
+                depth_slice: None,
             })],
             depth_stencil_attachment: None,
             occlusion_query_set: None,
@@ -366,6 +367,7 @@ pub fn blit_texture_and_fit_aspect(device: &wgpu::Device, queue: &wgpu::Queue, r
                     load: wgpu::LoadOp::Clear(wgpu::Color { r: 0.0, g: 0.0, b: 0.0, a: 1.0 }),
                     store: wgpu::StoreOp::Store
                 },
+                depth_slice: None,
             })],
             depth_stencil_attachment: None,
             occlusion_query_set: None,

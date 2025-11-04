@@ -61,7 +61,7 @@ fn main()
     let egui_ctx = egui::Context::default();
     let viewport_id = egui_ctx.viewport_id();
     let mut egui_state = egui_winit::State::new(egui_ctx.clone(), viewport_id, &window, None, None, None);
-    let mut egui_renderer = egui_wgpu::Renderer::new(&device, wgpu::TextureFormat::Rgba8Unorm, None, 1, true);
+    let mut egui_renderer = egui_wgpu::Renderer::new(&device, wgpu::TextureFormat::Rgba8Unorm, Default::default());
 
     let mut input = Input::default();
 
@@ -387,6 +387,7 @@ impl<'a> AppState<'a>
                         load: wgpu::LoadOp::Load,
                         store: wgpu::StoreOp::Store,
                     },
+                    depth_slice: None,
                 })],
                 depth_stencil_attachment: None,
                 label: None,
@@ -824,7 +825,7 @@ impl<'a> AppState<'a>
                     });
 
                     ui.horizontal(|ui| {
-                        ui.add(egui::DragValue::new(&mut self.camera_params.focus).range(0.0..=50000.0).speed(0.1));
+                        ui.add(egui::DragValue::new(&mut self.camera_params.focus).range(0.0..=10000000000.0).speed(0.1));
                         ui.label("Focus");
                     });
 
@@ -878,7 +879,6 @@ impl<'a> AppState<'a>
                         if ui.add(egui::RadioButton::new(selected, format!("Camera {}", i+1))).clicked()
                         {
                             self.switch_to_cam(i as i32);
-                            println!("clicked {}", i);
                         }
                     }
 
