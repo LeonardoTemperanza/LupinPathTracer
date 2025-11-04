@@ -784,11 +784,11 @@ pub fn load_scene_yoctogl_v24(path: &std::path::Path, device: &wgpu::Device, que
                         let strlit = p.next_strlit();
                         match strlit
                         {
-                            /*"name" =>
+                            b"name" =>
                             {
                                 p.expect_char(':');
                                 let name = p.next_strlit();
-                            }*/
+                            }
                             b"emission" =>
                             {
                                 p.expect_char(':');

@@ -167,9 +167,11 @@ struct BvhNode
 struct TlasNode
 {
     aabb_min: vec3f,
-    left_right: u32,  // 2x16 bits. If it's 0, this node is a leaf
+    left: u32,  // If it's 0, this node is a leaf
     aabb_max: vec3f,
     instance_idx: u32,
+    right: u32,
+    // 12 bytes padding.
 }
 
 // NOTE: Coupled to constants in renderer.rs
@@ -1573,7 +1575,7 @@ fn ray_scene_intersection(ray: Ray)->HitInfo
         stack_idx--;
         let node = tlas_nodes[tlas_stack[stack_idx]];
 
-        if node.left_right == 0u  // Leaf node
+        if node.left == 0u  // Leaf node
         {
             let instance = instances[node.instance_idx];
 
@@ -1594,10 +1596,8 @@ fn ray_scene_intersection(ray: Ray)->HitInfo
         }
         else  // Non-leaf node
         {
-            let left_child  = node.left_right >> 16;
-            let right_child = node.left_right & 0x0000FFFF;
-            let left_child_node  = tlas_nodes[left_child];
-            let right_child_node = tlas_nodes[right_child];
+            let left_child_node  = tlas_nodes[node.left];
+            let right_child_node = tlas_nodes[node.right];
 
             let left_dst  = ray_aabb_dst(ray, left_child_node.aabb_min,  left_child_node.aabb_max);
             let right_dst = ray_aabb_dst(ray, right_child_node.aabb_min, right_child_node.aabb_max);
@@ -1620,13 +1620,13 @@ fn ray_scene_intersection(ray: Ray)->HitInfo
             {
                 if push_right
                 {
-                    tlas_stack[stack_idx] = right_child;
+                    tlas_stack[stack_idx] = node.right;
                     stack_idx++;
                 }
 
                 if push_left
                 {
-                    tlas_stack[stack_idx] = left_child;
+                    tlas_stack[stack_idx] = node.left;
                     stack_idx++;
                 }
             }
@@ -1634,13 +1634,13 @@ fn ray_scene_intersection(ray: Ray)->HitInfo
             {
                 if push_left
                 {
-                    tlas_stack[stack_idx] = left_child;
+                    tlas_stack[stack_idx] = node.left;
                     stack_idx++;
                 }
 
                 if push_right
                 {
-                    tlas_stack[stack_idx] = right_child;
+                    tlas_stack[stack_idx] = node.right;
                     stack_idx++;
                 }
             }

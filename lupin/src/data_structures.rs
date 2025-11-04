@@ -536,7 +536,6 @@ fn compute_aabb(_indices: &[u32], tri_bounds: &mut[Aabb], tri_begin: u32, tri_co
     return (res.min, res.max);
 }
 
-
 // The aabbs are in model space, and they're indexed using the instance mesh_idx member.
 pub fn build_tlas(instances: &[Instance], model_aabbs: &[Aabb]) -> Vec<TlasNode>
 {
@@ -544,8 +543,6 @@ pub fn build_tlas(instances: &[Instance], model_aabbs: &[Aabb]) -> Vec<TlasNode>
 
     let mut node_indices = Vec::<u32>::with_capacity(instances.len());
     let mut tlas = Vec::<TlasNode>::with_capacity(instances.len() * 2 - 1);
-
-    tlas.push(TlasNode::default());  // Reserve slot for root node.
 
     // Assign a leaf node for each instance.
     for i in 0..instances.len() as u32
@@ -559,7 +556,9 @@ pub fn build_tlas(instances: &[Instance], model_aabbs: &[Aabb]) -> Vec<TlasNode>
             aabb_min: aabb_trans.min,
             aabb_max: aabb_trans.max,
             instance_idx: i,
-            left_right: 0,  // Makes it a leaf.
+            left: 0,  // Makes it a leaf.
+            right: 0,
+            ..Default::default()
         };
         tlas.push(tlas_node);
         node_indices.push(tlas.len() as u32 - 1);
@@ -575,16 +574,21 @@ pub fn build_tlas(instances: &[Instance], model_aabbs: &[Aabb]) -> Vec<TlasNode>
         {
             let node_idx_a = node_indices[a as usize];
             let node_idx_b = node_indices[b as usize];
+
             let node_a = tlas[node_idx_a as usize];
             let node_b = tlas[node_idx_b as usize];
 
             let new_node = TlasNode {
-                left_right: node_idx_a + (node_idx_b << 16),
+                left: node_idx_a,
+                right: node_idx_b,
                 aabb_min: node_a.aabb_min.min(node_b.aabb_min),
                 aabb_max: node_a.aabb_max.max(node_b.aabb_max),
                 instance_idx: 0,  // Unused.
+                ..Default::default()
             };
             tlas.push(new_node);
+
+            assert!(tlas.len() <= u32::MAX as usize);
 
             node_indices[a as usize] = tlas.len() as u32 - 1;
             node_indices[b as usize] = node_indices[node_indices.len() - 1];
@@ -600,7 +604,31 @@ pub fn build_tlas(instances: &[Instance], model_aabbs: &[Aabb]) -> Vec<TlasNode>
         }
     }
 
-    tlas[0] = tlas[node_indices[a as usize] as usize];
+    // Push root
+    tlas.push(tlas[node_indices[a as usize] as usize]);
+
+    // Reverse TLAS for better memory layout. This puts
+    // the root at index 0.
+    let tlas_len = tlas.len();
+    for i in 0..tlas_len / 2 + tlas_len % 2
+    {
+        let tmp = tlas[i];
+        tlas[i] = tlas[tlas_len - 1 - i];
+        tlas[tlas_len - 1 - i] = tmp;
+
+        if tlas[i].left != 0
+        {
+            tlas[i].left = tlas_len as u32 - 1 - tlas[i].left;
+            tlas[i].right = tlas_len as u32 - 1 - tlas[i].right;
+        }
+
+        if tlas[tlas_len - 1 - i].left != 0
+        {
+            tlas[tlas_len - 1 - i].left = tlas_len as u32 - 1 - tlas[i].left;
+            tlas[tlas_len - 1 - i].right = tlas_len as u32 - 1 - tlas[i].right;
+        }
+    }
+
     return tlas;
 }
 
@@ -800,12 +828,9 @@ mod tests
         {
             let slot_idx: usize = rng.gen_range(0..alias_table.len()); // inclusive range
             let rnd: f32 = rng.gen();
-            if rnd >= alias_table[slot_idx].alias_threshold
-            {
+            if rnd >= alias_table[slot_idx].alias_threshold {
                 hits_per_idx[alias_table[slot_idx].alias as usize].hits += 1;
-            }
-            else
-            {
+            } else {
                 hits_per_idx[slot_idx as usize].hits += 1;
             }
         }

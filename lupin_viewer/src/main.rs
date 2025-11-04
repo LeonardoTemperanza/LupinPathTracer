@@ -255,7 +255,9 @@ impl<'a> AppState<'a>
             view_formats: &[]
         });
 
-        return Self {
+        let num_cameras = scene_cameras.len();
+
+        let mut res = Self {
             device: device,
             queue: queue,
             window: window,
@@ -300,6 +302,10 @@ impl<'a> AppState<'a>
             accum_counter: 0,
             tile_idx: 0,
         };
+
+        res.switch_to_cam(if num_cameras > 0 { 0 } else { -1 });
+
+        return res;
     }
 
     pub fn update_and_render(&mut self, egui_ctx: &egui::Context, egui_state: &mut egui_winit::State, egui_renderer: &mut egui_wgpu::Renderer, swapchain: &wgpu::Texture, input: &Input, delta_time: f32)

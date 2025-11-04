@@ -204,9 +204,11 @@ pub struct BvhNode
 pub struct TlasNode
 {
     pub aabb_min: Vec3,
-    pub left_right: u32,  // 2x16 bits. If it's 0, this node is a leaf
+    pub left: u32,  // If it's 0, this node is a leaf
     pub aabb_max: Vec3,
-    pub instance_idx: u32
+    pub instance_idx: u32,
+    pub right: u32,
+    pub _padding0: Vec3,
 }
 
 #[derive(Default, Clone, Copy, Debug)]
