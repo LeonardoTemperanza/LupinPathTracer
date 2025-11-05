@@ -659,11 +659,11 @@ pub fn tlas_find_best_match(tlas: &[TlasNode], idx_array: &[u32], node_a: u32) -
 /// Also builds and uploads auxiliary data structures, e.g. lights.
 pub fn upload_scene_to_gpu(device: &wgpu::Device, queue: &wgpu::Queue, scene: &SceneCPU, textures: Vec<wgpu::Texture>, samplers: Vec<wgpu::Sampler>, envs_info: &[EnvMapInfo]) -> Scene
 {
-    let verts_pos_array: Vec::<wgpu::Buffer> = scene.verts_pos_array.iter().map(|x| upload_storage_buffer(device, queue, to_u8_slice(x))).collect();
+    let verts_pos_array: Vec::<wgpu::Buffer> = scene.verts_pos_array.iter().map(|x| upload_vertex_pos_buffer(device, queue, to_u8_slice(x))).collect();
     let verts_normal_array: Vec::<wgpu::Buffer> = scene.verts_normal_array.iter().map(|x| upload_storage_buffer(device, queue, to_u8_slice(x))).collect();
     let verts_texcoord_array: Vec::<wgpu::Buffer> = scene.verts_texcoord_array.iter().map(|x| upload_storage_buffer(device, queue, to_u8_slice(x))).collect();
     let verts_color_array: Vec::<wgpu::Buffer> = scene.verts_color_array.iter().map(|x| upload_storage_buffer(device, queue, to_u8_slice(x))).collect();
-    let indices_array: Vec::<wgpu::Buffer> = scene.indices_array.iter().map(|x| upload_storage_buffer(device, queue, to_u8_slice(x))).collect();
+    let indices_array: Vec::<wgpu::Buffer> = scene.indices_array.iter().map(|x| upload_indices_buffer(device, queue, to_u8_slice(x))).collect();
     let bvh_nodes_array: Vec::<wgpu::Buffer> = scene.bvh_nodes_array.iter().map(|x| upload_storage_buffer(device, queue, to_u8_slice(x))).collect();
 
     let mesh_infos = upload_storage_buffer_with_name(device, queue, to_u8_slice(&scene.mesh_infos), "mesh_infos");
@@ -674,6 +674,98 @@ pub fn upload_scene_to_gpu(device: &wgpu::Device, queue: &wgpu::Queue, scene: &S
 
     // Build auxiliary data structures.
     let lights = build_lights(device, queue, scene, envs_info);
+
+    // RT hardware accel structures
+    let mut tlas = device.create_tlas(&wgpu::CreateTlasDescriptor {
+        label: None,
+        flags: wgpu::AccelerationStructureFlags::PREFER_FAST_TRACE,
+        update_mode: wgpu::AccelerationStructureUpdateMode::Build,
+        max_instances: 1000000,
+    });
+
+    let mut blases = Vec::new();
+    let mut build_entries = Vec::new();
+    let mut size_descs = Vec::new();
+
+    for i in 0..scene.verts_pos_array.len()
+    {
+        let verts = &scene.verts_pos_array[i];
+        let indices = &scene.indices_array[i];
+
+        let size_desc = wgpu::BlasTriangleGeometrySizeDescriptor {
+            vertex_format: wgpu::VertexFormat::Float32x3,
+            vertex_count: verts.len() as u32,
+            index_format: Some(wgpu::IndexFormat::Uint32),
+            index_count: Some(indices.len() as u32),
+            flags: wgpu::AccelerationStructureGeometryFlags::OPAQUE,
+        };
+        size_descs.push(size_desc);
+    }
+
+    for i in 0..scene.verts_pos_array.len()
+    {
+        let blas = device.create_blas(
+            &wgpu::CreateBlasDescriptor {
+                label: None,
+                flags: wgpu::AccelerationStructureFlags::PREFER_FAST_TRACE,
+                update_mode: wgpu::AccelerationStructureUpdateMode::Build,
+            },
+            wgpu::BlasGeometrySizeDescriptors::Triangles {
+                descriptors: vec![size_descs[i].clone()],
+            },
+        );
+
+        blases.push(blas);
+    }
+
+    for i in 0..scene.verts_pos_array.len()
+    {
+        let verts = &scene.verts_pos_array[i];
+        let indices = &scene.indices_array[i];
+
+        let triangle_geometry = wgpu::BlasTriangleGeometry {
+            size: &size_descs[i],
+            vertex_buffer: &verts_pos_array[i],
+            first_vertex: 0,
+            vertex_stride: std::mem::size_of::<Vec4>() as u64,
+            index_buffer: Some(&indices_array[i]),
+            first_index: Some(0),
+            transform_buffer: None,
+            transform_buffer_offset: None,
+        };
+
+        build_entries.push(wgpu::BlasBuildEntry {
+            blas: &blases[i],
+            geometry: wgpu::BlasGeometries::TriangleGeometries(vec![triangle_geometry]),
+        });
+    }
+
+    // Continue work from here.
+    for (i, instance) in scene.instances.iter().enumerate()
+    {
+        let mesh_idx = instance.mesh_idx;
+        let rt_transform = instance.transpose_inverse_transform.transpose().inverse().transpose();
+        let rt_transform_serial = [
+            rt_transform.m[0][0], rt_transform.m[0][1], rt_transform.m[0][2], rt_transform.m[0][3],
+            rt_transform.m[1][0], rt_transform.m[1][1], rt_transform.m[1][2], rt_transform.m[1][3],
+            rt_transform.m[2][0], rt_transform.m[2][1], rt_transform.m[2][2], rt_transform.m[2][3],
+        ];
+
+        // Using the index_mut trait for wgpu::Tlas.
+        tlas[i] = Some(wgpu::TlasInstance::new(
+            &blases[mesh_idx as usize],
+            rt_transform_serial,
+            i as u32,
+            0xFF
+        ));
+    }
+
+    let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
+    encoder.build_acceleration_structures(build_entries.iter(), std::iter::empty());
+    queue.submit(Some(encoder.finish()));
+    encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
+    encoder.build_acceleration_structures(std::iter::empty(), std::iter::once(&tlas));
+    queue.submit(Some(encoder.finish()));
 
     return Scene {
         mesh_infos,
@@ -690,8 +782,106 @@ pub fn upload_scene_to_gpu(device: &wgpu::Device, queue: &wgpu::Queue, scene: &S
         samplers,
         environments,
         lights,
+        rt_tlas: tlas,
+        rt_blases: blases,
     };
 }
+
+/// Builds BVH and TLAS for hardware raytracing.
+/*
+pub fn build_rt_accel_structures(device: wgpu::Device, queue: wgpu::Queue, verts_pos: &wgpu::Buffer, indices: &wgpu::Buffer) -> (Vec<wgpu::Blas>, wgpu::Tlas)
+{
+    let mut tlas = device.create_tlas(&wgpu::CreateTlasDescriptor {
+        label: None,
+        flags: wgpu::AccelerationStructureFlags::PREFER_FAST_TRACE,
+        update_mode: wgpu::AccelerationStructureUpdateMode::Build,
+        max_instances: 1000000,
+    });
+
+    let mut blases = Vec::new();
+    let mut build_entries = Vec::new();
+    let mut size_descs = Vec::new();
+
+    for i in 0..scene.verts_pos_array.len()
+    {
+        let verts = &scene.verts_pos_array[i];
+        let indices = &scene.indices_array[i];
+
+        let size_desc = wgpu::BlasTriangleGeometrySizeDescriptor {
+            vertex_format: wgpu::VertexFormat::Float32x4,
+            vertex_count: verts.len() as u32,
+            index_format: Some(wgpu::IndexFormat::Uint32),
+            index_count: Some(indices.len() as u32),
+            flags: wgpu::AccelerationStructureGeometryFlags::OPAQUE,
+        };
+        size_descs.push(size_desc);
+    }
+
+    for i in 0..scene.verts_pos_array.len()
+    {
+        let blas = device.create_blas(
+            &wgpu::CreateBlasDescriptor {
+                label: None,
+                flags: wgpu::AccelerationStructureFlags::PREFER_FAST_TRACE,
+                update_mode: wgpu::AccelerationStructureUpdateMode::Build,
+            },
+            wgpu::BlasGeometrySizeDescriptors::Triangles {
+                descriptors: vec![size_descs[i].clone()],
+            },
+        );
+
+        blases.push(blas);
+    }
+
+    for i in 0..scene.verts_pos_array.len()
+    {
+        let verts = &scene.verts_pos_array[i];
+        let indices = &scene.indices_array[i];
+
+        let triangle_geometry = wgpu::BlasTriangleGeometry {
+            size: &size_descs[size_descs.len() - 1],
+            vertex_buffer: &verts_pos_array[i],
+            first_vertex: 0,
+            vertex_stride: std::mem::size_of::<Vec4>() as u64,
+            index_buffer: Some(&indices_array[i]),
+            first_index: Some(0),
+            transform_buffer: None,
+            transform_buffer_offset: None,
+        };
+
+        build_entries.push(wgpu::BlasBuildEntry {
+            blas: &blases[i],
+            geometry: wgpu::BlasGeometries::TriangleGeometries(vec![triangle_geometry]),
+        });
+    }
+
+    let build_entries = Vec::new();
+
+    // Continue work from here.
+    for (i, instance) in scene.instances.iter().enumerate()
+    {
+        let mesh_idx = instance.mesh_idx;
+        let rt_transform = instance.transpose_inverse_transform.transpose().inverse().transpose();
+        let rt_transform_serial = [
+            rt_transform.m[0][0], rt_transform.m[0][1], rt_transform.m[0][2], rt_transform.m[0][3],
+            rt_transform.m[1][0], rt_transform.m[1][1], rt_transform.m[1][2], rt_transform.m[1][3],
+            rt_transform.m[2][0], rt_transform.m[2][1], rt_transform.m[2][2], rt_transform.m[2][3],
+        ];
+
+        // Using the index_mut trait for wgpu::Tlas.
+        tlas[i] = Some(wgpu::TlasInstance::new(
+            &blases[mesh_idx as usize],
+            rt_transform_serial,
+            i as u32,
+            0xFF
+        ));
+    }
+
+    let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
+    encoder.build_acceleration_structures(build_entries.iter(), std::iter::once(&tlas));
+    queue.submit(Some(encoder.finish()));
+}
+*/
 
 /// Used to verify if a scene has been built correctly. It's best to call it
 /// right before upload_scene_to_gpu.

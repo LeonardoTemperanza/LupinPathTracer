@@ -558,7 +558,7 @@ impl std::ops::Mul<Mat3x4> for Mat3x4
     }
 }
 
-/// The naming follows this convention: MatRxC, where R
+/// The naming follows this convention: MatCxR, where R
 /// is the number of rows, and C is the number of columns.
 #[derive(Debug, Clone, Copy)]
 #[repr(C)]

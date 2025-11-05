@@ -1,12 +1,11 @@
 
 use crate::base::*;
+use crate::renderer::*;
 
-// Windowing libraries tipically implement the Into<wgpu::SurfaceTarget> trait,
-// if not you can easily implement it yourself
-pub fn init_default_wgpu_context<'a>(device_desc: wgpu::DeviceDescriptor,
-                             surface_config: &wgpu::SurfaceConfiguration,
-                             window: impl Into<wgpu::SurfaceTarget<'a>>,
-                             window_width: i32, window_height: i32)->(wgpu::Device, wgpu::Queue, wgpu::Surface<'a>, wgpu::Adapter)
+/// Initializes a WGPU context for you.
+pub fn init_default_wgpu_context<'a>(surface_config: &wgpu::SurfaceConfiguration,
+                                     window: impl Into<wgpu::SurfaceTarget<'a>>,
+                                     window_width: i32, window_height: i32)->(wgpu::Device, wgpu::Queue, wgpu::Surface<'a>, wgpu::Adapter)
 {
     let instance_desc = wgpu::InstanceDescriptor {
         #[cfg(target_os = "windows")]
@@ -31,14 +30,15 @@ pub fn init_default_wgpu_context<'a>(device_desc: wgpu::DeviceDescriptor,
     };
     let adapter = wait_for(instance.request_adapter(&adapter_options)).expect("Failed to get adapter");
 
-    let (device, queue) = wait_for(adapter.request_device(&device_desc)).expect("Failed to get device");
+    let (device, queue) = request_device_for_lupin(&adapter);
 
     surface.configure(&device, &surface_config);
 
     return (device, queue, surface, adapter);
 }
 
-pub fn init_default_wgpu_context_no_window(device_desc: wgpu::DeviceDescriptor)->(wgpu::Device, wgpu::Queue, wgpu::Adapter)
+/// Initializes a WGPU context for you, for a headless setup.
+pub fn init_default_wgpu_context_no_window()->(wgpu::Device, wgpu::Queue, wgpu::Adapter)
 {
     let instance_desc = wgpu::InstanceDescriptor {
         #[cfg(target_os = "windows")]
@@ -61,9 +61,49 @@ pub fn init_default_wgpu_context_no_window(device_desc: wgpu::DeviceDescriptor)-
     };
     let adapter = wait_for(instance.request_adapter(&adapter_options)).expect("Failed to get adapter");
 
-    let (device, queue) = wait_for(adapter.request_device(&device_desc)).expect("Failed to get device");
+    let (device, queue) = request_device_for_lupin(&adapter);
 
     return (device, queue, adapter);
+}
+
+pub fn upload_vertex_pos_buffer(device: &wgpu::Device, queue: &wgpu::Queue, buf: &[u8]) -> wgpu::Buffer
+{
+    let supports_rt = device.features().contains(wgpu::Features::EXPERIMENTAL_RAY_QUERY);
+
+    let mut usages = wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::STORAGE;
+    if supports_rt {
+        usages |= wgpu::BufferUsages::BLAS_INPUT;
+    }
+
+    let wgpu_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+        label: None,
+        size: buf.len() as u64,
+        usage: usages,
+        mapped_at_creation: false,
+    });
+
+    queue.write_buffer(&wgpu_buffer, 0, to_u8_slice(&buf));
+    return wgpu_buffer
+}
+
+pub fn upload_indices_buffer(device: &wgpu::Device, queue: &wgpu::Queue, buf: &[u8]) -> wgpu::Buffer
+{
+    let supports_rt = device.features().contains(wgpu::Features::EXPERIMENTAL_RAY_QUERY);
+
+    let mut usages = wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::STORAGE;
+    if supports_rt {
+        usages |= wgpu::BufferUsages::BLAS_INPUT;
+    }
+
+    let wgpu_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+        label: None,
+        size: buf.len() as u64,
+        usage: usages,
+        mapped_at_creation: false,
+    });
+
+    queue.write_buffer(&wgpu_buffer, 0, to_u8_slice(&buf));
+    return wgpu_buffer
 }
 
 pub fn upload_storage_buffer(device: &wgpu::Device, queue: &wgpu::Queue, buf: &[u8])->wgpu::Buffer

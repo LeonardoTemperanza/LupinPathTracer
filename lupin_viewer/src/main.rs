@@ -41,7 +41,6 @@ fn main()
 
     let win_size = window.inner_size();
     let (width, height) = (win_size.width as i32, win_size.height as i32);
-    let device_spec = lp::get_required_device_spec();
 
     let mut surface_config = wgpu::SurfaceConfiguration {
         usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
@@ -54,7 +53,7 @@ fn main()
         view_formats: vec![],
     };
 
-    let (device, queue, surface, adapter) = lp::init_default_wgpu_context(device_spec, &surface_config, &window, width, height);
+    let (device, queue, surface, adapter) = lp::init_default_wgpu_context(&surface_config, &window, width, height);
 
     let mut app_state = AppState::new(&device, &queue, &window);
 

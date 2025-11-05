@@ -36,6 +36,8 @@ pub struct Scene
 
     // Auxiliary data structures.
     pub lights: Lights,
+    pub rt_tlas: wgpu::Tlas,
+    pub rt_blases: Vec<wgpu::Blas>,
 }
 
 #[derive(Default, Debug)]
@@ -258,19 +260,30 @@ pub const NUM_STORAGE_BUFFERS_PER_MESH: u32 = 7;
 // NOTE: Coupled to shader.
 pub const WORKGROUP_SIZE: u32 = 4;
 
-/// This will need to be used when creating the device.
-pub fn get_required_device_spec()->wgpu::DeviceDescriptor<'static>
+
+/// Requests the wgpu device with the required features for Lupin.
+pub fn request_device_for_lupin(adapter: &wgpu::Adapter) -> (wgpu::Device, wgpu::Queue)
 {
+    let optional_features = wgpu::Features::EXPERIMENTAL_RAY_QUERY;
+    let supported_optional_features = optional_features.intersection(adapter.features());
+
+    let supports_rt = supported_optional_features.contains(wgpu::Features::EXPERIMENTAL_RAY_QUERY);
+    let allowed_accel_structures = if supports_rt { 1 } else { 0 };
+    let max_rt_instances = if supports_rt { 1000000 } else { 0 };
+    let max_blas_geometry_count = if supports_rt { 1 } else { 0 };
+    let max_blas_primitives = if supports_rt { 10000000 } else { 0 };
+
     // The main feature we need is the possibility to define arrays of buffer,
     // texture and sampler bindings, and to index them with non-uniform values.
-    return wgpu::DeviceDescriptor {
+    let desc = wgpu::DeviceDescriptor {
         label: None,
         required_features: wgpu::Features::TEXTURE_BINDING_ARRAY |
                            wgpu::Features::BUFFER_BINDING_ARRAY  |
                            wgpu::Features::STORAGE_RESOURCE_BINDING_ARRAY |
                            wgpu::Features::SAMPLED_TEXTURE_AND_STORAGE_BUFFER_ARRAY_NON_UNIFORM_INDEXING |
                            wgpu::Features::PARTIALLY_BOUND_BINDING_ARRAY |
-                           wgpu::Features::PUSH_CONSTANTS,
+                           wgpu::Features::PUSH_CONSTANTS |
+                           supported_optional_features,
         required_limits: wgpu::Limits {
             max_storage_buffers_per_shader_stage: MAX_MESHES * NUM_STORAGE_BUFFERS_PER_MESH + MAX_ENVS + 64,
             max_binding_array_elements_per_shader_stage: MAX_MESHES * NUM_STORAGE_BUFFERS_PER_MESH + MAX_ENVS + MAX_TEXTURES + 64,
@@ -278,12 +291,19 @@ pub fn get_required_device_spec()->wgpu::DeviceDescriptor<'static>
             max_sampled_textures_per_shader_stage: MAX_TEXTURES + 64,
             max_samplers_per_shader_stage: MAX_SAMPLERS + 8,
             max_push_constant_size: MAX_PUSH_CONSTANTS_SIZE,
+            max_acceleration_structures_per_shader_stage: allowed_accel_structures,
+            max_tlas_instance_count: max_rt_instances,
+            max_blas_geometry_count: max_blas_geometry_count,
+            max_blas_primitive_count: max_blas_primitives,
             ..Default::default()
         },
         experimental_features: unsafe { wgpu::ExperimentalFeatures::enabled() },
         memory_hints: Default::default(),
         trace: Default::default(),
     };
+
+    let (device, queue) = wait_for(adapter.request_device(&desc)).expect("Failed to get device");
+    return (device, queue);
 }
 
 // Shader params
@@ -354,6 +374,17 @@ pub fn build_pathtrace_resources(device: &wgpu::Device, baked_pathtrace_params: 
     let scene_bindgroup_layout = create_pathtracer_scene_bindgroup_layout(device);
     let settings_bindgroup_layout = create_pathtracer_settings_bindgroup_layout(device);
     let render_target_bindgroup_layout = create_pathtracer_output_bindgroup_layout(device);
+    let rt_bindgroup_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+        label: None,
+        entries: &[
+            wgpu::BindGroupLayoutEntry {  // rt_tlas
+                binding: 0,
+                visibility: wgpu::ShaderStages::COMPUTE,
+                ty: wgpu::BindingType::AccelerationStructure { vertex_return: false },
+                count: None,
+            },
+        ]
+    });
 
     let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label: Some("Lupin Pathtracer Pipeline Layout"),
@@ -361,6 +392,7 @@ pub fn build_pathtrace_resources(device: &wgpu::Device, baked_pathtrace_params: 
             &scene_bindgroup_layout,
             &settings_bindgroup_layout,
             &render_target_bindgroup_layout,
+            &rt_bindgroup_layout,
         ],
         push_constant_ranges: &[wgpu::PushConstantRange {
             stages: wgpu::ShaderStages::COMPUTE,
@@ -614,6 +646,7 @@ pub fn pathtrace_scene(device: &wgpu::Device, queue: &wgpu::Queue, desc: &Pathtr
     let scene_bindgroup = create_pathtracer_scene_bindgroup(device, queue, resources, scene);
     let settings_bindgroup = create_pathtracer_settings_bindgroup(device, queue, resources, accum_params.prev_frame);
     let output_bindgroup = create_pathtracer_output_bindgroup(device, queue, resources, Some(render_target), None, None);
+    let rt_bindgroup = create_pathtracer_rt_bindgroup(device, &scene.rt_tlas, resources);
 
     let mut encoder = device.create_command_encoder(&Default::default());
     {
@@ -626,6 +659,7 @@ pub fn pathtrace_scene(device: &wgpu::Device, queue: &wgpu::Queue, desc: &Pathtr
         pass.set_bind_group(0, &scene_bindgroup, &[]);
         pass.set_bind_group(1, &settings_bindgroup, &[]);
         pass.set_bind_group(2, &output_bindgroup, &[]);
+        pass.set_bind_group(3, &rt_bindgroup, &[]);
 
         if let Some(tile_params) = desc.tile_params  // Tiled rendering.
         {
@@ -718,6 +752,7 @@ pub fn pathtrace_scene_falsecolor(device: &wgpu::Device, queue: &wgpu::Queue, de
     } else {
         output_bindgroup = create_pathtracer_output_bindgroup(device, queue, resources, None, Some(render_target), None);
     }
+    let rt_bindgroup = create_pathtracer_rt_bindgroup(device, &scene.rt_tlas, resources);
 
     let mut encoder = device.create_command_encoder(&Default::default());
     {
@@ -730,6 +765,7 @@ pub fn pathtrace_scene_falsecolor(device: &wgpu::Device, queue: &wgpu::Queue, de
         pass.set_bind_group(0, &scene_bindgroup, &[]);
         pass.set_bind_group(1, &settings_bindgroup, &[]);
         pass.set_bind_group(2, &output_bindgroup, &[]);
+        pass.set_bind_group(3, &rt_bindgroup, &[]);
 
         if let Some(tile_params) = desc.tile_params  // Tiled rendering.
         {
@@ -1283,6 +1319,19 @@ fn create_pathtracer_output_bindgroup_layout(device: &wgpu::Device) -> wgpu::Bin
     });
 }
 
+fn create_pathtracer_rt_bindgroup(device: &wgpu::Device, tlas: &wgpu::Tlas, resources: &PathtraceResources) -> wgpu::BindGroup
+{
+    let render_target_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some("Pathtracer rt bindgroup"),
+        layout: &resources.pipeline.get_bind_group_layout(3),
+        entries: &[
+            wgpu::BindGroupEntry { binding: 0, resource: tlas.as_binding() },
+        ]
+    });
+
+    return render_target_bind_group;
+}
+
 fn get_push_constants(desc: &PathtraceDesc, pathtrace_type: Option<PathtraceType>, falsecolor_type: Option<FalsecolorType>, debug_desc: Option<&DebugVizDesc>) -> PushConstants
 {
     let mut push_constants = PushConstants::default();
@@ -1329,13 +1378,10 @@ fn get_push_constants(desc: &PathtraceDesc, pathtrace_type: Option<PathtraceType
         push_constants.flags |= FLAG_LIGHTS_EMPTY;
     }
 
-    if let Some(pathtrace_type) = pathtrace_type
-    {
+    if let Some(pathtrace_type) = pathtrace_type {
         push_constants.pathtrace_type = pathtrace_type as u32;
     }
-
-    if let Some(falsecolor_type) = falsecolor_type
-    {
+    if let Some(falsecolor_type) = falsecolor_type {
         push_constants.falsecolor_type = falsecolor_type as u32;
     }
 

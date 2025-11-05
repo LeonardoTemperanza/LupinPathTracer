@@ -1486,295 +1486,8 @@ fn random_in_tri(v0: vec3f, v1: vec3f, v2: vec3f) -> vec3f
 }
 
 //////////////////////////////////////////////
-// Acceleration structures
+// Vertex attributes retrieval
 //////////////////////////////////////////////
-
-struct Ray
-{
-    ori: vec3f,
-    dir: vec3f,
-    inv_dir: vec3f  // Precomputed inverse of the ray direction, for performance.
-}
-
-const RAY_ESPILON: f32 = 0.001;
-
-// From: https://tavianator.com/2011/ray_box.html
-// For misses, t = F32_MAX
-fn ray_aabb_dst(ray: Ray, aabb_min: vec3f, aabb_max: vec3f)->f32
-{
-    let t_min: vec3f = (aabb_min - ray.ori) * ray.inv_dir;
-    let t_max: vec3f = (aabb_max - ray.ori) * ray.inv_dir;
-    let t1: vec3f = min(t_min, t_max);
-    let t2: vec3f = max(t_min, t_max);
-    let dst_far: f32  = min(min(t2.x, t2.y), t2.z);
-    let dst_near: f32 = max(max(t1.x, t1.y), t1.z);
-
-    let did_hit: bool = dst_far >= dst_near && dst_far > 0.0f;
-    return select(F32_MAX, dst_near, did_hit);
-}
-
-// From: https://www.shadertoy.com/view/MlGcDz
-// Triangle intersection. Returns { t, u, v, det }
-// For misses, t = F32_MAX
-fn ray_tri_dst(ray: Ray, v0: vec3f, v1: vec3f, v2: vec3f)->vec4f
-{
-    let v1v0 = v1 - v0;
-    let v2v0 = v2 - v0;
-    let rov0 = ray.ori - v0;
-
-    // Cramer's rule for solving p(t) = ro+t·rd = p(u,v) = vo + u·(v1-v0) + v·(v2-v1).
-    // The four determinants above have lots of terms in common. Knowing the changing
-    // the order of the columns/rows doesn't change the volume/determinant, and that
-    // the volume is dot(cross(a,b,c)), we can precompute some common terms and reduce
-    // it all to:
-    let n = cross(v1v0, v2v0);
-    let q = cross(rov0, ray.dir);
-    let det = dot(ray.dir, n);
-    let d = 1.0 / det;
-    let u = d * dot(-q, v2v0);
-    let v = d * dot(q, v1v0);
-    var t = d * dot(-n, rov0);
-
-    if min(u, v) < 0.0 || (u+v) > 1.0 || t < RAY_ESPILON { t = F32_MAX; }
-    return vec4f(t, u, v, det);
-}
-
-struct HitInfo
-{
-    hit: bool,  // Rest of the fields are invalid if false.
-    dst: f32,
-    uv: vec2f,
-    instance_idx: u32,
-    tri_idx: u32,
-    hit_backside: bool,
-}
-
-const MAX_TLAS_DEPTH: u32 = 20;  // This supports 2^MAX_TLAS_DEPTH objects.
-
-struct RayDebugInfo
-{
-    num_tri_checks: u32,
-    num_aabb_checks: u32,
-}
-
-var<private> RAY_DEBUG_INFO: RayDebugInfo = RayDebugInfo();
-
-fn ray_scene_intersection(ray: Ray)->HitInfo
-{
-    var tlas_stack: array<u32, MAX_TLAS_DEPTH+1>;  // local
-    var stack_idx: u32 = 2;
-    tlas_stack[0] = 0u;
-    tlas_stack[1] = 0u;
-
-    // t, u, v, det
-    var min_hit = vec4f(F32_MAX, 0.0f, 0.0f, 0.0f);
-    var tri_idx: u32 = 0;
-    var instance_idx: u32 = 0;
-    while stack_idx > 1
-    {
-        stack_idx--;
-        let node = tlas_nodes[tlas_stack[stack_idx]];
-
-        if node.left == 0u  // Leaf node
-        {
-            let instance = instances[node.instance_idx];
-
-            var ray_trans = ray;
-            // NOTE: We do vector * matrix because it's transposed.
-            ray_trans.ori = (vec4f(ray_trans.ori, 1.0f) * instance.transpose_inverse_transform).xyz;
-            // NOTE: We do not normalize because we do want ray.dir's length to change.
-            ray_trans.dir = (vec4f(ray_trans.dir, 0.0f) * instance.transpose_inverse_transform).xyz;
-            ray_trans.inv_dir = 1.0f / ray_trans.dir;
-
-            let result = ray_mesh_intersection(ray_trans, min_hit.x, instance.mesh_idx);
-            if result.hit.x < min_hit.x
-            {
-                min_hit      = result.hit;
-                tri_idx      = result.tri_idx;
-                instance_idx = node.instance_idx;
-            }
-        }
-        else  // Non-leaf node
-        {
-            let left_child_node  = tlas_nodes[node.left];
-            let right_child_node = tlas_nodes[node.right];
-
-            let left_dst  = ray_aabb_dst(ray, left_child_node.aabb_min,  left_child_node.aabb_max);
-            let right_dst = ray_aabb_dst(ray, right_child_node.aabb_min, right_child_node.aabb_max);
-
-            if DEBUG {
-                RAY_DEBUG_INFO.num_aabb_checks += 2;
-            }
-
-            // Push children onto the stack
-            // The closest child should be looked at
-            // first. This order is chosen so that it's more
-            // likely that the second child will never need
-            // to be visited in depth.
-
-            let visit_left_first: bool = left_dst <= right_dst;
-            let push_left:  bool = left_dst < min_hit.x;
-            let push_right: bool = right_dst < min_hit.x;
-
-            if visit_left_first
-            {
-                if push_right
-                {
-                    tlas_stack[stack_idx] = node.right;
-                    stack_idx++;
-                }
-
-                if push_left
-                {
-                    tlas_stack[stack_idx] = node.left;
-                    stack_idx++;
-                }
-            }
-            else
-            {
-                if push_left
-                {
-                    tlas_stack[stack_idx] = node.left;
-                    stack_idx++;
-                }
-
-                if push_right
-                {
-                    tlas_stack[stack_idx] = node.right;
-                    stack_idx++;
-                }
-            }
-        }
-    }
-
-    var hit_info = HitInfo();
-    if min_hit.x != F32_MAX
-    {
-        hit_info.hit = true;
-        hit_info.dst = min_hit.x;
-        hit_info.uv = min_hit.yz;
-        hit_info.instance_idx = instance_idx;
-        hit_info.tri_idx = tri_idx;
-        hit_info.hit_backside = min_hit.w > 0.0f;
-    }
-
-    return hit_info;
-}
-
-const MAX_BVH_DEPTH: u32 = 25;
-
-struct RayMeshIntersectionResult
-{
-    hit: vec4f,  // t, u, v, det
-    tri_idx: u32,
-}
-
-// cur_min_hit_dst should be F32_MAX if absent.
-fn ray_mesh_intersection(ray: Ray, cur_min_hit_dst: f32, mesh_idx: u32) -> RayMeshIntersectionResult
-{
-    var bvh_stack: array<u32, MAX_BVH_DEPTH+1>;  // local
-    var stack_idx = 2u;
-    bvh_stack[0] = 0u;
-    bvh_stack[1] = 0u;
-
-    // t, u, v
-    var min_hit = vec4f(cur_min_hit_dst, 0.0f, 0.0f, 0.0f);
-    var tri_idx = 0u;
-    while stack_idx > 1
-    {
-        stack_idx--;
-        let node = bvh_nodes_array[mesh_idx].data[bvh_stack[stack_idx]];
-
-        if node.tri_count > 0u  // Leaf node
-        {
-            let tri_begin = node.tri_begin_or_first_child;
-            let tri_count = node.tri_count;
-            for(var i: u32 = tri_begin; i < tri_begin + tri_count; i++)
-            {
-                let v0 = verts_pos_array[mesh_idx].data[indices_array[mesh_idx].data[i*3 + 0]];
-                let v1 = verts_pos_array[mesh_idx].data[indices_array[mesh_idx].data[i*3 + 1]];
-                let v2 = verts_pos_array[mesh_idx].data[indices_array[mesh_idx].data[i*3 + 2]];
-                let hit = ray_tri_dst(ray, v0, v1, v2);
-                if hit.x < min_hit.x
-                {
-                    min_hit = hit;
-                    tri_idx = i;
-                }
-
-                if DEBUG {
-                    RAY_DEBUG_INFO.num_tri_checks++;
-                }
-            }
-        }
-        else  // Non-leaf node
-        {
-            let left_child  = node.tri_begin_or_first_child;
-            let right_child = left_child + 1;
-            let left_child_node  = bvh_nodes_array[mesh_idx].data[left_child];
-            let right_child_node = bvh_nodes_array[mesh_idx].data[right_child];
-
-            let left_dst  = ray_aabb_dst(ray, left_child_node.aabb_min,  left_child_node.aabb_max);
-            let right_dst = ray_aabb_dst(ray, right_child_node.aabb_min, right_child_node.aabb_max);
-
-            if DEBUG {
-                RAY_DEBUG_INFO.num_aabb_checks += 2;
-            }
-
-            // Push children onto the stack
-            // The closest child should be looked at
-            // first. This order is chosen so that it's more
-            // likely that the second child will never need
-            // to be visited in depth.
-
-            let visit_left_first: bool = left_dst <= right_dst;
-            let push_left:  bool = left_dst < min_hit.x;
-            let push_right: bool = right_dst < min_hit.x;
-
-            if visit_left_first
-            {
-                if push_right
-                {
-                    bvh_stack[stack_idx] = right_child;
-                    stack_idx++;
-                }
-
-                if push_left
-                {
-                    bvh_stack[stack_idx] = left_child;
-                    stack_idx++;
-                }
-            }
-            else
-            {
-                if push_left
-                {
-                    bvh_stack[stack_idx] = left_child;
-                    stack_idx++;
-                }
-
-                if push_right
-                {
-                    bvh_stack[stack_idx] = right_child;
-                    stack_idx++;
-                }
-            }
-        }
-    }
-
-    return RayMeshIntersectionResult(min_hit, tri_idx);
-}
-
-fn ray_instance_intersection(ray: Ray, cur_min_hit_dst: f32, instance_idx: u32) -> RayMeshIntersectionResult
-{
-    let instance = instances[instance_idx];
-
-    let test = transpose(instance.transpose_inverse_transform);
-    let trans_mat4 = mat4x4f(vec4f(test[0], 0.0f), vec4f(test[1], 0.0f), vec4f(test[2], 0.0f), vec4f(test[3], 1.0f));
-
-    let ray_trans = transform_ray_without_normalizing_direction(ray, trans_mat4);
-    let result = ray_mesh_intersection(ray_trans, cur_min_hit_dst, instance.mesh_idx);
-    return result;
-}
 
 struct Tangents
 {
@@ -2902,4 +2615,318 @@ fn get_heatmap_color(val: f32, min: f32, max: f32) -> vec3f
 
     color = pow(factor * color, vec3f(gamma));
     return color;
+}
+
+//////////////////////////////////////////////
+// Raycasting
+//////////////////////////////////////////////
+
+@group(3) @binding(0) var rt_tlas: acceleration_structure;
+
+struct Ray
+{
+    ori: vec3f,
+    dir: vec3f,
+    inv_dir: vec3f  // Precomputed inverse of the ray direction, for performance.
+}
+
+const RAY_EPSILON: f32 = 0.001;
+
+// From: https://tavianator.com/2011/ray_box.html
+// For misses, t = F32_MAX
+fn ray_aabb_dst(ray: Ray, aabb_min: vec3f, aabb_max: vec3f)->f32
+{
+    let t_min: vec3f = (aabb_min - ray.ori) * ray.inv_dir;
+    let t_max: vec3f = (aabb_max - ray.ori) * ray.inv_dir;
+    let t1: vec3f = min(t_min, t_max);
+    let t2: vec3f = max(t_min, t_max);
+    let dst_far: f32  = min(min(t2.x, t2.y), t2.z);
+    let dst_near: f32 = max(max(t1.x, t1.y), t1.z);
+
+    let did_hit: bool = dst_far >= dst_near && dst_far > 0.0f;
+    return select(F32_MAX, dst_near, did_hit);
+}
+
+// From: https://www.shadertoy.com/view/MlGcDz
+// Triangle intersection. Returns { t, u, v, det }
+// For misses, t = F32_MAX
+fn ray_tri_dst(ray: Ray, v0: vec3f, v1: vec3f, v2: vec3f)->vec4f
+{
+    let v1v0 = v1 - v0;
+    let v2v0 = v2 - v0;
+    let rov0 = ray.ori - v0;
+
+    // Cramer's rule for solving p(t) = ro+t·rd = p(u,v) = vo + u·(v1-v0) + v·(v2-v1).
+    // The four determinants above have lots of terms in common. Knowing the changing
+    // the order of the columns/rows doesn't change the volume/determinant, and that
+    // the volume is dot(cross(a,b,c)), we can precompute some common terms and reduce
+    // it all to:
+    let n = cross(v1v0, v2v0);
+    let q = cross(rov0, ray.dir);
+    let det = dot(ray.dir, n);
+    let d = 1.0 / det;
+    let u = d * dot(-q, v2v0);
+    let v = d * dot(q, v1v0);
+    var t = d * dot(-n, rov0);
+
+    if min(u, v) < 0.0 || (u+v) > 1.0 || t < RAY_EPSILON { t = F32_MAX; }
+    return vec4f(t, u, v, det);
+}
+
+struct HitInfo
+{
+    hit: bool,  // Rest of the fields are invalid if false.
+    dst: f32,
+    uv: vec2f,
+    instance_idx: u32,
+    tri_idx: u32,
+    hit_backside: bool,
+}
+
+const MAX_TLAS_DEPTH: u32 = 20;  // This supports 2^MAX_TLAS_DEPTH objects.
+
+struct RayDebugInfo
+{
+    num_tri_checks: u32,
+    num_aabb_checks: u32,
+}
+
+var<private> RAY_DEBUG_INFO: RayDebugInfo = RayDebugInfo();
+
+/*
+fn ray_scene_intersection(ray: Ray)->HitInfo
+{
+    var tlas_stack: array<u32, MAX_TLAS_DEPTH+1>;  // local
+    var stack_idx: u32 = 2;
+    tlas_stack[0] = 0u;
+    tlas_stack[1] = 0u;
+
+    // t, u, v, det
+    var min_hit = vec4f(F32_MAX, 0.0f, 0.0f, 0.0f);
+    var tri_idx: u32 = 0;
+    var instance_idx: u32 = 0;
+    while stack_idx > 1
+    {
+        stack_idx--;
+        let node = tlas_nodes[tlas_stack[stack_idx]];
+
+        if node.left == 0u  // Leaf node
+        {
+            let instance = instances[node.instance_idx];
+
+            var ray_trans = ray;
+            // NOTE: We do vector * matrix because it's transposed.
+            ray_trans.ori = (vec4f(ray_trans.ori, 1.0f) * instance.transpose_inverse_transform).xyz;
+            // NOTE: We do not normalize because we do want ray.dir's length to change.
+            ray_trans.dir = (vec4f(ray_trans.dir, 0.0f) * instance.transpose_inverse_transform).xyz;
+            ray_trans.inv_dir = 1.0f / ray_trans.dir;
+
+            let result = ray_mesh_intersection(ray_trans, min_hit.x, instance.mesh_idx);
+            if result.hit.x < min_hit.x
+            {
+                min_hit      = result.hit;
+                tri_idx      = result.tri_idx;
+                instance_idx = node.instance_idx;
+            }
+        }
+        else  // Non-leaf node
+        {
+            let left_child_node  = tlas_nodes[node.left];
+            let right_child_node = tlas_nodes[node.right];
+
+            let left_dst  = ray_aabb_dst(ray, left_child_node.aabb_min,  left_child_node.aabb_max);
+            let right_dst = ray_aabb_dst(ray, right_child_node.aabb_min, right_child_node.aabb_max);
+
+            if DEBUG {
+                RAY_DEBUG_INFO.num_aabb_checks += 2;
+            }
+
+            // Push children onto the stack
+            // The closest child should be looked at
+            // first. This order is chosen so that it's more
+            // likely that the second child will never need
+            // to be visited in depth.
+
+            let visit_left_first: bool = left_dst <= right_dst;
+            let push_left:  bool = left_dst < min_hit.x;
+            let push_right: bool = right_dst < min_hit.x;
+
+            if visit_left_first
+            {
+                if push_right
+                {
+                    tlas_stack[stack_idx] = node.right;
+                    stack_idx++;
+                }
+
+                if push_left
+                {
+                    tlas_stack[stack_idx] = node.left;
+                    stack_idx++;
+                }
+            }
+            else
+            {
+                if push_left
+                {
+                    tlas_stack[stack_idx] = node.left;
+                    stack_idx++;
+                }
+
+                if push_right
+                {
+                    tlas_stack[stack_idx] = node.right;
+                    stack_idx++;
+                }
+            }
+        }
+    }
+
+    var hit_info = HitInfo();
+    if min_hit.x != F32_MAX
+    {
+        hit_info.hit = true;
+        hit_info.dst = min_hit.x;
+        hit_info.uv = min_hit.yz;
+        hit_info.instance_idx = instance_idx;
+        hit_info.tri_idx = tri_idx;
+        hit_info.hit_backside = min_hit.w > 0.0f;
+    }
+
+    return hit_info;
+}
+*/
+
+fn ray_scene_intersection(ray: Ray)->HitInfo
+{
+    var rq: ray_query;
+    rayQueryInitialize(&rq, rt_tlas, RayDesc(0u, 0xFFu, RAY_EPSILON, F32_MAX, ray.ori, ray.dir));
+    rayQueryProceed(&rq);
+
+    let intersection = rayQueryGetCommittedIntersection(&rq);
+    if intersection.kind == RAY_QUERY_INTERSECTION_NONE { return HitInfo(); }
+
+    var res = HitInfo();
+    res.hit = true;
+    res.dst = intersection.t;
+    res.uv  = intersection.barycentrics;
+    res.instance_idx = intersection.instance_custom_data;
+    res.tri_idx = intersection.primitive_index;
+    res.hit_backside = !intersection.front_face;
+    return res;
+}
+
+const MAX_BVH_DEPTH: u32 = 25;
+
+struct RayMeshIntersectionResult
+{
+    hit: vec4f,  // t, u, v, det
+    tri_idx: u32,
+}
+
+// cur_min_hit_dst should be F32_MAX if absent.
+fn ray_mesh_intersection(ray: Ray, cur_min_hit_dst: f32, mesh_idx: u32) -> RayMeshIntersectionResult
+{
+    var bvh_stack: array<u32, MAX_BVH_DEPTH+1>;  // local
+    var stack_idx = 2u;
+    bvh_stack[0] = 0u;
+    bvh_stack[1] = 0u;
+
+    // t, u, v
+    var min_hit = vec4f(cur_min_hit_dst, 0.0f, 0.0f, 0.0f);
+    var tri_idx = 0u;
+    while stack_idx > 1
+    {
+        stack_idx--;
+        let node = bvh_nodes_array[mesh_idx].data[bvh_stack[stack_idx]];
+
+        if node.tri_count > 0u  // Leaf node
+        {
+            let tri_begin = node.tri_begin_or_first_child;
+            let tri_count = node.tri_count;
+            for(var i: u32 = tri_begin; i < tri_begin + tri_count; i++)
+            {
+                let v0 = verts_pos_array[mesh_idx].data[indices_array[mesh_idx].data[i*3 + 0]];
+                let v1 = verts_pos_array[mesh_idx].data[indices_array[mesh_idx].data[i*3 + 1]];
+                let v2 = verts_pos_array[mesh_idx].data[indices_array[mesh_idx].data[i*3 + 2]];
+                let hit = ray_tri_dst(ray, v0, v1, v2);
+                if hit.x < min_hit.x
+                {
+                    min_hit = hit;
+                    tri_idx = i;
+                }
+
+                if DEBUG {
+                    RAY_DEBUG_INFO.num_tri_checks++;
+                }
+            }
+        }
+        else  // Non-leaf node
+        {
+            let left_child  = node.tri_begin_or_first_child;
+            let right_child = left_child + 1;
+            let left_child_node  = bvh_nodes_array[mesh_idx].data[left_child];
+            let right_child_node = bvh_nodes_array[mesh_idx].data[right_child];
+
+            let left_dst  = ray_aabb_dst(ray, left_child_node.aabb_min,  left_child_node.aabb_max);
+            let right_dst = ray_aabb_dst(ray, right_child_node.aabb_min, right_child_node.aabb_max);
+
+            if DEBUG {
+                RAY_DEBUG_INFO.num_aabb_checks += 2;
+            }
+
+            // Push children onto the stack
+            // The closest child should be looked at
+            // first. This order is chosen so that it's more
+            // likely that the second child will never need
+            // to be visited in depth.
+
+            let visit_left_first: bool = left_dst <= right_dst;
+            let push_left:  bool = left_dst < min_hit.x;
+            let push_right: bool = right_dst < min_hit.x;
+
+            if visit_left_first
+            {
+                if push_right
+                {
+                    bvh_stack[stack_idx] = right_child;
+                    stack_idx++;
+                }
+
+                if push_left
+                {
+                    bvh_stack[stack_idx] = left_child;
+                    stack_idx++;
+                }
+            }
+            else
+            {
+                if push_left
+                {
+                    bvh_stack[stack_idx] = left_child;
+                    stack_idx++;
+                }
+
+                if push_right
+                {
+                    bvh_stack[stack_idx] = right_child;
+                    stack_idx++;
+                }
+            }
+        }
+    }
+
+    return RayMeshIntersectionResult(min_hit, tri_idx);
+}
+
+fn ray_instance_intersection(ray: Ray, cur_min_hit_dst: f32, instance_idx: u32) -> RayMeshIntersectionResult
+{
+    let instance = instances[instance_idx];
+
+    let test = transpose(instance.transpose_inverse_transform);
+    let trans_mat4 = mat4x4f(vec4f(test[0], 0.0f), vec4f(test[1], 0.0f), vec4f(test[2], 0.0f), vec4f(test[3], 1.0f));
+
+    let ray_trans = transform_ray_without_normalizing_direction(ray, trans_mat4);
+    let result = ray_mesh_intersection(ray_trans, cur_min_hit_dst, instance.mesh_idx);
+    return result;
 }

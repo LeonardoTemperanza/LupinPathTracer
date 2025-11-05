@@ -9,7 +9,6 @@ pathtracer
     denoising (oidn)
 loader
     improve json parser
-    make all scenes loadable ------- IMPORTANT
 
     would be cool:
         - asynchronous loading with progress bar
@@ -21,3 +20,6 @@ misc
     just use eframe instead of winit, which has breaking changes on every version
 
     maybe use software rendering for the UI and put it in another thread (maybe...).
+
+tester
+    MAKE TESTER AND PROFILER
