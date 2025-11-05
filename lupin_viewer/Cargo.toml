@@ -4,7 +4,8 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-lupin = { path = "../lupin" }
+#lupin = { path = "../lupin" }
+lupin = { path = "../lupin", features = [ "denoising" ] }
 lupin_loader = { path = "../lupin_loader" }
 
 # GUI

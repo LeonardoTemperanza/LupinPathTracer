@@ -260,7 +260,6 @@ pub const NUM_STORAGE_BUFFERS_PER_MESH: u32 = 7;
 // NOTE: Coupled to shader.
 pub const WORKGROUP_SIZE: u32 = 4;
 
-
 /// Requests the wgpu device with the required features for Lupin.
 pub fn request_device_for_lupin(adapter: &wgpu::Adapter) -> (wgpu::Device, wgpu::Queue)
 {
@@ -304,6 +303,69 @@ pub fn request_device_for_lupin(adapter: &wgpu::Adapter) -> (wgpu::Device, wgpu:
 
     let (device, queue) = wait_for(adapter.request_device(&desc)).expect("Failed to get device");
     return (device, queue);
+}
+
+#[cfg(feature = "denoising")]
+pub enum DenoiseDevice
+{
+    InteropDevice(oidn_wgpu_interop::Device),
+    OidnDevice(oidn::Device),
+}
+
+/// Requests the wgpu device with the required features for Lupin and for denoising.
+#[cfg(feature = "denoising")]
+pub fn request_device_for_lupin_with_denoising_capabilities(adapter: &wgpu::Adapter) -> (wgpu::Device, wgpu::Queue, DenoiseDevice)
+{
+    let optional_features = wgpu::Features::EXPERIMENTAL_RAY_QUERY;
+    let supported_optional_features = optional_features.intersection(adapter.features());
+
+    let supports_rt = supported_optional_features.contains(wgpu::Features::EXPERIMENTAL_RAY_QUERY);
+    let allowed_accel_structures = if supports_rt { 1 } else { 0 };
+    let max_rt_instances = if supports_rt { 1000000 } else { 0 };
+    let max_blas_geometry_count = if supports_rt { 1 } else { 0 };
+    let max_blas_primitives = if supports_rt { 10000000 } else { 0 };
+
+    // The main feature we need is the possibility to define arrays of buffer,
+    // texture and sampler bindings, and to index them with non-uniform values.
+    let desc = wgpu::DeviceDescriptor {
+        label: None,
+        required_features: wgpu::Features::TEXTURE_BINDING_ARRAY |
+                           wgpu::Features::BUFFER_BINDING_ARRAY  |
+                           wgpu::Features::STORAGE_RESOURCE_BINDING_ARRAY |
+                           wgpu::Features::SAMPLED_TEXTURE_AND_STORAGE_BUFFER_ARRAY_NON_UNIFORM_INDEXING |
+                           wgpu::Features::PARTIALLY_BOUND_BINDING_ARRAY |
+                           wgpu::Features::PUSH_CONSTANTS |
+                           supported_optional_features,
+        required_limits: wgpu::Limits {
+            max_storage_buffers_per_shader_stage: MAX_MESHES * NUM_STORAGE_BUFFERS_PER_MESH + MAX_ENVS + 64,
+            max_binding_array_elements_per_shader_stage: MAX_MESHES * NUM_STORAGE_BUFFERS_PER_MESH + MAX_ENVS + MAX_TEXTURES + 64,
+            max_binding_array_sampler_elements_per_shader_stage: MAX_SAMPLERS,
+            max_sampled_textures_per_shader_stage: MAX_TEXTURES + 64,
+            max_samplers_per_shader_stage: MAX_SAMPLERS + 8,
+            max_push_constant_size: MAX_PUSH_CONSTANTS_SIZE,
+            max_acceleration_structures_per_shader_stage: allowed_accel_structures,
+            max_tlas_instance_count: max_rt_instances,
+            max_blas_geometry_count: max_blas_geometry_count,
+            max_blas_primitive_count: max_blas_primitives,
+            ..Default::default()
+        },
+        experimental_features: unsafe { wgpu::ExperimentalFeatures::enabled() },
+        memory_hints: Default::default(),
+        trace: Default::default(),
+    };
+
+    let res = wait_for(oidn_wgpu_interop::Device::new(adapter, &desc));
+    if let Ok(res) = res
+    {
+        let (device, queue) = res;
+        return (device.wgpu_device().clone(), queue, DenoiseDevice::InteropDevice(device));
+    }
+    else
+    {
+        let (device, queue) = wait_for(adapter.request_device(&desc)).expect("Failed to get device");
+        let oidn_device = oidn::Device::new();
+        return (device, queue, DenoiseDevice::OidnDevice(oidn_device));
+    }
 }
 
 // Shader params
