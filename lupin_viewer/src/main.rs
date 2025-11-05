@@ -53,7 +53,7 @@ fn main()
         view_formats: vec![],
     };
 
-    let (device, queue, surface, adapter) = lp::init_default_wgpu_context(&surface_config, &window, width, height);
+    let (device, queue, surface, adapter, denoise_device) = lp::init_default_wgpu_context_with_denoising_capabilities(&surface_config, &window, width, height);
 
     let mut app_state = AppState::new(&device, &queue, &window);
 

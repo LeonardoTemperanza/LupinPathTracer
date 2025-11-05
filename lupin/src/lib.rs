@@ -10,6 +10,8 @@ mod renderer;
 mod wgpu_utils;
 mod data_structures;
 mod tonemapping;
+#[cfg(feature = "denoising")]
+mod denoising;
 
 pub use base::*;
 pub use renderer::*;

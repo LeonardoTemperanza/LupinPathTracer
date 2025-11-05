@@ -5,7 +5,7 @@ use crate::renderer::*;
 /// Initializes a WGPU context for you.
 pub fn init_default_wgpu_context<'a>(surface_config: &wgpu::SurfaceConfiguration,
                                      window: impl Into<wgpu::SurfaceTarget<'a>>,
-                                     window_width: i32, window_height: i32)->(wgpu::Device, wgpu::Queue, wgpu::Surface<'a>, wgpu::Adapter)
+                                     window_width: i32, window_height: i32) -> (wgpu::Device, wgpu::Queue, wgpu::Surface<'a>, wgpu::Adapter)
 {
     let instance_desc = wgpu::InstanceDescriptor {
         #[cfg(target_os = "windows")]
@@ -64,6 +64,42 @@ pub fn init_default_wgpu_context_no_window()->(wgpu::Device, wgpu::Queue, wgpu::
     let (device, queue) = request_device_for_lupin(&adapter);
 
     return (device, queue, adapter);
+}
+
+/// Initializes a WGPU context for you, with denoising capabilities.
+#[cfg(feature = "denoising")]
+pub fn init_default_wgpu_context_with_denoising_capabilities<'a>(surface_config: &wgpu::SurfaceConfiguration,
+                                     window: impl Into<wgpu::SurfaceTarget<'a>>,
+                                     window_width: i32, window_height: i32) -> (wgpu::Device, wgpu::Queue, wgpu::Surface<'a>, wgpu::Adapter, DenoiseDevice)
+{
+    let instance_desc = wgpu::InstanceDescriptor {
+        #[cfg(target_os = "windows")]
+        backends: wgpu::Backends::VULKAN,
+
+        #[cfg(not(target_os = "windows"))]
+        #[cfg(not(target_arch = "wasm32"))]
+        backends: wgpu::Backends::PRIMARY,
+
+        #[cfg(target_arch = "wasm32")]
+        backends: wgpu::Backends::GL,
+        ..Default::default()
+    };
+    let instance = wgpu::Instance::new(&instance_desc);
+
+    let surface = instance.create_surface(window).expect("Failed to create WGPU surface");
+
+    let adapter_options = wgpu::RequestAdapterOptions {
+        power_preference: wgpu::PowerPreference::default(),
+        compatible_surface: Some(&surface),
+        force_fallback_adapter: false,
+    };
+    let adapter = wait_for(instance.request_adapter(&adapter_options)).expect("Failed to get adapter");
+
+    let (device, queue, denoise_device) = request_device_for_lupin_with_denoising_capabilities(&adapter);
+
+    surface.configure(&device, &surface_config);
+
+    return (device, queue, surface, adapter, denoise_device);
 }
 
 pub fn upload_vertex_pos_buffer(device: &wgpu::Device, queue: &wgpu::Queue, buf: &[u8]) -> wgpu::Buffer
