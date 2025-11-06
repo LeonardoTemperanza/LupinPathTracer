@@ -10,9 +10,25 @@ pub struct DenoiseResources
 {
     /// Assumed to be rgbaf16 linear.
     pub beauty: oidn_wgpu_interop::SharedBuffer,
+    pub filter: oidn::sys::OIDNFilter,
     pub width: u32,
     pub height: u32,
     pub beauty_pixel_byte_size: u8,
+}
+
+impl Drop for DenoiseResources
+{
+    fn drop(&mut self)
+    {
+        unsafe
+        {
+            use oidn::sys::*;
+
+            if !self.filter.is_null() {
+                oidnReleaseFilter(self.filter);
+            }
+        }
+    }
 }
 
 pub fn build_denoise_resources(device: &wgpu::Device, denoise_device: &DenoiseDevice,
@@ -22,7 +38,8 @@ pub fn build_denoise_resources(device: &wgpu::Device, denoise_device: &DenoiseDe
     let albedo: oidn_wgpu_interop::SharedBuffer;
     let normals: oidn_wgpu_interop::SharedBuffer;
     let denoise_output: oidn_wgpu_interop::SharedBuffer;
-    let mut oidn_filter: oidn::RayTracing;
+
+    let filter: oidn::sys::OIDNFilter;
 
     let beauty_size = beauty_pixel_byte_size as u32 * width * height;
     let gbuffer_size = 3 * 4 * width * height;
@@ -32,6 +49,26 @@ pub fn build_denoise_resources(device: &wgpu::Device, denoise_device: &DenoiseDe
         DenoiseDevice::InteropDevice(interop_device) =>
         {
             beauty = interop_device.allocate_shared_buffers(beauty_size as u64).expect("Could not allocate shared buffers");
+
+            unsafe
+            {
+                use oidn::sys::*;
+                let device_raw = interop_device.oidn_device().raw();
+                let shared_beauty_raw = beauty.oidn_buffer().raw();
+
+                filter = oidnNewFilter(device_raw, c"RT".as_ptr());
+                if filter.is_null() { panic!("Failed to create OIDN filter"); }
+
+                oidnSetFilterBool(filter, c"hdr".as_ptr(), true);
+                oidnSetFilterBool(filter, c"srgb".as_ptr(), false);
+                oidnSetFilterBool(filter, c"clean_aux".as_ptr(), true);
+                oidnSetFilterImage(filter, c"color".as_ptr(), shared_beauty_raw,
+                                   OIDNFormat_OIDN_FORMAT_HALF3, width as usize, height as usize, 0, 4 * 2, 0);
+                oidnSetFilterImage(filter, c"output".as_ptr(), shared_beauty_raw,
+                                   OIDNFormat_OIDN_FORMAT_HALF3, width as usize, height as usize, 0, 4 * 2, 0);
+                oidnCommitFilter(filter);
+                oidn_check(device_raw);
+            }
         }
         DenoiseDevice::OidnDevice(oidn_device) =>
         {
@@ -41,6 +78,7 @@ pub fn build_denoise_resources(device: &wgpu::Device, denoise_device: &DenoiseDe
 
     return DenoiseResources {
         beauty,
+        filter,
         width,
         height,
         beauty_pixel_byte_size,
@@ -122,35 +160,17 @@ pub fn denoise(device: &wgpu::Device, queue: &wgpu::Queue,
     {
         DenoiseDevice::InteropDevice(interop_device) =>
         {
-            // Create and execute filter.
+            // Must wait for wgpu to finish before we can start the oidn workload.
+            // Unfortunately wgpu-oidn synchronization is currently not possible.
+            device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
+
             unsafe
             {
                 use oidn::sys::*;
-
                 let device_raw = interop_device.oidn_device().raw();
-                let shared_beauty_raw = resources.beauty.oidn_buffer().raw() as *mut _;
-
-                let filter = oidnNewFilter(device_raw, c"RT".as_ptr());
-                if filter.is_null() { panic!("Failed to create OIDN filter"); }
-                oidnSetFilterBool(filter, c"hdr".as_ptr(), true);
-                oidnSetFilterBool(filter, c"srgb".as_ptr(), false);
-                oidnSetFilterBool(filter, c"clean_aux".as_ptr(), true);
-                oidnSetFilterImage(filter, c"color".as_ptr(), shared_beauty_raw,
-                                         OIDNFormat_OIDN_FORMAT_HALF3, width as usize, height as usize, 0, 4 * 2, 0);
-                oidnSetFilterImage(filter, c"output".as_ptr(), shared_beauty_raw,
-                                         OIDNFormat_OIDN_FORMAT_HALF3, width as usize, height as usize, 0, 4 * 2, 0);
-                oidnCommitFilter(filter);
-
-                oidn_check(device_raw);
-
-                // Must wait for wgpu to finish before we can start the oidn workload.
-                // Unfortunately wgpu-oidn synchronization is currently not possible.
-                device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
 
                 // This will stall the CPU until the operation is done.
-                oidnExecuteFilter(filter);
-                oidnReleaseFilter(filter);
-
+                oidnExecuteFilter(resources.filter);
                 oidn_check(device_raw);
             }
         }
