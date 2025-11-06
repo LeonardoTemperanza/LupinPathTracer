@@ -10,6 +10,8 @@ pub struct DenoiseResources
 {
     /// Assumed to be rgbaf16 linear.
     pub beauty: oidn_wgpu_interop::SharedBuffer,
+    pub albedo: oidn_wgpu_interop::SharedBuffer,
+    pub normals: oidn_wgpu_interop::SharedBuffer,
     pub filter: oidn::sys::OIDNFilter,
     pub width: u32,
     pub height: u32,
@@ -23,7 +25,6 @@ impl Drop for DenoiseResources
         unsafe
         {
             use oidn::sys::*;
-
             if !self.filter.is_null() {
                 oidnReleaseFilter(self.filter);
             }
@@ -48,24 +49,32 @@ pub fn build_denoise_resources(device: &wgpu::Device, denoise_device: &DenoiseDe
     {
         DenoiseDevice::InteropDevice(interop_device) =>
         {
-            beauty = interop_device.allocate_shared_buffers(beauty_size as u64).expect("Could not allocate shared buffers");
+            beauty  = interop_device.allocate_shared_buffers(beauty_size  as u64).unwrap();
+            albedo  = interop_device.allocate_shared_buffers(gbuffer_size as u64).unwrap();
+            normals = interop_device.allocate_shared_buffers(gbuffer_size as u64).unwrap();
 
             unsafe
             {
                 use oidn::sys::*;
                 let device_raw = interop_device.oidn_device().raw();
-                let shared_beauty_raw = beauty.oidn_buffer().raw();
+                let shared_beauty_raw  = beauty.oidn_buffer().raw();
+                let shared_albedo_raw  = beauty.oidn_buffer().raw();
+                let shared_normals_raw = beauty.oidn_buffer().raw();
 
                 filter = oidnNewFilter(device_raw, c"RT".as_ptr());
                 if filter.is_null() { panic!("Failed to create OIDN filter"); }
 
                 oidnSetFilterBool(filter, c"hdr".as_ptr(), true);
                 oidnSetFilterBool(filter, c"srgb".as_ptr(), false);
-                oidnSetFilterBool(filter, c"clean_aux".as_ptr(), true);
+                oidnSetFilterBool(filter, c"clean_aux".as_ptr(), false);
                 oidnSetFilterImage(filter, c"color".as_ptr(), shared_beauty_raw,
                                    OIDNFormat_OIDN_FORMAT_HALF3, width as usize, height as usize, 0, 4 * 2, 0);
                 oidnSetFilterImage(filter, c"output".as_ptr(), shared_beauty_raw,
                                    OIDNFormat_OIDN_FORMAT_HALF3, width as usize, height as usize, 0, 4 * 2, 0);
+                //oidnSetFilterImage(filter, c"albedo".as_ptr(), shared_albedo_raw,
+                //                   OIDNFormat_OIDN_FORMAT_UINT3, width as usize, height as usize, 0, 4, 0);
+                //oidnSetFilterImage(filter, c"normals".as_ptr(), shared_normals_raw,
+                //                   OIDNFormat_OIDN_FORMAT_UINT3, width as usize, height as usize, 0, 4, 0);
                 oidnCommitFilter(filter);
                 oidn_check(device_raw);
             }
@@ -78,6 +87,8 @@ pub fn build_denoise_resources(device: &wgpu::Device, denoise_device: &DenoiseDe
 
     return DenoiseResources {
         beauty,
+        albedo,
+        normals,
         filter,
         width,
         height,
@@ -169,8 +180,12 @@ pub fn denoise(device: &wgpu::Device, queue: &wgpu::Queue,
                 use oidn::sys::*;
                 let device_raw = interop_device.oidn_device().raw();
 
+                let filter = resources.filter;
+                oidnSetFilterInt(filter, c"quality".as_ptr(), filter_quality as i32);
+                oidnCommitFilter(filter);
+
                 // This will stall the CPU until the operation is done.
-                oidnExecuteFilter(resources.filter);
+                oidnExecuteFilter(filter);
                 oidn_check(device_raw);
             }
         }

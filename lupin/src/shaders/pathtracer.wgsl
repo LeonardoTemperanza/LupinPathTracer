@@ -26,9 +26,7 @@
 @group(1) @binding(0) var prev_frame: texture_2d<f32>;
 
 // Group 2: Render targets
-@group(2) @binding(0) var output_hdr: texture_storage_2d<rgba16float, write>;
-@group(2) @binding(1) var output_rgba8unorm: texture_storage_2d<rgba8unorm, write>;
-@group(2) @binding(2) var output_rgba8snorm: texture_storage_2d<rgba8snorm, write>;
+@group(2) @binding(0) var output: texture_storage_2d<rgba16float, write>;
 
 // Push constants
 struct PushConstants
@@ -217,7 +215,7 @@ const PATHTRACE_TYPE_DIRECT: u32 = 3;
 fn pathtrace_main(@builtin(local_invocation_id) local_id: vec3u, @builtin(global_invocation_id) global_id_: vec3u)
 {
     let global_id = global_id_.xy + constants.id_offset;
-    let output_dim = textureDimensions(output_hdr).xy;
+    let output_dim = textureDimensions(output).xy;
     init_rng(global_id.y * output_dim.x + global_id.x);
 
     var color = vec3f(0.0f);
@@ -280,7 +278,7 @@ fn pathtrace_main(@builtin(local_invocation_id) local_id: vec3u, @builtin(global
     }
 
     if all(global_id < output_dim) {
-        textureStore(output_hdr, global_id.xy, vec4f(color, 1.0f));
+        textureStore(output, global_id.xy, vec4f(color, 1.0f));
     }
 }
 
@@ -291,7 +289,7 @@ fn pathtrace_main(@builtin(local_invocation_id) local_id: vec3u, @builtin(global
 fn pathtrace_falsecolor_main(@builtin(local_invocation_id) local_id: vec3u, @builtin(global_invocation_id) global_id_: vec3u)
 {
     let global_id = global_id_.xy + constants.id_offset;
-    let output_dim = max(textureDimensions(output_rgba8unorm).xy, textureDimensions(output_rgba8snorm).xy);
+    let output_dim = textureDimensions(output).xy;
     init_rng(global_id.y * output_dim.x + global_id.x);
 
     var color = vec3f(0.0f);
@@ -438,11 +436,7 @@ fn pathtrace_falsecolor_main(@builtin(local_invocation_id) local_id: vec3u, @bui
     }
 
     if all(global_id < output_dim) {
-        if constants.falsecolor_type == FALSECOLOR_NORMALS {
-            textureStore(output_rgba8snorm, global_id.xy, vec4f(color, 1.0f));
-        } else {
-            textureStore(output_rgba8unorm, global_id.xy, vec4f(color, 1.0f));
-        }
+        textureStore(output, global_id.xy, vec4f(color, 1.0f));
     }
 }
 
@@ -454,7 +448,7 @@ fn pathtrace_debug_main(@builtin(local_invocation_id) local_id: vec3u, @builtin(
     if !DEBUG { return; }
 
     let global_id = global_id_.xy + constants.id_offset;
-    let output_dim = textureDimensions(output_rgba8unorm).xy;
+    let output_dim = textureDimensions(output).xy;
     init_rng(global_id.y * output_dim.x + global_id.x);
 
     let pixel_offset = random_vec2f() - 0.5f;
@@ -490,7 +484,7 @@ fn pathtrace_debug_main(@builtin(local_invocation_id) local_id: vec3u, @builtin(
     }
 
     if all(global_id < output_dim) {
-        textureStore(output_rgba8unorm, global_id.xy, vec4f(color, 1.0f));
+        textureStore(output, global_id.xy, vec4f(color, 1.0f));
     }
 }
 

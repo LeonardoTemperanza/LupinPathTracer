@@ -679,6 +679,8 @@ pub enum PathtraceType
 pub struct PathtraceDesc<'a>
 {
     pub scene: &'a Scene,
+    /// Output texture to store the result. This must be different from
+    /// accum_params.prev_frame, due to underlying graphics API limitations.
     pub render_target: &'a wgpu::Texture,
     pub resources: &'a PathtraceResources,
     pub accum_params: &'a AccumulationParams<'a>,
@@ -694,7 +696,7 @@ pub struct PathtraceDesc<'a>
 /// * `tile_idx` - Current tile. Will be incremented by the function and set to 0 once all tiles are finished. If absent, 0 will be used instead.
 pub fn pathtrace_scene(device: &wgpu::Device, queue: &wgpu::Queue, desc: &PathtraceDesc, pathtrace_type: PathtraceType, tile_idx: Option<&mut u32>)
 {
-    // TODO: Check format and usage of render target params and others.
+    assert!(desc.render_target.format() == wgpu::TextureFormat::Rgba16Float);
 
     let scene = desc.scene;
     let render_target = desc.render_target;
@@ -707,7 +709,7 @@ pub fn pathtrace_scene(device: &wgpu::Device, queue: &wgpu::Queue, desc: &Pathtr
 
     let scene_bindgroup = create_pathtracer_scene_bindgroup(device, queue, resources, scene);
     let settings_bindgroup = create_pathtracer_settings_bindgroup(device, queue, resources, accum_params.prev_frame);
-    let output_bindgroup = create_pathtracer_output_bindgroup(device, queue, resources, Some(render_target), None, None);
+    let output_bindgroup = create_pathtracer_output_bindgroup(device, queue, resources, render_target);
     let rt_bindgroup = create_pathtracer_rt_bindgroup(device, &scene.rt_tlas, resources);
 
     let mut encoder = device.create_command_encoder(&Default::default());
@@ -808,12 +810,7 @@ pub fn pathtrace_scene_falsecolor(device: &wgpu::Device, queue: &wgpu::Queue, de
 
     let scene_bindgroup = create_pathtracer_scene_bindgroup(device, queue, resources, scene);
     let settings_bindgroup = create_pathtracer_settings_bindgroup(device, queue, resources, accum_params.prev_frame);
-    let output_bindgroup;
-    if falsecolor_type == FalsecolorType::Normals {
-        output_bindgroup = create_pathtracer_output_bindgroup(device, queue, resources, None, None, Some(render_target));
-    } else {
-        output_bindgroup = create_pathtracer_output_bindgroup(device, queue, resources, None, Some(render_target), None);
-    }
+    let output_bindgroup = create_pathtracer_output_bindgroup(device, queue, resources, render_target);
     let rt_bindgroup = create_pathtracer_rt_bindgroup(device, &scene.rt_tlas, resources);
 
     let mut encoder = device.create_command_encoder(&Default::default());
@@ -902,7 +899,7 @@ pub fn pathtrace_scene_debug(device: &wgpu::Device, queue: &wgpu::Queue, desc: &
 
     let scene_bindgroup = create_pathtracer_scene_bindgroup(device, queue, resources, scene);
     let settings_bindgroup = create_pathtracer_settings_bindgroup(device, queue, resources, accum_params.prev_frame);
-    let output_bindgroup = create_pathtracer_output_bindgroup(device, queue, resources, None, Some(render_target), None);
+    let output_bindgroup = create_pathtracer_output_bindgroup(device, queue, resources, render_target);
 
     let mut encoder = device.create_command_encoder(&Default::default());
     {
@@ -1311,31 +1308,15 @@ fn create_pathtracer_settings_bindgroup_layout(device: &wgpu::Device) -> wgpu::B
     });
 }
 
-fn create_pathtracer_output_bindgroup(device: &wgpu::Device, queue: &wgpu::Queue, resources: &PathtraceResources, output_hdr: Option<&wgpu::Texture>, output_rgba8_unorm: Option<&wgpu::Texture>, output_rgba8_snorm: Option<&wgpu::Texture>) -> wgpu::BindGroup
+fn create_pathtracer_output_bindgroup(device: &wgpu::Device, queue: &wgpu::Queue, resources: &PathtraceResources, output: &wgpu::Texture) -> wgpu::BindGroup
 {
-    let output_hdr_view  = match output_hdr
-    {
-        Some(tex) => tex.create_view(&Default::default()),
-        None =>      resources.dummy_output_texture.create_view(&Default::default()),
-    };
-    let output_rgba8_unorm_view = match output_rgba8_unorm
-    {
-        Some(tex) => tex.create_view(&Default::default()),
-        None =>      resources.dummy_albedo_texture.create_view(&Default::default()),
-    };
-    let output_rgba8_snorm_view = match output_rgba8_snorm
-    {
-        Some(tex) => tex.create_view(&Default::default()),
-        None =>      resources.dummy_normals_texture.create_view(&Default::default()),
-    };
+    let view = output.create_view(&Default::default());
 
     let render_target_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
         label: Some("Pathtracer output bindgroup"),
         layout: &resources.pipeline.get_bind_group_layout(2),
         entries: &[
-            wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(&output_hdr_view) },
-            wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::TextureView(&output_rgba8_unorm_view) },
-            wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::TextureView(&output_rgba8_snorm_view) },
+            wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(&view) },
         ]
     });
 
@@ -1356,27 +1337,7 @@ fn create_pathtracer_output_bindgroup_layout(device: &wgpu::Device) -> wgpu::Bin
                     view_dimension: wgpu::TextureViewDimension::D2
                 },
                 count: None
-            },
-            wgpu::BindGroupLayoutEntry {
-                binding: 1,
-                visibility: wgpu::ShaderStages::COMPUTE,
-                ty: wgpu::BindingType::StorageTexture {
-                    access: wgpu::StorageTextureAccess::WriteOnly,
-                    format: wgpu::TextureFormat::Rgba8Unorm,
-                    view_dimension: wgpu::TextureViewDimension::D2
-                },
-                count: None
-            },
-            wgpu::BindGroupLayoutEntry {
-                binding: 2,
-                visibility: wgpu::ShaderStages::COMPUTE,
-                ty: wgpu::BindingType::StorageTexture {
-                    access: wgpu::StorageTextureAccess::WriteOnly,
-                    format: wgpu::TextureFormat::Rgba8Snorm,
-                    view_dimension: wgpu::TextureViewDimension::D2
-                },
-                count: None
-            },
+            }
         ]
     });
 }
