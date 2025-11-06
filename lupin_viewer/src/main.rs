@@ -591,13 +591,20 @@ impl<'a> AppState<'a>
         }
 
         // Denoise
-        if self.denoising
+        if self.denoising && self.tile_idx == 0
         {
             lp::denoise(self.device, self.queue, self.denoise_device, &self.denoise_resources, &lp::DenoiseDesc {
                 pathtrace_output: self.output_hdr.front(),
                 denoise_output: &self.denoised,
                 quality: Default::default(),
             });
+            let tonemap_desc = lp::TonemapDesc {
+                resources: &self.tonemap_resources,
+                hdr_texture: &self.denoised,
+                render_target: &swapchain,
+                tonemap_params: &self.tonemap_params
+            };
+            lp::tonemap_and_fit_aspect(&self.device, &self.queue, &tonemap_desc, Some(viewport));
         }
 
         // Swap output textures
