@@ -18,4 +18,6 @@ pub use renderer::*;
 pub use wgpu_utils::*;
 pub use data_structures::*;
 pub use tonemapping::*;
-pub use wgpu;  // No need to have an extra dependency on wgpu.
+#[cfg(feature = "denoising")]
+pub use denoising::*;
+pub use wgpu;  // No need to have an extra cargo dependency on wgpu.

@@ -55,7 +55,7 @@ fn main()
 
     let (device, queue, surface, adapter, denoise_device) = lp::init_default_wgpu_context_with_denoising_capabilities(&surface_config, &window, width, height);
 
-    let mut app_state = AppState::new(&device, &queue, &window);
+    let mut app_state = AppState::new(&device, &denoise_device, &queue, &window);
 
     let egui_ctx = egui::Context::default();
     let viewport_id = egui_ctx.viewport_id();
@@ -154,6 +154,7 @@ pub struct DebugVizInfo
 pub struct AppState<'a>
 {
     pub device: &'a wgpu::Device,
+    pub denoise_device: &'a lp::DenoiseDevice,
     pub queue: &'a wgpu::Queue,
     pub window: &'a winit::window::Window,
 
@@ -174,15 +175,17 @@ pub struct AppState<'a>
     pub cam_speed_multiplier: f32,
     pub tiled_rendering: bool,
     pub tile_params: lp::TileParams,
+    pub denoising: bool,
 
     // Camera
     pub cam_pos: lp::Vec3,
     pub cam_rot: lp::Quat,
     pub cam_transform: lp::Mat3x4,
 
-    // Lupin resources,
+    // Lupin resources
     pub pathtrace_resources: lp::PathtraceResources,
     pub tonemap_resources: lp::TonemapResources,
+    pub denoise_resources: lp::DenoiseResources,
     pub scene: lp::Scene,
     pub scene_cameras: Vec<lpl::SceneCamera>,
     pub selected_cam: i32,  // If -1, no cam is selected (free-roam).
@@ -191,6 +194,7 @@ pub struct AppState<'a>
     pub output_hdr: DoubleBufferedTexture,
     pub output_rgba8_unorm: DoubleBufferedTexture,
     pub output_rgba8_snorm: DoubleBufferedTexture,
+    pub denoised: wgpu::Texture,
 
     // Saved state for accumulation
     pub prev_cam_transform: lp::Mat3x4,
@@ -200,7 +204,7 @@ pub struct AppState<'a>
 
 impl<'a> AppState<'a>
 {
-    pub fn new(device: &'a wgpu::Device, queue: &'a wgpu::Queue, window: &'a winit::window::Window) -> Self
+    pub fn new(device: &'a wgpu::Device, denoise_device: &'a lp::DenoiseDevice, queue: &'a wgpu::Queue, window: &'a winit::window::Window) -> Self
     {
         const DEFAULT_SAMPLES_PER_PIXEL: u32 = 5;
         const DEFAULT_MAX_BOUNCES: u32 = 8;
@@ -215,9 +219,24 @@ impl<'a> AppState<'a>
         let width = window.inner_size().width;
         let height = window.inner_size().height;
 
+        let denoise_resources = lp::build_denoise_resources(&device, &denoise_device, 8, width, height);
+
         let (scene, scene_cameras) = lpl::build_scene_cornell_box(&device, &queue);
 
         let output_hdr = DoubleBufferedTexture::create(device, &wgpu::TextureDescriptor {
+            label: None,
+            size: wgpu::Extent3d { width: width as u32, height: height as u32, depth_or_array_layers: 1 },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba16Float,
+            usage: wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::TEXTURE_BINDING |
+                   wgpu::TextureUsages::COPY_SRC | wgpu::TextureUsages::COPY_DST |
+                   wgpu::TextureUsages::RENDER_ATTACHMENT,
+            view_formats: &[]
+        });
+
+        let denoised = device.create_texture(&wgpu::TextureDescriptor {
             label: None,
             size: wgpu::Extent3d { width: width as u32, height: height as u32, depth_or_array_layers: 1 },
             mip_level_count: 1,
@@ -258,6 +277,7 @@ impl<'a> AppState<'a>
 
         let mut res = Self {
             device: device,
+            denoise_device: denoise_device,
             queue: queue,
             window: window,
 
@@ -279,6 +299,7 @@ impl<'a> AppState<'a>
             cam_speed_multiplier: 1.0,
             tiled_rendering: false,
             tile_params: Default::default(),
+            denoising: false,
 
             // Camera
             cam_pos: Default::default(),
@@ -288,6 +309,7 @@ impl<'a> AppState<'a>
             // Lupin resources
             pathtrace_resources,
             tonemap_resources,
+            denoise_resources,
             scene,
             scene_cameras,
 
@@ -295,6 +317,7 @@ impl<'a> AppState<'a>
             output_hdr,
             output_rgba8_unorm,
             output_rgba8_snorm,
+            denoised,
 
             // Saved state for accumulation
             prev_cam_transform: lp::Mat3x4::zeros(),
@@ -567,6 +590,16 @@ impl<'a> AppState<'a>
             }
         }
 
+        // Denoise
+        if self.denoising
+        {
+            lp::denoise(self.device, self.queue, self.denoise_device, &self.denoise_resources, &lp::DenoiseDesc {
+                pathtrace_output: self.output_hdr.front(),
+                denoise_output: &self.denoised,
+                quality: Default::default(),
+            });
+        }
+
         // Swap output textures
         if self.accum_counter < self.max_accums
         {
@@ -682,6 +715,8 @@ impl<'a> AppState<'a>
         self.output_hdr.resize(self.device, new_width, new_height);
         self.output_rgba8_unorm.resize(self.device, new_width, new_height);
         self.output_rgba8_snorm.resize(self.device, new_width, new_height);
+        self.denoise_resources = lp::build_denoise_resources(self.device, self.denoise_device, 8, new_width, new_height);
+        resize_texture(self.device, &mut self.denoised, new_width, new_height);
     }
 
     fn update_ui(&mut self, egui_ctx: &egui::Context)
@@ -787,6 +822,8 @@ impl<'a> AppState<'a>
                             ui.label("Tile size");
                         });
                     }
+
+                    ui.checkbox(&mut self.denoising, "Denoise");
 
                     egui::CollapsingHeader::new("Stats").id_salt("stats_pathtrace").show(ui, |ui| {
                         ui.label(format!("Iteration: {:?}", self.accum_counter));
