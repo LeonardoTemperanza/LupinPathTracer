@@ -196,7 +196,7 @@ pub fn denoise(device: &wgpu::Device, queue: &wgpu::Queue,
 
                 // Update aux images if necessary
                 if !resources.cur_has_albedo && desc.albedo.is_some()
-                { println!("now using albedo!");
+                {
                     oidnSetFilterImage(filter, c"albedo".as_ptr(), shared_albedo_raw,
                                        OIDNFormat_OIDN_FORMAT_HALF3, width as usize, height as usize, 0, 4 * 2, 0);
                     resources.cur_has_albedo = true;
