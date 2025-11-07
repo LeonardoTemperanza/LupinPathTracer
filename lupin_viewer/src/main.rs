@@ -491,11 +491,13 @@ impl<'a> AppState<'a>
                 {
                     if self.show_normals_when_moving
                     {
-                        //let mut desc = desc_template;
-                        //desc.render_target = &self.output;
-                        //lp::raycast_normals(&self.device, &self.queue, &desc);
-                        //lp::blit_texture_and_fit_aspect(&self.device, &self.queue, &self.tonemap_resources,
-                        //                                &self.output, &swapchain, Some(viewport));
+                        let mut desc = desc;
+                        if !self.tiled_rendering {
+                            desc.tile_params = None;
+                        }
+                        lp::pathtrace_scene_falsecolor(self.device, self.queue, &desc, lp::FalsecolorType::NormalsUnsigned, Some(&mut self.tile_idx));
+                        lp::blit_texture_and_fit_aspect(&self.device, &self.queue, &self.tonemap_resources,
+                                                        &self.output.front(), &swapchain, Some(viewport));
                     }
                     else
                     {
