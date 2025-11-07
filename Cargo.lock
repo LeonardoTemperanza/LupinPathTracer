@@ -2616,6 +2616,7 @@ dependencies = [
 [[package]]
 name = "oidn-wgpu-interop"
 version = "0.3.0"
+source = "git+https://github.com/Vecvec/oidn-wgpu-interop#934b1d5515de08760b916c9d87df7dd4c7c64792"
 dependencies = [
  "ash",
  "cfg_aliases 0.2.1",

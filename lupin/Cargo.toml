@@ -14,7 +14,9 @@ half = "2.6.0"
 rand = "0.8"
 oidn = { version = "2.3.3", optional = true }
 #oidn-wgpu-interop = { version = "0.3.0", optional = true }
-oidn-wgpu-interop = { path = "../../oidn-wgpu-interop", optional = true }
+#oidn-wgpu-interop = { path = "../../oidn-wgpu-interop", optional = true }
+# Need latest pull request so that it works on my PC.
+oidn-wgpu-interop = { git = "https://github.com/Vecvec/oidn-wgpu-interop", optional = true }
 
 [features]
 denoising = ["dep:oidn", "dep:oidn-wgpu-interop"]

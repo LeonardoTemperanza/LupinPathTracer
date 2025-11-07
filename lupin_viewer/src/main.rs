@@ -476,28 +476,14 @@ impl<'a> AppState<'a>
         {
             RenderType::Falsecolor(falsecolor_type) =>
             {
-                if falsecolor_type == lp::FalsecolorType::Normals
-                {
-                    let mut desc = desc;
-                    if !self.tiled_rendering {
-                        desc.tile_params = None;
-                    }
-
-                    lp::pathtrace_scene_falsecolor(self.device, self.queue, &desc, falsecolor_type, Some(&mut self.tile_idx));
-                    lp::blit_texture_and_fit_aspect(&self.device, &self.queue, &self.tonemap_resources,
-                                                    &self.output.front(), &swapchain, Some(viewport));
+                let mut desc = desc;
+                if !self.tiled_rendering {
+                    desc.tile_params = None;
                 }
-                else
-                {
-                    let mut desc = desc;
-                    if !self.tiled_rendering {
-                        desc.tile_params = None;
-                    }
 
-                    lp::pathtrace_scene_falsecolor(self.device, self.queue, &desc, falsecolor_type, Some(&mut self.tile_idx));
-                    lp::blit_texture_and_fit_aspect(&self.device, &self.queue, &self.tonemap_resources,
-                                                    &self.output.front(), &swapchain, Some(viewport));
-                }
+                lp::pathtrace_scene_falsecolor(self.device, self.queue, &desc, falsecolor_type, Some(&mut self.tile_idx));
+                lp::blit_texture_and_fit_aspect(&self.device, &self.queue, &self.tonemap_resources,
+                                                &self.output.front(), &swapchain, Some(viewport));
             }
             RenderType::Pathtrace =>
             {
@@ -513,8 +499,7 @@ impl<'a> AppState<'a>
                     }
                     else
                     {
-                        if self.accum_counter < self.max_accums
-                        {
+                        if self.accum_counter < self.max_accums {
                             lp::pathtrace_scene(&self.device, &self.queue, &desc_no_tiles, self.pathtrace_type, None);
                         }
 
@@ -527,7 +512,9 @@ impl<'a> AppState<'a>
                     {
                         let mut desc = desc;
                         desc.tile_params = None;
-                        lp::pathtrace_scene(&self.device, &self.queue, &desc, self.pathtrace_type, None);
+                        if self.accum_counter < self.max_accums {
+                            lp::pathtrace_scene(&self.device, &self.queue, &desc, self.pathtrace_type, None);
+                        }
                     }
                     else if self.accum_counter < self.max_accums
                     {
@@ -570,18 +557,15 @@ impl<'a> AppState<'a>
         }
 
         // Swap output textures
-        if self.accum_counter < self.max_accums
+        if self.tile_idx == 0
         {
-            if self.tile_idx == 0
-            {
-                // Copy the contents of the front buffer onto the back buffer,
-                // so that when we swap buffers it won't be as jarring.
-                if self.tiled_rendering {
-                    self.output.copy_front_to_back(self.device, self.queue);
-                }
-                self.output.flip();
-                self.accum_counter = (self.accum_counter + 1).min(self.max_accums);
+            // Copy the contents of the front buffer onto the back buffer,
+            // so that when we swap buffers it won't be as jarring.
+            if self.tiled_rendering {
+                self.output.copy_front_to_back(self.device, self.queue);
             }
+            self.output.flip();
+            self.accum_counter = (self.accum_counter + 1).min(self.max_accums);
         }
     }
 
