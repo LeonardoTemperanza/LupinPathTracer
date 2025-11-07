@@ -5,11 +5,4 @@ edition = "2021"
 
 [dependencies]
 lupin = { path = "../lupin" }
-wgpu = "24.0.1"
 lupin_loader = { path = "../lupin_loader" }
-
-# GUI
-winit = "0.29.7"
-
-# Serialization
-tobj  = "4.0.2"

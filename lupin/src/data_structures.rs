@@ -945,6 +945,18 @@ pub fn validate_scene(scene: &SceneCPU, num_textures: u32, num_samplers: u32)
     }
 }
 
+#[derive(Default, Clone, Copy, Debug)]
+pub struct SceneStats
+{
+    /// Does not count multiple instances of the same mesh
+    pub total_tri_count: u64,
+    pub num_instances: u64,
+}
+pub fn get_scene_stats(scene: &Scene) -> SceneStats
+{
+    return Default::default();
+}
+
 pub fn compute_mesh_aabb(verts_pos: &[Vec4]) -> Aabb
 {
     let mut aabb = Aabb::neutral();
