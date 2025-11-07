@@ -1,4 +1,7 @@
 
+@group(3) @binding(0) var<storage, read> bvh_nodes_array: binding_array<BvhNodes>;
+@group(3) @binding(1) var<storage, read> tlas_nodes: array<TlasNode>;
+
 fn ray_scene_intersection(ray: Ray)->HitInfo
 {
     var tlas_stack: array<u32, MAX_TLAS_DEPTH+1>;  // local

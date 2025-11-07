@@ -270,3 +270,8 @@ pub fn create_point_sampler(device: &wgpu::Device) -> wgpu::Sampler
         ..Default::default()
     });
 }
+
+pub fn supports_rt(device: &wgpu::Device) -> bool
+{
+    return device.features().contains(wgpu::Features::EXPERIMENTAL_RAY_QUERY);
+}

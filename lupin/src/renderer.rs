@@ -464,18 +464,7 @@ pub fn build_pathtrace_resources(device: &wgpu::Device, baked_pathtrace_params: 
     let scene_bindgroup_layout = create_pathtracer_scene_bindgroup_layout(device);
     let settings_bindgroup_layout = create_pathtracer_settings_bindgroup_layout(device);
     let render_target_bindgroup_layout = create_pathtracer_output_bindgroup_layout(device);
-    /*let rt_bindgroup_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-        label: None,
-        entries: &[
-            wgpu::BindGroupLayoutEntry {  // rt_tlas
-                binding: 0,
-                visibility: wgpu::ShaderStages::COMPUTE,
-                ty: wgpu::BindingType::AccelerationStructure { vertex_return: false },
-                count: None,
-            },
-        ]
-    });
-*/
+    let bvh_bindgroup_layout = create_pathtracer_bvh_bindgroup_layout(device, true);
 
     let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label: Some("Lupin Pathtracer Pipeline Layout"),
@@ -483,7 +472,7 @@ pub fn build_pathtrace_resources(device: &wgpu::Device, baked_pathtrace_params: 
             &scene_bindgroup_layout,
             &settings_bindgroup_layout,
             &render_target_bindgroup_layout,
-            //&rt_bindgroup_layout,
+            &bvh_bindgroup_layout,
         ],
         push_constant_ranges: &[wgpu::PushConstantRange {
             stages: wgpu::ShaderStages::COMPUTE,
@@ -759,6 +748,7 @@ pub struct PathtraceDesc<'a>
     pub tile_params: Option<&'a TileParams>,
     pub camera_params: CameraParams,
     pub camera_transform: Mat3x4,
+    pub force_software_bvh: bool,
 }
 
 // TODO: Just make the user modify the tile_idx. This is bad.
@@ -779,7 +769,7 @@ pub fn pathtrace_scene(device: &wgpu::Device, queue: &wgpu::Queue, desc: &Pathtr
     let scene_bindgroup = create_pathtracer_scene_bindgroup(device, queue, resources, scene);
     let settings_bindgroup = create_pathtracer_settings_bindgroup(device, queue, resources, accum_params.prev_frame);
     let output_bindgroup = create_pathtracer_output_bindgroup(device, queue, resources, render_target);
-    let rt_bindgroup = create_pathtracer_rt_bindgroup(device, &scene.rt_tlas, resources);
+    let bvh_bindgroup = create_pathtracer_bvh_bindgroup(device, &scene.rt_tlas, scene, resources, true);
 
     let mut encoder = device.create_command_encoder(&Default::default());
     {
@@ -792,7 +782,7 @@ pub fn pathtrace_scene(device: &wgpu::Device, queue: &wgpu::Queue, desc: &Pathtr
         pass.set_bind_group(0, &scene_bindgroup, &[]);
         pass.set_bind_group(1, &settings_bindgroup, &[]);
         pass.set_bind_group(2, &output_bindgroup, &[]);
-        pass.set_bind_group(3, &rt_bindgroup, &[]);
+        pass.set_bind_group(3, &bvh_bindgroup, &[]);
 
         if let Some(tile_params) = desc.tile_params  // Tiled rendering.
         {
@@ -866,7 +856,7 @@ pub enum FalsecolorType
 
 pub fn pathtrace_scene_falsecolor(device: &wgpu::Device, queue: &wgpu::Queue, desc: &PathtraceDesc, falsecolor_type: FalsecolorType, tile_idx: Option<&mut u32>)
 {
-    // TODO: Check format and usage of render target params and others.
+    assert!(desc.render_target.format() == wgpu::TextureFormat::Rgba16Float);
 
     let scene = desc.scene;
     let render_target = desc.render_target;
@@ -880,7 +870,7 @@ pub fn pathtrace_scene_falsecolor(device: &wgpu::Device, queue: &wgpu::Queue, de
     let scene_bindgroup = create_pathtracer_scene_bindgroup(device, queue, resources, scene);
     let settings_bindgroup = create_pathtracer_settings_bindgroup(device, queue, resources, accum_params.prev_frame);
     let output_bindgroup = create_pathtracer_output_bindgroup(device, queue, resources, render_target);
-    let rt_bindgroup = create_pathtracer_rt_bindgroup(device, &scene.rt_tlas, resources);
+    let bvh_bindgroup = create_pathtracer_bvh_bindgroup(device, &scene.rt_tlas, scene, resources, true);
 
     let mut encoder = device.create_command_encoder(&Default::default());
     {
@@ -893,7 +883,7 @@ pub fn pathtrace_scene_falsecolor(device: &wgpu::Device, queue: &wgpu::Queue, de
         pass.set_bind_group(0, &scene_bindgroup, &[]);
         pass.set_bind_group(1, &settings_bindgroup, &[]);
         pass.set_bind_group(2, &output_bindgroup, &[]);
-        pass.set_bind_group(3, &rt_bindgroup, &[]);
+        pass.set_bind_group(3, &bvh_bindgroup, &[]);
 
         if let Some(tile_params) = desc.tile_params  // Tiled rendering.
         {
@@ -955,7 +945,7 @@ pub struct DebugVizDesc
 
 pub fn pathtrace_scene_debug(device: &wgpu::Device, queue: &wgpu::Queue, desc: &PathtraceDesc, debug_desc: &DebugVizDesc, tile_idx: Option<&mut u32>)
 {
-    // TODO: Check format and usage of render target params and others.
+    assert!(desc.render_target.format() == wgpu::TextureFormat::Rgba16Float);
 
     let scene = desc.scene;
     let render_target = desc.render_target;
@@ -969,6 +959,7 @@ pub fn pathtrace_scene_debug(device: &wgpu::Device, queue: &wgpu::Queue, desc: &
     let scene_bindgroup = create_pathtracer_scene_bindgroup(device, queue, resources, scene);
     let settings_bindgroup = create_pathtracer_settings_bindgroup(device, queue, resources, accum_params.prev_frame);
     let output_bindgroup = create_pathtracer_output_bindgroup(device, queue, resources, render_target);
+    let bvh_bindgroup = create_pathtracer_bvh_bindgroup(device, &scene.rt_tlas, scene, resources, true);
 
     let mut encoder = device.create_command_encoder(&Default::default());
     {
@@ -981,6 +972,7 @@ pub fn pathtrace_scene_debug(device: &wgpu::Device, queue: &wgpu::Queue, desc: &
         pass.set_bind_group(0, &scene_bindgroup, &[]);
         pass.set_bind_group(1, &settings_bindgroup, &[]);
         pass.set_bind_group(2, &output_bindgroup, &[]);
+        pass.set_bind_group(3, &bvh_bindgroup, &[]);
 
         if let Some(tile_params) = desc.tile_params  // Tiled rendering.
         {
@@ -1117,7 +1109,6 @@ fn create_pathtracer_scene_bindgroup(device: &wgpu::Device, queue: &wgpu::Queue,
     let verts_texcoord = &scene.verts_texcoord_array;
     let verts_color = &scene.verts_color_array;
     let indices = &scene.indices_array;
-    let bvh_nodes = &scene.bvh_nodes_array;
 
     // NOTE: Need to do a whole lot of work here to guard from 0 size buffers.
     // WGPU doesn't like 0 size bindings and 0 length binding arrays, but for
@@ -1132,14 +1123,12 @@ fn create_pathtracer_scene_bindgroup(device: &wgpu::Device, queue: &wgpu::Queue,
     let verts_texcoord_array = array_of_buffer_bindings_resource(&verts_texcoord, &resources.dummy_buf_vertuv);
     let verts_color_array    = array_of_buffer_bindings_resource(&verts_color, &resources.dummy_buf_vertcolor);
     let indices_array   = array_of_buffer_bindings_resource(&indices, &resources.dummy_buf_idx);
-    let bvh_nodes_array = array_of_buffer_bindings_resource(&bvh_nodes, &resources.dummy_buf_bvh_node);
     let textures_array  = array_of_texture_bindings_resource(&texture_views, &dummy_tex_view);
     let samplers_array  = array_of_sampler_bindings_resource(&scene.samplers, &resources.dummy_scene_sampler);
     let alias_table_array     = array_of_buffer_bindings_resource(&scene.lights.alias_tables, &resources.dummy_buf_alias_bin);
     let env_alias_table_array = array_of_buffer_bindings_resource(&scene.lights.env_alias_tables, &resources.dummy_buf_alias_bin);
 
     let mesh_infos_buf = buffer_resource(&scene.mesh_infos, &resources.dummy_buf_mesh_infos);
-    let tlas_buf = buffer_resource(&scene.tlas_nodes, &resources.dummy_buf_tlas);
     let instances_buf = buffer_resource(&scene.instances, &resources.dummy_buf_instance);
     let materials_buf = buffer_resource(&scene.materials, &resources.dummy_buf_material);
     let environments_buf = buffer_resource(&scene.environments, &resources.dummy_buf_environment);
@@ -1155,16 +1144,14 @@ fn create_pathtracer_scene_bindgroup(device: &wgpu::Device, queue: &wgpu::Queue,
             wgpu::BindGroupEntry { binding: 3,  resource: wgpu::BindingResource::BufferArray(verts_texcoord_array.as_slice())  },
             wgpu::BindGroupEntry { binding: 4,  resource: wgpu::BindingResource::BufferArray(verts_color_array.as_slice())     },
             wgpu::BindGroupEntry { binding: 5,  resource: wgpu::BindingResource::BufferArray(indices_array.as_slice())         },
-            wgpu::BindGroupEntry { binding: 6,  resource: wgpu::BindingResource::BufferArray(bvh_nodes_array.as_slice())       },
-            wgpu::BindGroupEntry { binding: 7,  resource: tlas_buf },
-            wgpu::BindGroupEntry { binding: 8,  resource: instances_buf },
-            wgpu::BindGroupEntry { binding: 9,  resource: materials_buf },
-            wgpu::BindGroupEntry { binding: 10, resource: wgpu::BindingResource::TextureViewArray(textures_array.as_slice())   },
-            wgpu::BindGroupEntry { binding: 11, resource: wgpu::BindingResource::SamplerArray(samplers_array.as_slice())       },
-            wgpu::BindGroupEntry { binding: 12, resource: environments_buf },
-            wgpu::BindGroupEntry { binding: 13, resource: lights_buf },
-            wgpu::BindGroupEntry { binding: 14, resource: wgpu::BindingResource::BufferArray(alias_table_array.as_slice())     },
-            wgpu::BindGroupEntry { binding: 15, resource: wgpu::BindingResource::BufferArray(env_alias_table_array.as_slice()) },
+            wgpu::BindGroupEntry { binding: 6,  resource: instances_buf },
+            wgpu::BindGroupEntry { binding: 7,  resource: materials_buf },
+            wgpu::BindGroupEntry { binding: 8,  resource: wgpu::BindingResource::TextureViewArray(textures_array.as_slice())   },
+            wgpu::BindGroupEntry { binding: 9,  resource: wgpu::BindingResource::SamplerArray(samplers_array.as_slice())       },
+            wgpu::BindGroupEntry { binding: 10, resource: environments_buf },
+            wgpu::BindGroupEntry { binding: 11, resource: lights_buf },
+            wgpu::BindGroupEntry { binding: 12, resource: wgpu::BindingResource::BufferArray(alias_table_array.as_slice())     },
+            wgpu::BindGroupEntry { binding: 13, resource: wgpu::BindingResource::BufferArray(env_alias_table_array.as_slice()) },
         ]
     });
 
@@ -1238,28 +1225,8 @@ fn create_pathtracer_scene_bindgroup_layout(device: &wgpu::Device) -> wgpu::Bind
                 },
                 count: std::num::NonZero::new(MAX_MESHES)
             },
-            wgpu::BindGroupLayoutEntry {  // bvh_nodes
-                binding: 6,
-                visibility: wgpu::ShaderStages::COMPUTE,
-                ty: wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Storage { read_only: true },
-                    has_dynamic_offset: false,
-                    min_binding_size: None,
-                },
-                count: std::num::NonZero::new(MAX_MESHES)
-            },
-            wgpu::BindGroupLayoutEntry {  // tlas_nodes
-                binding: 7,
-                visibility: wgpu::ShaderStages::COMPUTE,
-                ty: wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Storage { read_only: true },
-                    has_dynamic_offset: false,
-                    min_binding_size: None,
-                },
-                count: None,
-            },
             wgpu::BindGroupLayoutEntry {  // instances
-                binding: 8,
+                binding: 6,
                 visibility: wgpu::ShaderStages::COMPUTE,
                 ty: wgpu::BindingType::Buffer {
                     ty: wgpu::BufferBindingType::Storage { read_only: true },
@@ -1269,7 +1236,7 @@ fn create_pathtracer_scene_bindgroup_layout(device: &wgpu::Device) -> wgpu::Bind
                 count: None,
             },
             wgpu::BindGroupLayoutEntry {  // materials
-                binding: 9,
+                binding: 7,
                 visibility: wgpu::ShaderStages::COMPUTE,
                 ty: wgpu::BindingType::Buffer {
                     ty: wgpu::BufferBindingType::Storage { read_only: true },
@@ -1279,7 +1246,7 @@ fn create_pathtracer_scene_bindgroup_layout(device: &wgpu::Device) -> wgpu::Bind
                 count: None,
             },
             wgpu::BindGroupLayoutEntry {  // textures
-                binding: 10,
+                binding: 8,
                 visibility: wgpu::ShaderStages::COMPUTE,
                 ty: wgpu::BindingType::Texture {
                     sample_type: wgpu::TextureSampleType::Float { filterable: true },
@@ -1289,13 +1256,13 @@ fn create_pathtracer_scene_bindgroup_layout(device: &wgpu::Device) -> wgpu::Bind
                 count: std::num::NonZero::new(MAX_TEXTURES)
             },
             wgpu::BindGroupLayoutEntry {  // samplers
-                binding: 11,
+                binding: 9,
                 visibility: wgpu::ShaderStages::COMPUTE,
                 ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
                 count: std::num::NonZero::new(MAX_SAMPLERS)
             },
             wgpu::BindGroupLayoutEntry {  // environments
-                binding: 12,
+                binding: 10,
                 visibility: wgpu::ShaderStages::COMPUTE,
                 ty: wgpu::BindingType::Buffer {
                     ty: wgpu::BufferBindingType::Storage { read_only: true },
@@ -1305,7 +1272,7 @@ fn create_pathtracer_scene_bindgroup_layout(device: &wgpu::Device) -> wgpu::Bind
                 count: None,
             },
             wgpu::BindGroupLayoutEntry {  // lights
-                binding: 13,
+                binding: 11,
                 visibility: wgpu::ShaderStages::COMPUTE,
                 ty: wgpu::BindingType::Buffer {
                     ty: wgpu::BufferBindingType::Storage { read_only: true },
@@ -1315,7 +1282,7 @@ fn create_pathtracer_scene_bindgroup_layout(device: &wgpu::Device) -> wgpu::Bind
                 count: None,
             },
             wgpu::BindGroupLayoutEntry {  // alias_tables
-                binding: 14,
+                binding: 12,
                 visibility: wgpu::ShaderStages::COMPUTE,
                 ty: wgpu::BindingType::Buffer {
                     ty: wgpu::BufferBindingType::Storage { read_only: true },
@@ -1325,7 +1292,7 @@ fn create_pathtracer_scene_bindgroup_layout(device: &wgpu::Device) -> wgpu::Bind
                 count: std::num::NonZero::new(MAX_MESHES),
             },
             wgpu::BindGroupLayoutEntry {  // env_alias_tables
-                binding: 15,
+                binding: 13,
                 visibility: wgpu::ShaderStages::COMPUTE,
                 ty: wgpu::BindingType::Buffer {
                     ty: wgpu::BufferBindingType::Storage { read_only: true },
@@ -1411,17 +1378,79 @@ fn create_pathtracer_output_bindgroup_layout(device: &wgpu::Device) -> wgpu::Bin
     });
 }
 
-fn create_pathtracer_rt_bindgroup(device: &wgpu::Device, tlas: &wgpu::Tlas, resources: &PathtraceResources) -> wgpu::BindGroup
+fn create_pathtracer_bvh_bindgroup(device: &wgpu::Device, tlas: &wgpu::Tlas, scene: &Scene, resources: &PathtraceResources, use_software_bvh: bool) -> wgpu::BindGroup
 {
-    let render_target_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-        label: Some("Pathtracer rt bindgroup"),
-        layout: &resources.pipeline.get_bind_group_layout(3),
-        entries: &[
-            wgpu::BindGroupEntry { binding: 0, resource: tlas.as_binding() },
-        ]
-    });
+    if use_software_bvh
+    {
+        let bvh_nodes = &scene.bvh_nodes_array;
+        let bvh_nodes_array = array_of_buffer_bindings_resource(&bvh_nodes, &resources.dummy_buf_bvh_node);
+        let tlas_buf = buffer_resource(&scene.tlas_nodes, &resources.dummy_buf_tlas);
 
-    return render_target_bind_group;
+        return device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("Pathtracer BVH bindgroup (software)"),
+            layout: &resources.pipeline.get_bind_group_layout(3),
+            entries: &[
+                wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::BufferArray(bvh_nodes_array.as_slice()) },
+                wgpu::BindGroupEntry { binding: 1, resource: tlas_buf },
+            ]
+        });
+    }
+    else
+    {
+        return device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("Pathtracer BVH bindgroup (hardware)"),
+            layout: &resources.pipeline.get_bind_group_layout(3),
+            entries: &[
+                wgpu::BindGroupEntry { binding: 0, resource: tlas.as_binding() },
+            ]
+        });
+    }
+}
+
+fn create_pathtracer_bvh_bindgroup_layout(device: &wgpu::Device, use_software_bvh: bool) -> wgpu::BindGroupLayout
+{
+    if use_software_bvh
+    {
+        return device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: None,
+            entries: &[
+                wgpu::BindGroupLayoutEntry {  // bvh_nodes_array
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: std::num::NonZero::new(MAX_MESHES)
+                },
+                wgpu::BindGroupLayoutEntry {  // tlas_nodes
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+            ]
+        });
+    }
+    else
+    {
+        return device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: None,
+            entries: &[
+                wgpu::BindGroupLayoutEntry {  // rt_tlas
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::AccelerationStructure { vertex_return: false },
+                    count: None,
+                },
+            ]
+        });
+    }
 }
 
 fn get_push_constants(desc: &PathtraceDesc, pathtrace_type: Option<PathtraceType>, falsecolor_type: Option<FalsecolorType>, debug_desc: Option<&DebugVizDesc>) -> PushConstants

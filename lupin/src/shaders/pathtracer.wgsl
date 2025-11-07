@@ -7,20 +7,18 @@
 @group(0) @binding(3) var<storage, read> verts_texcoord_array: binding_array<VertsUV>;
 @group(0) @binding(4) var<storage, read> verts_color_array: binding_array<VertsColor>;
 @group(0) @binding(5) var<storage, read> indices_array: binding_array<Indices>;
-@group(0) @binding(6) var<storage, read> bvh_nodes_array: binding_array<BvhNodes>;
 // Instances
-@group(0) @binding(7) var<storage, read> tlas_nodes: array<TlasNode>;
-@group(0) @binding(8) var<storage, read> instances: array<Instance>;
-@group(0) @binding(9) var<storage, read> materials: array<Material>;
+@group(0) @binding(6) var<storage, read> instances: array<Instance>;
+@group(0) @binding(7) var<storage, read> materials: array<Material>;
 // Textures
-@group(0) @binding(10) var textures: binding_array<texture_2d<f32>>;
-@group(0) @binding(11) var samplers: binding_array<sampler>;
+@group(0) @binding(8) var textures: binding_array<texture_2d<f32>>;
+@group(0) @binding(9) var samplers: binding_array<sampler>;
 // Environments
-@group(0) @binding(12) var<storage, read> environments: array<Environment>;
+@group(0) @binding(10) var<storage, read> environments: array<Environment>;
 // Lights
-@group(0) @binding(13) var<storage, read> lights: array<Light>;
-@group(0) @binding(14) var<storage, read> alias_tables: binding_array<AliasTable>;
-@group(0) @binding(15) var<storage, read> env_alias_tables: binding_array<AliasTable>;
+@group(0) @binding(11) var<storage, read> lights: array<Light>;
+@group(0) @binding(12) var<storage, read> alias_tables: binding_array<AliasTable>;
+@group(0) @binding(13) var<storage, read> env_alias_tables: binding_array<AliasTable>;
 
 // Group 1: Pathtrace settings
 @group(1) @binding(0) var prev_frame: texture_2d<f32>;
