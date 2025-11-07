@@ -22,12 +22,12 @@ fn main()
     }
 
     let scene_names = [
+        "coffee",
         "bathroom1",
         "bistroexterior",
         "bistrointerior",
         "car2",
         "classroom",
-        "coffee",
         "ecosys",
         "hairball",
         "junkshop",
@@ -58,7 +58,6 @@ fn main()
         }
 
         let (scene, cameras) = lpl::load_scene_yoctogl_v24(path_json, &device, &queue).unwrap();
-        let num_accums = 200;
 
         if cameras.len() <= 0
         {
@@ -82,6 +81,7 @@ fn main()
             view_formats: &[]
         });
 
+        let num_accums = 200;
         print!("Scene \"{}\": ", scene_name);
         for accum_idx in 0..num_accums
         {

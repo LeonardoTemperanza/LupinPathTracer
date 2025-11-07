@@ -4,15 +4,17 @@ use crate::wgpu_utils::*;
 
 use wgpu::util::DeviceExt;  // For some extra device traits.
 
-pub static DEFAULT_PATHTRACER_SRC: &str = include_str!("shaders/pathtracer.wgsl");
-pub static SENTINEL_IDX: u32 = u32::MAX;
-
 #[allow(unused_macros)]
 macro_rules! static_assert {
     ($($tt:tt)*) => {
         const _: () = assert!($($tt)*);
     }
 }
+
+pub static DEFAULT_PATHTRACER_SRC: &str = include_str!("shaders/pathtracer.wgsl");
+pub static PATHTRACER_BVH_RT_SRC: &str = include_str!("shaders/bvh_rt.wgsl");
+pub static PATHTRACER_BVH_CUSTOM_SRC: &str = include_str!("shaders/bvh_custom.wgsl");
+pub static SENTINEL_IDX: u32 = u32::MAX;
 
 pub struct Scene
 {
@@ -370,8 +372,17 @@ pub fn request_device_for_lupin_with_denoising_capabilities(adapter: &wgpu::Adap
 
 // Shader params
 
+pub struct PathtracePipeline
+{
+    custom: wgpu::ComputePipeline,
+    rt: Option<wgpu::ComputePipeline>,
+}
+
 pub struct PathtraceResources
 {
+    //pub pipeline: PathtracePipeline,
+    //pub falsecolor_pipeline: PathtracePipeline,
+    //pub debug_pipeline: PathtracePipeline,
     pub pipeline: wgpu::ComputePipeline,
     pub falsecolor_pipeline: wgpu::ComputePipeline,
     pub debug_pipeline: wgpu::ComputePipeline,
@@ -421,22 +432,39 @@ impl Default for BakedPathtraceParams
 
 pub fn build_pathtrace_resources(device: &wgpu::Device, baked_pathtrace_params: &BakedPathtraceParams) -> PathtraceResources
 {
-    let shader_desc = wgpu::ShaderModuleDescriptor {
+    let mut shader_src_custom = String::from(DEFAULT_PATHTRACER_SRC);
+    shader_src_custom.push_str(PATHTRACER_BVH_CUSTOM_SRC);
+    let mut shader_src_rt = String::from(DEFAULT_PATHTRACER_SRC);
+    shader_src_rt.push_str(PATHTRACER_BVH_RT_SRC);
+
+    let shader_desc_custom = wgpu::ShaderModuleDescriptor {
         label: Some("Lupin Pathtracer Shader"),
-        source: wgpu::ShaderSource::Wgsl(DEFAULT_PATHTRACER_SRC.into())
+        source: wgpu::ShaderSource::Wgsl(shader_src_custom.into())
+    };
+    let shader_desc_rt = wgpu::ShaderModuleDescriptor {
+        label: Some("Lupin Pathtracer Shader"),
+        source: wgpu::ShaderSource::Wgsl(shader_src_rt.into())
     };
 
-    let shader;
+    let shader_custom;
     if baked_pathtrace_params.with_runtime_checks {
-        shader = device.create_shader_module(shader_desc);
+        shader_custom = device.create_shader_module(shader_desc_custom);
     } else {
-        shader = unsafe { device.create_shader_module_trusted(shader_desc, wgpu::ShaderRuntimeChecks::unchecked()) };
+        shader_custom = unsafe { device.create_shader_module_trusted(shader_desc_custom, wgpu::ShaderRuntimeChecks::unchecked()) };
     }
+    /*
+    let shader_rt;
+    if baked_pathtrace_params.with_runtime_checks {
+        shader_custom = device.create_shader_module(shader_desc_custom);
+    } else {
+        shader_custom = unsafe { device.create_shader_module_trusted(shader_desc_rt, wgpu::ShaderRuntimeChecks::unchecked()) };
+    }
+    */
 
     let scene_bindgroup_layout = create_pathtracer_scene_bindgroup_layout(device);
     let settings_bindgroup_layout = create_pathtracer_settings_bindgroup_layout(device);
     let render_target_bindgroup_layout = create_pathtracer_output_bindgroup_layout(device);
-    let rt_bindgroup_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+    /*let rt_bindgroup_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
         label: None,
         entries: &[
             wgpu::BindGroupLayoutEntry {  // rt_tlas
@@ -447,6 +475,7 @@ pub fn build_pathtrace_resources(device: &wgpu::Device, baked_pathtrace_params: 
             },
         ]
     });
+*/
 
     let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label: Some("Lupin Pathtracer Pipeline Layout"),
@@ -454,7 +483,7 @@ pub fn build_pathtrace_resources(device: &wgpu::Device, baked_pathtrace_params: 
             &scene_bindgroup_layout,
             &settings_bindgroup_layout,
             &render_target_bindgroup_layout,
-            &rt_bindgroup_layout,
+            //&rt_bindgroup_layout,
         ],
         push_constant_ranges: &[wgpu::PushConstantRange {
             stages: wgpu::ShaderStages::COMPUTE,
@@ -476,7 +505,7 @@ pub fn build_pathtrace_resources(device: &wgpu::Device, baked_pathtrace_params: 
     let pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
         label: Some("Lupin Pathtracer Pipeline"),
         layout: Some(&pipeline_layout),
-        module: &shader,
+        module: &shader_custom,
         entry_point: Some("pathtrace_main"),
         compilation_options: wgpu::PipelineCompilationOptions {
             constants: &constants,
@@ -488,7 +517,7 @@ pub fn build_pathtrace_resources(device: &wgpu::Device, baked_pathtrace_params: 
     let falsecolor_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
         label: Some("Lupin Pathtracer Falsecolor Pipeline"),
         layout: Some(&pipeline_layout),
-        module: &shader,
+        module: &shader_custom,
         entry_point: Some("pathtrace_falsecolor_main"),
         compilation_options: wgpu::PipelineCompilationOptions {
             constants: &constants,
@@ -500,7 +529,7 @@ pub fn build_pathtrace_resources(device: &wgpu::Device, baked_pathtrace_params: 
     let debug_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
         label: Some("Lupin Pathtracer Debug Pipeline"),
         layout: Some(&pipeline_layout),
-        module: &shader,
+        module: &shader_custom,
         entry_point: Some("pathtrace_debug_main"),
         compilation_options: wgpu::PipelineCompilationOptions {
             constants: &debug_constants,
@@ -508,6 +537,45 @@ pub fn build_pathtrace_resources(device: &wgpu::Device, baked_pathtrace_params: 
         },
         cache: None,
     });
+
+    // RT Variants
+    /*
+    let pipeline_rt = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+        label: Some("Lupin Pathtracer Pipeline"),
+        layout: Some(&pipeline_layout),
+        module: &shader_rt,
+        entry_point: Some("pathtrace_main"),
+        compilation_options: wgpu::PipelineCompilationOptions {
+            constants: &constants,
+            zero_initialize_workgroup_memory: true,
+        },
+        cache: None,
+    });
+
+    let falsecolor_pipeline_rt = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+        label: Some("Lupin Pathtracer Falsecolor Pipeline"),
+        layout: Some(&pipeline_layout),
+        module: &shader_rt,
+        entry_point: Some("pathtrace_falsecolor_main"),
+        compilation_options: wgpu::PipelineCompilationOptions {
+            constants: &constants,
+            zero_initialize_workgroup_memory: true,
+        },
+        cache: None,
+    });
+
+    let debug_pipeline_rt = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+        label: Some("Lupin Pathtracer Debug Pipeline"),
+        layout: Some(&pipeline_layout),
+        module: &shader_rt,
+        entry_point: Some("pathtrace_debug_main"),
+        compilation_options: wgpu::PipelineCompilationOptions {
+            constants: &debug_constants,
+            zero_initialize_workgroup_memory: true,
+        },
+        cache: None,
+    });
+    */
 
     let size = wgpu::Extent3d {
         width: 1,
