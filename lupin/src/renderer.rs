@@ -693,6 +693,7 @@ pub struct PathtraceDesc<'a>
     pub camera_transform: Mat3x4,
 }
 
+// TODO: Just make the user modify the tile_idx. This is bad.
 /// * `tile_idx` - Current tile. Will be incremented by the function and set to 0 once all tiles are finished. If absent, 0 will be used instead.
 pub fn pathtrace_scene(device: &wgpu::Device, queue: &wgpu::Queue, desc: &PathtraceDesc, pathtrace_type: PathtraceType, tile_idx: Option<&mut u32>)
 {

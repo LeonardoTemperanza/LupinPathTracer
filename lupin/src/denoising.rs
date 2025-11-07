@@ -15,7 +15,11 @@ pub struct DenoiseResources
     pub filter: oidn::sys::OIDNFilter,
     pub width: u32,
     pub height: u32,
-    pub beauty_pixel_byte_size: u8,
+
+    // Current state, to minimize the number of commit() calls
+    // on the filter
+    pub cur_has_albedo: bool,
+    pub cur_has_normals: bool,
 }
 
 impl Drop for DenoiseResources
@@ -33,7 +37,7 @@ impl Drop for DenoiseResources
 }
 
 pub fn build_denoise_resources(device: &wgpu::Device, denoise_device: &DenoiseDevice,
-                               beauty_pixel_byte_size: u8, width: u32, height: u32) -> DenoiseResources
+                               width: u32, height: u32) -> DenoiseResources
 {
     let beauty: oidn_wgpu_interop::SharedBuffer;
     let albedo: oidn_wgpu_interop::SharedBuffer;
@@ -42,24 +46,21 @@ pub fn build_denoise_resources(device: &wgpu::Device, denoise_device: &DenoiseDe
 
     let filter: oidn::sys::OIDNFilter;
 
-    let beauty_size = beauty_pixel_byte_size as u32 * width * height;
-    let gbuffer_size = 3 * 4 * width * height;
+    let texture_size = 4 * 2 * width * height;
 
     match denoise_device
     {
         DenoiseDevice::InteropDevice(interop_device) =>
         {
-            beauty  = interop_device.allocate_shared_buffers(beauty_size  as u64).unwrap();
-            albedo  = interop_device.allocate_shared_buffers(gbuffer_size as u64).unwrap();
-            normals = interop_device.allocate_shared_buffers(gbuffer_size as u64).unwrap();
+            beauty  = interop_device.allocate_shared_buffers(texture_size as u64).unwrap();
+            albedo  = interop_device.allocate_shared_buffers(texture_size as u64).unwrap();
+            normals = interop_device.allocate_shared_buffers(texture_size as u64).unwrap();
 
             unsafe
             {
                 use oidn::sys::*;
                 let device_raw = interop_device.oidn_device().raw();
                 let shared_beauty_raw  = beauty.oidn_buffer().raw();
-                let shared_albedo_raw  = beauty.oidn_buffer().raw();
-                let shared_normals_raw = beauty.oidn_buffer().raw();
 
                 filter = oidnNewFilter(device_raw, c"RT".as_ptr());
                 if filter.is_null() { panic!("Failed to create OIDN filter"); }
@@ -71,10 +72,6 @@ pub fn build_denoise_resources(device: &wgpu::Device, denoise_device: &DenoiseDe
                                    OIDNFormat_OIDN_FORMAT_HALF3, width as usize, height as usize, 0, 4 * 2, 0);
                 oidnSetFilterImage(filter, c"output".as_ptr(), shared_beauty_raw,
                                    OIDNFormat_OIDN_FORMAT_HALF3, width as usize, height as usize, 0, 4 * 2, 0);
-                //oidnSetFilterImage(filter, c"albedo".as_ptr(), shared_albedo_raw,
-                //                   OIDNFormat_OIDN_FORMAT_UINT3, width as usize, height as usize, 0, 4, 0);
-                //oidnSetFilterImage(filter, c"normals".as_ptr(), shared_normals_raw,
-                //                   OIDNFormat_OIDN_FORMAT_UINT3, width as usize, height as usize, 0, 4, 0);
                 oidnCommitFilter(filter);
                 oidn_check(device_raw);
             }
@@ -92,7 +89,9 @@ pub fn build_denoise_resources(device: &wgpu::Device, denoise_device: &DenoiseDe
         filter,
         width,
         height,
-        beauty_pixel_byte_size,
+
+        cur_has_albedo: false,
+        cur_has_normals: false,
     };
 }
 
@@ -102,9 +101,9 @@ pub struct DenoiseDesc<'a>
     /// Assumed to be rgbaf16 linear.
     pub pathtrace_output: &'a wgpu::Texture,
     /// Assumed to be rgba8_unorm.
-    //pub albedo: &'a wgpu::Texture,
+    pub albedo: Option<&'a wgpu::Texture>,
     /// Assumed to be rgba8_snorm, in the [-1, 1] range.
-    //pub normals: &'a wgpu::Texture,
+    pub normals: Option<&'a wgpu::Texture>,
     /// Output of denoise operation. This can be the same texture as pathtrace_output,
     /// in which case the denoising will cleanly be performed in place.
     pub denoise_output: &'a wgpu::Texture,
@@ -126,12 +125,21 @@ pub enum DenoiseQuality
 
 /// Keep in mind this will trigger a CPU stall waiting for currently scheduled GPU commands to finish.
 pub fn denoise(device: &wgpu::Device, queue: &wgpu::Queue,
-               denoise_device: &DenoiseDevice, resources: &DenoiseResources,
+               denoise_device: &DenoiseDevice, resources: &mut DenoiseResources,
                desc: &DenoiseDesc)
 {
     assert!(desc.pathtrace_output.format() == wgpu::TextureFormat::Rgba16Float);
     assert!(desc.pathtrace_output.width() == resources.width && desc.pathtrace_output.height() == resources.height);
     assert!(desc.denoise_output.width() == resources.width && desc.denoise_output.height() == resources.height);
+
+    if let Some(albedo) = desc.albedo {
+        assert!(albedo.format() == wgpu::TextureFormat::Rgba16Float);
+        assert!(albedo.width() == resources.width && albedo.height() == resources.height);
+    }
+    if let Some(normals) = desc.normals {
+        assert!(normals.format() == wgpu::TextureFormat::Rgba16Float);
+        assert!(normals.width() == resources.width && normals.height() == resources.height);
+    }
 
     //let has_albedo = desc.albedo.is_some();
     //let has_normals = desc.albedo.is_some();
@@ -180,8 +188,35 @@ pub fn denoise(device: &wgpu::Device, queue: &wgpu::Queue,
                 use oidn::sys::*;
                 let device_raw = interop_device.oidn_device().raw();
 
+                let shared_albedo_raw  = resources.albedo.oidn_buffer().raw();
+                let shared_normals_raw = resources.normals.oidn_buffer().raw();
+
                 let filter = resources.filter;
                 oidnSetFilterInt(filter, c"quality".as_ptr(), filter_quality as i32);
+
+                // Update aux images if necessary
+                if !resources.cur_has_albedo && desc.albedo.is_some()
+                { println!("now using albedo!");
+                    oidnSetFilterImage(filter, c"albedo".as_ptr(), shared_albedo_raw,
+                                       OIDNFormat_OIDN_FORMAT_HALF3, width as usize, height as usize, 0, 4 * 2, 0);
+                    resources.cur_has_albedo = true;
+                }
+                else if resources.cur_has_albedo && !desc.albedo.is_some()
+                {
+                    oidnUnsetFilterImage(filter, c"albedo".as_ptr());
+                    resources.cur_has_albedo = false;
+                }
+                if !resources.cur_has_normals && desc.normals.is_some()
+                {
+                    oidnSetFilterImage(filter, c"normals".as_ptr(), shared_normals_raw,
+                                       OIDNFormat_OIDN_FORMAT_HALF3, width as usize, height as usize, 0, 4 * 2, 0);
+                    resources.cur_has_normals = true;
+                }
+                else if resources.cur_has_normals && !desc.normals.is_some()
+                {
+                    oidnUnsetFilterImage(filter, c"normals".as_ptr());
+                    resources.cur_has_normals = false;
+                }
                 oidnCommitFilter(filter);
 
                 // This will stall the CPU until the operation is done.

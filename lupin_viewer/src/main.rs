@@ -176,6 +176,7 @@ pub struct AppState<'a>
     pub tiled_rendering: bool,
     pub tile_params: lp::TileParams,
     pub denoising: bool,
+    pub use_gbuffers_for_denoise: bool,
 
     // Camera
     pub cam_pos: lp::Vec3,
@@ -199,6 +200,7 @@ pub struct AppState<'a>
     // Saved state for accumulation
     pub prev_cam_transform: lp::Mat3x4,
     pub accum_counter: u32,
+    pub gbuffers_accum_counter: u32,
     pub tile_idx: u32,
 }
 
@@ -216,10 +218,10 @@ impl<'a> AppState<'a>
         });
         let tonemap_resources = lp::build_tonemap_resources(&device);
 
-        let width = window.inner_size().width;
-        let height = window.inner_size().height;
+        let width = 1920;
+        let height = 1080;
 
-        let denoise_resources = lp::build_denoise_resources(&device, &denoise_device, 8, width, height);
+        let denoise_resources = lp::build_denoise_resources(&device, &denoise_device, width, height);
 
         let (scene, scene_cameras) = lpl::build_scene_cornell_box(&device, &queue);
 
@@ -302,6 +304,7 @@ impl<'a> AppState<'a>
             tiled_rendering: false,
             tile_params: Default::default(),
             denoising: false,
+            use_gbuffers_for_denoise: false,
 
             // Camera
             cam_pos: Default::default(),
@@ -324,6 +327,7 @@ impl<'a> AppState<'a>
             // Saved state for accumulation
             prev_cam_transform: lp::Mat3x4::zeros(),
             accum_counter: 0,
+            gbuffers_accum_counter: 0,
             tile_idx: 0,
         };
 
@@ -461,9 +465,37 @@ impl<'a> AppState<'a>
             camera_params: self.camera_params,
             camera_transform: self.cam_transform,
         };
+        let desc_albedo = lp::PathtraceDesc {
+            scene: &self.scene,
+            render_target: self.albedo.front(),
+            resources: &self.pathtrace_resources,
+            accum_params: &lp::AccumulationParams {
+                prev_frame: Some(self.albedo.back()),
+                accum_counter: self.gbuffers_accum_counter,
+            },
+            tile_params: Some(&self.tile_params),
+            camera_params: self.camera_params,
+            camera_transform: self.cam_transform,
+        };
+        let desc_normals = lp::PathtraceDesc {
+            scene: &self.scene,
+            render_target: self.normals.front(),
+            resources: &self.pathtrace_resources,
+            accum_params: &lp::AccumulationParams {
+                prev_frame: Some(self.normals.back()),
+                accum_counter: self.gbuffers_accum_counter,
+            },
+            tile_params: Some(&self.tile_params),
+            camera_params: self.camera_params,
+            camera_transform: self.cam_transform,
+        };
 
         let mut desc_no_tiles = desc;
         desc_no_tiles.tile_params = None;
+        let mut desc_albedo_no_tiles = desc_albedo;
+        desc_albedo_no_tiles.tile_params = None;
+        let mut desc_normals_no_tiles = desc_normals;
+        desc_normals_no_tiles.tile_params = None;
 
         let tonemap_desc = lp::TonemapDesc {
             resources: &self.tonemap_resources,
@@ -472,6 +504,7 @@ impl<'a> AppState<'a>
             tonemap_params: &self.tonemap_params
         };
 
+        // TODO: Refactor this!!!!
         match self.render_type
         {
             RenderType::Falsecolor(falsecolor_type) =>
@@ -503,6 +536,10 @@ impl<'a> AppState<'a>
                     {
                         if self.accum_counter < self.max_accums {
                             lp::pathtrace_scene(&self.device, &self.queue, &desc_no_tiles, self.pathtrace_type, None);
+                            //if self.denoising {
+                            //    lp::pathtrace_scene_falsecolor(self.device, self.queue, &desc_albedo_no_tiles, lp::FalsecolorType::Albedo,  Some(&mut self.tile_idx));
+                            //    lp::pathtrace_scene_falsecolor(self.device, self.queue, &desc_normals_no_tiles, lp::FalsecolorType::Normals, Some(&mut self.tile_idx));
+                            //}
                         }
 
                         lp::tonemap_and_fit_aspect(&self.device, &self.queue, &tonemap_desc, Some(viewport));
@@ -516,11 +553,19 @@ impl<'a> AppState<'a>
                         desc.tile_params = None;
                         if self.accum_counter < self.max_accums {
                             lp::pathtrace_scene(&self.device, &self.queue, &desc, self.pathtrace_type, None);
+                            if self.denoising {
+                                lp::pathtrace_scene_falsecolor(self.device, self.queue, &desc_albedo_no_tiles, lp::FalsecolorType::Albedo,   None);
+                                lp::pathtrace_scene_falsecolor(self.device, self.queue, &desc_normals_no_tiles, lp::FalsecolorType::Normals, None);
+                            }
                         }
                     }
                     else if self.accum_counter < self.max_accums
                     {
                         lp::pathtrace_scene(&self.device, &self.queue, &desc, self.pathtrace_type, Some(&mut self.tile_idx));
+                        //if self.denoising {
+                        //    lp::pathtrace_scene_falsecolor(self.device, self.queue, &desc_albedo, lp::FalsecolorType::Albedo,  Some(&mut self.tile_idx));
+                        //    lp::pathtrace_scene_falsecolor(self.device, self.queue, &desc_normals, lp::FalsecolorType::Normals, Some(&mut self.tile_idx));
+                        //}
                     }
 
                     lp::tonemap_and_fit_aspect(&self.device, &self.queue, &tonemap_desc, Some(viewport));
@@ -544,11 +589,27 @@ impl<'a> AppState<'a>
         // Denoise
         if self.denoising && self.tile_idx == 0
         {
-            lp::denoise(self.device, self.queue, self.denoise_device, &self.denoise_resources, &lp::DenoiseDesc {
-                pathtrace_output: self.output.front(),
-                denoise_output: &self.denoised,
-                quality: Default::default(),
-            });
+            if self.use_gbuffers_for_denoise
+            {
+                lp::denoise(self.device, self.queue, self.denoise_device, &mut self.denoise_resources, &lp::DenoiseDesc {
+                    pathtrace_output: self.output.front(),
+                    albedo: Some(self.albedo.front()),
+                    normals: Some(self.normals.front()),
+                    denoise_output: &self.denoised,
+                    quality: Default::default(),
+                });
+            }
+            else
+            {
+                lp::denoise(self.device, self.queue, self.denoise_device, &mut self.denoise_resources, &lp::DenoiseDesc {
+                    pathtrace_output: self.output.front(),
+                    albedo: None,
+                    normals: None,
+                    denoise_output: &self.denoised,
+                    quality: Default::default(),
+                });
+            }
+
             let tonemap_desc = lp::TonemapDesc {
                 resources: &self.tonemap_resources,
                 hdr_texture: &self.denoised,
@@ -563,11 +624,28 @@ impl<'a> AppState<'a>
         {
             // Copy the contents of the front buffer onto the back buffer,
             // so that when we swap buffers it won't be as jarring.
-            if self.tiled_rendering {
+            if self.tiled_rendering
+            {
                 self.output.copy_front_to_back(self.device, self.queue);
+                if self.denoising
+                {
+                    self.albedo.copy_front_to_back(self.device, self.queue);
+                    self.normals.copy_front_to_back(self.device, self.queue);
+                }
             }
+
             self.output.flip();
+            if self.denoising
+            {
+                self.albedo.flip();
+                self.normals.flip();
+            }
+
             self.accum_counter = (self.accum_counter + 1).min(self.max_accums);
+            if self.denoising
+            {
+                self.gbuffers_accum_counter = (self.gbuffers_accum_counter + 1).min(self.max_accums);
+            }
         }
     }
 
@@ -656,9 +734,9 @@ impl<'a> AppState<'a>
     {
         self.reset_accumulation();
         self.output.resize(self.device, new_width, new_height);
-        self.output.resize(self.device, new_width, new_height);
-        self.output.resize(self.device, new_width, new_height);
-        self.denoise_resources = lp::build_denoise_resources(self.device, self.denoise_device, 8, new_width, new_height);
+        self.albedo.resize(self.device, new_width, new_height);
+        self.normals.resize(self.device, new_width, new_height);
+        self.denoise_resources = lp::build_denoise_resources(self.device, self.denoise_device, new_width, new_height);
         resize_texture(self.device, &mut self.denoised, new_width, new_height);
     }
 
@@ -767,6 +845,10 @@ impl<'a> AppState<'a>
                     }
 
                     ui.checkbox(&mut self.denoising, "Denoise");
+
+                    if self.denoising {
+                        ui.checkbox(&mut self.use_gbuffers_for_denoise, "Use GBuffers");
+                    }
 
                     egui::CollapsingHeader::new("Stats").id_salt("stats_pathtrace").show(ui, |ui| {
                         ui.label(format!("Iteration: {:?}", self.accum_counter));
@@ -1127,6 +1209,7 @@ impl<'a> AppState<'a>
     fn reset_accumulation(&mut self)
     {
         self.accum_counter = 0;
+        self.gbuffers_accum_counter = 0;
         self.tile_idx = 0;
     }
 
