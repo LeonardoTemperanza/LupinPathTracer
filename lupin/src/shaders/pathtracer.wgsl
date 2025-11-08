@@ -2208,8 +2208,7 @@ fn sample_lights(pos: vec3f, normal: vec3f, outgoing: vec3f) -> vec3f
         let incoming = normalize(world_tri_pos - pos);
 
         if !same_hemisphere(up_normal, outgoing, incoming) { return vec3f(0.0f); }
-        //return incoming;
-        return vec3f(0.0f, 1.0f, 0.0f);
+        return incoming;
     }
     else
     {
@@ -2221,8 +2220,7 @@ fn sample_lights(pos: vec3f, normal: vec3f, outgoing: vec3f) -> vec3f
         let incoming = env_idx_to_dir(sample, env_idx);
 
         if !same_hemisphere(up_normal, outgoing, incoming) { return vec3f(0.0f); }
-        //return incoming;
-        return vec3(1.0f, 0.0f, 0.0f);
+        return incoming;
     }
 }
 
@@ -2265,7 +2263,6 @@ fn sample_lights_pdf(pos: vec3f, incoming: vec3f) -> f32
     }
 */
 
-/*
     for(var i = 0u; i < num_envs; i++)
     {
         let env_tex_idx = environments[i].emission_tex_idx;
@@ -2283,11 +2280,8 @@ fn sample_lights_pdf(pos: vec3f, incoming: vec3f) -> f32
                           sin(PI * (f32(pixel_coords.y) + 0.5f) / f32(env_tex_size.y));
         pdf += prob / solid_angle;
     }
-*/
 
-    pdf = 0.0f;
-
-    //pdf /= f32(num_lights + num_envs);
+    pdf /= f32(num_lights + num_envs);
     return pdf;
 }
 
