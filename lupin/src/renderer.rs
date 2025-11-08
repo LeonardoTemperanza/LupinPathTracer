@@ -261,6 +261,7 @@ pub const MAX_SAMPLERS:  u32 = 32;
 pub const NUM_STORAGE_BUFFERS_PER_MESH: u32 = 7;
 // NOTE: Coupled to shader.
 pub const WORKGROUP_SIZE: u32 = 4;
+const RT_MAX_ACCEL_STRUCTURES: u32 = 2;
 
 /// Requests the wgpu device with the required features for Lupin.
 pub fn request_device_for_lupin(adapter: &wgpu::Adapter) -> (wgpu::Device, wgpu::Queue)
@@ -269,7 +270,7 @@ pub fn request_device_for_lupin(adapter: &wgpu::Adapter) -> (wgpu::Device, wgpu:
     let supported_optional_features = optional_features.intersection(adapter.features());
 
     let supports_rt = supported_optional_features.contains(wgpu::Features::EXPERIMENTAL_RAY_QUERY);
-    let allowed_accel_structures = if supports_rt { 1 } else { 0 };
+    let allowed_accel_structures = if supports_rt { RT_MAX_ACCEL_STRUCTURES } else { 0 };
     let max_rt_instances = if supports_rt { 1000000 } else { 0 };
     let max_blas_geometry_count = if supports_rt { 1 } else { 0 };
     let max_blas_primitives = if supports_rt { 10000000 } else { 0 };
@@ -322,7 +323,7 @@ pub fn request_device_for_lupin_with_denoising_capabilities(adapter: &wgpu::Adap
     let supported_optional_features = optional_features.intersection(adapter.features());
 
     let supports_rt = supported_optional_features.contains(wgpu::Features::EXPERIMENTAL_RAY_QUERY);
-    let allowed_accel_structures = if supports_rt { 1 } else { 0 };
+    let allowed_accel_structures = if supports_rt { RT_MAX_ACCEL_STRUCTURES } else { 0 };
     let max_rt_instances = if supports_rt { 1000000 } else { 0 };
     let max_blas_geometry_count = if supports_rt { 1 } else { 0 };
     let max_blas_primitives = if supports_rt { 10000000 } else { 0 };
@@ -380,12 +381,12 @@ pub struct PathtracePipeline
 
 pub struct PathtraceResources
 {
-    //pub pipeline: PathtracePipeline,
-    //pub falsecolor_pipeline: PathtracePipeline,
-    //pub debug_pipeline: PathtracePipeline,
-    pub pipeline: wgpu::ComputePipeline,
-    pub falsecolor_pipeline: wgpu::ComputePipeline,
-    pub debug_pipeline: wgpu::ComputePipeline,
+    pub pipeline: PathtracePipeline,
+    pub falsecolor_pipeline: PathtracePipeline,
+    pub debug_pipeline: PathtracePipeline,
+    //pub pipeline: wgpu::ComputePipeline,
+    //pub falsecolor_pipeline: wgpu::ComputePipeline,
+    //pub debug_pipeline: wgpu::ComputePipeline,
     pub dummy_prev_frame_texture: wgpu::Texture,
     pub dummy_albedo_texture: wgpu::Texture,
     pub dummy_normals_texture: wgpu::Texture,
@@ -452,19 +453,19 @@ pub fn build_pathtrace_resources(device: &wgpu::Device, baked_pathtrace_params: 
     } else {
         shader_custom = unsafe { device.create_shader_module_trusted(shader_desc_custom, wgpu::ShaderRuntimeChecks::unchecked()) };
     }
-    /*
     let shader_rt;
-    if baked_pathtrace_params.with_runtime_checks {
-        shader_custom = device.create_shader_module(shader_desc_custom);
+    if !supports_rt(device) {
+        shader_rt = None;
+    } else if baked_pathtrace_params.with_runtime_checks {
+        shader_rt = Some(device.create_shader_module(shader_desc_rt));
     } else {
-        shader_custom = unsafe { device.create_shader_module_trusted(shader_desc_rt, wgpu::ShaderRuntimeChecks::unchecked()) };
+        shader_rt = Some( unsafe { device.create_shader_module_trusted(shader_desc_rt, wgpu::ShaderRuntimeChecks::unchecked()) } );
     }
-    */
 
     let scene_bindgroup_layout = create_pathtracer_scene_bindgroup_layout(device);
     let settings_bindgroup_layout = create_pathtracer_settings_bindgroup_layout(device);
     let render_target_bindgroup_layout = create_pathtracer_output_bindgroup_layout(device);
-    let bvh_bindgroup_layout = create_pathtracer_bvh_bindgroup_layout(device, true);
+    let bvh_custom_bindgroup_layout = create_pathtracer_bvh_bindgroup_layout(device, true);
 
     let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label: Some("Lupin Pathtracer Pipeline Layout"),
@@ -472,7 +473,7 @@ pub fn build_pathtrace_resources(device: &wgpu::Device, baked_pathtrace_params: 
             &scene_bindgroup_layout,
             &settings_bindgroup_layout,
             &render_target_bindgroup_layout,
-            &bvh_bindgroup_layout,
+            &bvh_custom_bindgroup_layout,
         ],
         push_constant_ranges: &[wgpu::PushConstantRange {
             stages: wgpu::ShaderStages::COMPUTE,
@@ -528,43 +529,62 @@ pub fn build_pathtrace_resources(device: &wgpu::Device, baked_pathtrace_params: 
     });
 
     // RT Variants
-    /*
-    let pipeline_rt = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-        label: Some("Lupin Pathtracer Pipeline"),
-        layout: Some(&pipeline_layout),
-        module: &shader_rt,
-        entry_point: Some("pathtrace_main"),
-        compilation_options: wgpu::PipelineCompilationOptions {
-            constants: &constants,
-            zero_initialize_workgroup_memory: true,
-        },
-        cache: None,
-    });
+    let mut pipeline_rt = None;
+    let mut falsecolor_pipeline_rt = None;
+    let mut debug_pipeline_rt = None;
+    if let Some(shader_rt) = shader_rt
+    {
+        let bvh_rt_bindgroup_layout = create_pathtracer_bvh_bindgroup_layout(device, false);
+        let pipeline_layout_rt = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("Lupin Pathtracer Pipeline Layout (RT)"),
+            bind_group_layouts: &[
+                &scene_bindgroup_layout,
+                &settings_bindgroup_layout,
+                &render_target_bindgroup_layout,
+                &bvh_rt_bindgroup_layout,
+            ],
+            push_constant_ranges: &[wgpu::PushConstantRange {
+                stages: wgpu::ShaderStages::COMPUTE,
+                range: 0..std::mem::size_of::<PushConstants>() as u32,
+            }],
+        });
 
-    let falsecolor_pipeline_rt = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-        label: Some("Lupin Pathtracer Falsecolor Pipeline"),
-        layout: Some(&pipeline_layout),
-        module: &shader_rt,
-        entry_point: Some("pathtrace_falsecolor_main"),
-        compilation_options: wgpu::PipelineCompilationOptions {
-            constants: &constants,
-            zero_initialize_workgroup_memory: true,
-        },
-        cache: None,
-    });
+        pipeline_rt = Some(device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+            label: Some("Lupin Pathtracer Pipeline"),
+            layout: Some(&pipeline_layout_rt),
+            module: &shader_rt,
+            entry_point: Some("pathtrace_main"),
+            compilation_options: wgpu::PipelineCompilationOptions {
+                constants: &constants,
+                zero_initialize_workgroup_memory: true,
+            },
+            cache: None,
+        }));
 
-    let debug_pipeline_rt = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-        label: Some("Lupin Pathtracer Debug Pipeline"),
-        layout: Some(&pipeline_layout),
-        module: &shader_rt,
-        entry_point: Some("pathtrace_debug_main"),
-        compilation_options: wgpu::PipelineCompilationOptions {
-            constants: &debug_constants,
-            zero_initialize_workgroup_memory: true,
-        },
-        cache: None,
-    });
-    */
+        falsecolor_pipeline_rt = Some(device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+            label: Some("Lupin Pathtracer Falsecolor Pipeline"),
+            layout: Some(&pipeline_layout_rt),
+            module: &shader_rt,
+            entry_point: Some("pathtrace_falsecolor_main"),
+            compilation_options: wgpu::PipelineCompilationOptions {
+                constants: &constants,
+                zero_initialize_workgroup_memory: true,
+            },
+            cache: None,
+        }));
+
+        debug_pipeline_rt = Some(device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+            label: Some("Lupin Pathtracer Debug Pipeline"),
+            layout: Some(&pipeline_layout_rt),
+            module: &shader_rt,
+            entry_point: Some("pathtrace_debug_main"),
+            compilation_options: wgpu::PipelineCompilationOptions {
+                constants: &debug_constants,
+                zero_initialize_workgroup_memory: true,
+            },
+            cache: None,
+        }));
+    }
 
     let size = wgpu::Extent3d {
         width: 1,
@@ -632,9 +652,9 @@ pub fn build_pathtrace_resources(device: &wgpu::Device, baked_pathtrace_params: 
     });
 
     return PathtraceResources {
-        pipeline,
-        debug_pipeline,
-        falsecolor_pipeline,
+        pipeline: PathtracePipeline { custom: pipeline, rt: pipeline_rt },
+        debug_pipeline: PathtracePipeline { custom: debug_pipeline, rt: debug_pipeline_rt },
+        falsecolor_pipeline: PathtracePipeline { custom: falsecolor_pipeline, rt: falsecolor_pipeline_rt },
         dummy_prev_frame_texture,
         dummy_output_texture,
         dummy_albedo_texture,
@@ -756,6 +776,10 @@ pub struct PathtraceDesc<'a>
 pub fn pathtrace_scene(device: &wgpu::Device, queue: &wgpu::Queue, desc: &PathtraceDesc, pathtrace_type: PathtraceType, tile_idx: Option<&mut u32>)
 {
     assert!(desc.render_target.format() == wgpu::TextureFormat::Rgba16Float);
+    if desc.force_software_bvh {
+        // Check that the software BVH is built
+        //assert!(scene.
+    }
 
     let scene = desc.scene;
     let render_target = desc.render_target;
@@ -766,10 +790,16 @@ pub fn pathtrace_scene(device: &wgpu::Device, queue: &wgpu::Queue, desc: &Pathtr
     let camera_params = desc.camera_params;
     let camera_transform = desc.camera_transform;
 
+    let (pipeline, use_software_bvh) = if !supports_rt(device) || desc.force_software_bvh {
+        (&resources.pipeline.custom, true)
+    } else {
+        (resources.pipeline.rt.as_ref().unwrap(), false)
+    };
+
     let scene_bindgroup = create_pathtracer_scene_bindgroup(device, queue, resources, scene);
     let settings_bindgroup = create_pathtracer_settings_bindgroup(device, queue, resources, accum_params.prev_frame);
     let output_bindgroup = create_pathtracer_output_bindgroup(device, queue, resources, render_target);
-    let bvh_bindgroup = create_pathtracer_bvh_bindgroup(device, &scene.rt_tlas, scene, resources, true);
+    let bvh_bindgroup = create_pathtracer_bvh_bindgroup(device, &scene.rt_tlas, scene, resources, use_software_bvh);
 
     let mut encoder = device.create_command_encoder(&Default::default());
     {
@@ -778,7 +808,7 @@ pub fn pathtrace_scene(device: &wgpu::Device, queue: &wgpu::Queue, desc: &Pathtr
             timestamp_writes: None
         });
 
-        pass.set_pipeline(&resources.pipeline);
+        pass.set_pipeline(pipeline);
         pass.set_bind_group(0, &scene_bindgroup, &[]);
         pass.set_bind_group(1, &settings_bindgroup, &[]);
         pass.set_bind_group(2, &output_bindgroup, &[]);
@@ -867,10 +897,16 @@ pub fn pathtrace_scene_falsecolor(device: &wgpu::Device, queue: &wgpu::Queue, de
     let camera_params = desc.camera_params;
     let camera_transform = desc.camera_transform;
 
+    let (pipeline, use_software_bvh) = if !supports_rt(device) || desc.force_software_bvh {
+        (&resources.falsecolor_pipeline.custom, true)
+    } else {
+        (resources.falsecolor_pipeline.rt.as_ref().unwrap(), false)
+    };
+
     let scene_bindgroup = create_pathtracer_scene_bindgroup(device, queue, resources, scene);
     let settings_bindgroup = create_pathtracer_settings_bindgroup(device, queue, resources, accum_params.prev_frame);
     let output_bindgroup = create_pathtracer_output_bindgroup(device, queue, resources, render_target);
-    let bvh_bindgroup = create_pathtracer_bvh_bindgroup(device, &scene.rt_tlas, scene, resources, true);
+    let bvh_bindgroup = create_pathtracer_bvh_bindgroup(device, &scene.rt_tlas, scene, resources, use_software_bvh);
 
     let mut encoder = device.create_command_encoder(&Default::default());
     {
@@ -879,7 +915,7 @@ pub fn pathtrace_scene_falsecolor(device: &wgpu::Device, queue: &wgpu::Queue, de
             timestamp_writes: None
         });
 
-        pass.set_pipeline(&resources.falsecolor_pipeline);
+        pass.set_pipeline(pipeline);
         pass.set_bind_group(0, &scene_bindgroup, &[]);
         pass.set_bind_group(1, &settings_bindgroup, &[]);
         pass.set_bind_group(2, &output_bindgroup, &[]);
@@ -956,10 +992,16 @@ pub fn pathtrace_scene_debug(device: &wgpu::Device, queue: &wgpu::Queue, desc: &
     let camera_params = desc.camera_params;
     let camera_transform = desc.camera_transform;
 
+    let (pipeline, use_software_bvh) = if !supports_rt(device) || desc.force_software_bvh {
+        (&resources.debug_pipeline.custom, true)
+    } else {
+        (resources.debug_pipeline.rt.as_ref().unwrap(), false)
+    };
+
     let scene_bindgroup = create_pathtracer_scene_bindgroup(device, queue, resources, scene);
     let settings_bindgroup = create_pathtracer_settings_bindgroup(device, queue, resources, accum_params.prev_frame);
     let output_bindgroup = create_pathtracer_output_bindgroup(device, queue, resources, render_target);
-    let bvh_bindgroup = create_pathtracer_bvh_bindgroup(device, &scene.rt_tlas, scene, resources, true);
+    let bvh_bindgroup = create_pathtracer_bvh_bindgroup(device, &scene.rt_tlas, scene, resources, use_software_bvh);
 
     let mut encoder = device.create_command_encoder(&Default::default());
     {
@@ -968,7 +1010,7 @@ pub fn pathtrace_scene_debug(device: &wgpu::Device, queue: &wgpu::Queue, desc: &
             timestamp_writes: None
         });
 
-        pass.set_pipeline(&resources.debug_pipeline);
+        pass.set_pipeline(pipeline);
         pass.set_bind_group(0, &scene_bindgroup, &[]);
         pass.set_bind_group(1, &settings_bindgroup, &[]);
         pass.set_bind_group(2, &output_bindgroup, &[]);
@@ -1136,7 +1178,7 @@ fn create_pathtracer_scene_bindgroup(device: &wgpu::Device, queue: &wgpu::Queue,
 
     let scene_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
         label: Some("Scene bind group"),
-        layout: &resources.pipeline.get_bind_group_layout(0),
+        layout: &resources.pipeline.custom.get_bind_group_layout(0),
         entries: &[
             wgpu::BindGroupEntry { binding: 0,  resource: mesh_infos_buf },
             wgpu::BindGroupEntry { binding: 1,  resource: wgpu::BindingResource::BufferArray(verts_pos_array.as_slice())       },
@@ -1316,7 +1358,7 @@ fn create_pathtracer_settings_bindgroup(device: &wgpu::Device, queue: &wgpu::Que
 
     let settings_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
         label: Some("Settings bind group"),
-        layout: &resources.pipeline.get_bind_group_layout(1),
+        layout: &resources.pipeline.custom.get_bind_group_layout(1),
         entries: &[
             wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(&prev_frame_view) },
         ]
@@ -1350,7 +1392,7 @@ fn create_pathtracer_output_bindgroup(device: &wgpu::Device, queue: &wgpu::Queue
 
     let render_target_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
         label: Some("Pathtracer output bindgroup"),
-        layout: &resources.pipeline.get_bind_group_layout(2),
+        layout: &resources.pipeline.custom.get_bind_group_layout(2),
         entries: &[
             wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(&view) },
         ]
@@ -1388,7 +1430,7 @@ fn create_pathtracer_bvh_bindgroup(device: &wgpu::Device, tlas: &wgpu::Tlas, sce
 
         return device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("Pathtracer BVH bindgroup (software)"),
-            layout: &resources.pipeline.get_bind_group_layout(3),
+            layout: &resources.pipeline.custom.get_bind_group_layout(3),
             entries: &[
                 wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::BufferArray(bvh_nodes_array.as_slice()) },
                 wgpu::BindGroupEntry { binding: 1, resource: tlas_buf },
@@ -1397,11 +1439,16 @@ fn create_pathtracer_bvh_bindgroup(device: &wgpu::Device, tlas: &wgpu::Tlas, sce
     }
     else
     {
+        assert!(supports_rt(device));
+
+        let layout = resources.pipeline.rt.as_ref().unwrap().get_bind_group_layout(3);
+
         return device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("Pathtracer BVH bindgroup (hardware)"),
-            layout: &resources.pipeline.get_bind_group_layout(3),
+            layout: &layout,
             entries: &[
                 wgpu::BindGroupEntry { binding: 0, resource: tlas.as_binding() },
+                wgpu::BindGroupEntry { binding: 1, resource: tlas.as_binding() },
             ]
         });
     }
@@ -1444,6 +1491,12 @@ fn create_pathtracer_bvh_bindgroup_layout(device: &wgpu::Device, use_software_bv
             entries: &[
                 wgpu::BindGroupLayoutEntry {  // rt_tlas
                     binding: 0,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::AccelerationStructure { vertex_return: false },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {  // rt_tlas_lights
+                    binding: 1,
                     visibility: wgpu::ShaderStages::COMPUTE,
                     ty: wgpu::BindingType::AccelerationStructure { vertex_return: false },
                     count: None,

@@ -301,7 +301,7 @@ fn pathtrace_falsecolor_main(@builtin(local_invocation_id) local_id: vec3u, @bui
         {
             case FALSECOLOR_ALBEDO:
             {
-                let hit = skip_alpha_stochastically(camera_ray);
+                let hit = ray_skip_alpha_stochastically(camera_ray);
                 if hit.hit
                 {
                     let mat_point = get_material_point(hit);
@@ -311,7 +311,7 @@ fn pathtrace_falsecolor_main(@builtin(local_invocation_id) local_id: vec3u, @bui
             }
             case FALSECOLOR_NORMALS:
             {
-                let hit = skip_alpha_stochastically(camera_ray);
+                let hit = ray_skip_alpha_stochastically(camera_ray);
                 if hit.hit
                 {
                     let normal = compute_shading_normal(hit);
@@ -321,7 +321,7 @@ fn pathtrace_falsecolor_main(@builtin(local_invocation_id) local_id: vec3u, @bui
             }
             case FALSECOLOR_NORMALS_UNSIGNED:
             {
-                let hit = skip_alpha_stochastically(camera_ray);
+                let hit = ray_skip_alpha_stochastically(camera_ray);
                 if hit.hit
                 {
                     let normal = compute_shading_normal(hit);
@@ -331,7 +331,7 @@ fn pathtrace_falsecolor_main(@builtin(local_invocation_id) local_id: vec3u, @bui
             }
             case FALSECOLOR_FRONTFACING:
             {
-                let hit = skip_alpha_stochastically(camera_ray);
+                let hit = ray_skip_alpha_stochastically(camera_ray);
                 if hit.hit {
                     color += f32(!hit.hit_backside);
                 }
@@ -339,7 +339,7 @@ fn pathtrace_falsecolor_main(@builtin(local_invocation_id) local_id: vec3u, @bui
             }
             case FALSECOLOR_EMISSION:
             {
-                let hit = skip_alpha_stochastically(camera_ray);
+                let hit = ray_skip_alpha_stochastically(camera_ray);
                 if hit.hit
                 {
                     let mat_point = get_material_point(hit);
@@ -349,7 +349,7 @@ fn pathtrace_falsecolor_main(@builtin(local_invocation_id) local_id: vec3u, @bui
             }
             case FALSECOLOR_ROUGHNESS:
             {
-                let hit = skip_alpha_stochastically(camera_ray);
+                let hit = ray_skip_alpha_stochastically(camera_ray);
                 if hit.hit
                 {
                     let mat_point = get_material_point(hit);
@@ -359,7 +359,7 @@ fn pathtrace_falsecolor_main(@builtin(local_invocation_id) local_id: vec3u, @bui
             }
             case FALSECOLOR_METALLIC:
             {
-                let hit = skip_alpha_stochastically(camera_ray);
+                let hit = ray_skip_alpha_stochastically(camera_ray);
                 if hit.hit
                 {
                     let mat_point = get_material_point(hit);
@@ -526,7 +526,7 @@ fn compute_camera_ray(global_id: vec2u, output_dim: vec2u, pixel_offset: vec2f) 
     }
 }
 
-fn skip_alpha_stochastically(start_ray: Ray) -> HitInfo
+fn ray_skip_alpha_stochastically(start_ray: Ray) -> HitInfo
 {
     var hit = HitInfo();
     var ray = start_ray;
@@ -2208,7 +2208,8 @@ fn sample_lights(pos: vec3f, normal: vec3f, outgoing: vec3f) -> vec3f
         let incoming = normalize(world_tri_pos - pos);
 
         if !same_hemisphere(up_normal, outgoing, incoming) { return vec3f(0.0f); }
-        return incoming;
+        //return incoming;
+        return vec3f(0.0f, 1.0f, 0.0f);
     }
     else
     {
@@ -2220,7 +2221,8 @@ fn sample_lights(pos: vec3f, normal: vec3f, outgoing: vec3f) -> vec3f
         let incoming = env_idx_to_dir(sample, env_idx);
 
         if !same_hemisphere(up_normal, outgoing, incoming) { return vec3f(0.0f); }
-        return incoming;
+        //return incoming;
+        return vec3(1.0f, 0.0f, 0.0f);
     }
 }
 
@@ -2231,6 +2233,7 @@ fn sample_lights_pdf(pos: vec3f, incoming: vec3f) -> f32
     let num_lights = select(arrayLength(&lights), 0u, (constants.flags & FLAG_LIGHTS_EMPTY) != 0);
     let num_envs = select(arrayLength(&environments), 0u, (constants.flags & FLAG_ENVS_EMPTY) != 0);
 
+/*
     for(var i = 0u; i < num_lights; i++)
     {
         let light = lights[i];
@@ -2260,7 +2263,9 @@ fn sample_lights_pdf(pos: vec3f, incoming: vec3f) -> f32
 
         pdf += light_pdf;
     }
+*/
 
+/*
     for(var i = 0u; i < num_envs; i++)
     {
         let env_tex_idx = environments[i].emission_tex_idx;
@@ -2278,9 +2283,11 @@ fn sample_lights_pdf(pos: vec3f, incoming: vec3f) -> f32
                           sin(PI * (f32(pixel_coords.y) + 0.5f) / f32(env_tex_size.y));
         pdf += prob / solid_angle;
     }
+*/
 
-    pdf /= f32(num_lights + num_envs);
+    pdf = 0.0f;
 
+    //pdf /= f32(num_lights + num_envs);
     return pdf;
 }
 
@@ -2663,18 +2670,6 @@ fn ray_tri_dst(ray: Ray, v0: vec3f, v1: vec3f, v2: vec3f)->vec4f
     return vec4f(t, u, v, det);
 }
 
-struct HitInfo
-{
-    hit: bool,  // Rest of the fields are invalid if false.
-    dst: f32,
-    uv: vec2f,
-    instance_idx: u32,
-    tri_idx: u32,
-    hit_backside: bool,
-}
-
-const MAX_TLAS_DEPTH: u32 = 20;  // This supports 2^MAX_TLAS_DEPTH objects.
-
 struct RayDebugInfo
 {
     num_tri_checks: u32,
@@ -2683,117 +2678,12 @@ struct RayDebugInfo
 
 var<private> RAY_DEBUG_INFO: RayDebugInfo = RayDebugInfo();
 
-const MAX_BVH_DEPTH: u32 = 25;
-
-struct RayMeshIntersectionResult
+struct HitInfo
 {
-    hit: vec4f,  // t, u, v, det
+    hit: bool,  // Rest of the fields are invalid if false.
+    dst: f32,
+    uv: vec2f,
+    instance_idx: u32,
     tri_idx: u32,
-}
-
-// cur_min_hit_dst should be F32_MAX if absent.
-fn ray_mesh_intersection(ray: Ray, cur_min_hit_dst: f32, mesh_idx: u32) -> RayMeshIntersectionResult
-{
-    var bvh_stack: array<u32, MAX_BVH_DEPTH+1>;  // local
-    var stack_idx = 2u;
-    bvh_stack[0] = 0u;
-    bvh_stack[1] = 0u;
-
-    // t, u, v
-    var min_hit = vec4f(cur_min_hit_dst, 0.0f, 0.0f, 0.0f);
-    var tri_idx = 0u;
-    while stack_idx > 1
-    {
-        stack_idx--;
-        let node = bvh_nodes_array[mesh_idx].data[bvh_stack[stack_idx]];
-
-        if node.tri_count > 0u  // Leaf node
-        {
-            let tri_begin = node.tri_begin_or_first_child;
-            let tri_count = node.tri_count;
-            for(var i: u32 = tri_begin; i < tri_begin + tri_count; i++)
-            {
-                let v0 = verts_pos_array[mesh_idx].data[indices_array[mesh_idx].data[i*3 + 0]];
-                let v1 = verts_pos_array[mesh_idx].data[indices_array[mesh_idx].data[i*3 + 1]];
-                let v2 = verts_pos_array[mesh_idx].data[indices_array[mesh_idx].data[i*3 + 2]];
-                let hit = ray_tri_dst(ray, v0, v1, v2);
-                if hit.x < min_hit.x
-                {
-                    min_hit = hit;
-                    tri_idx = i;
-                }
-
-                if DEBUG {
-                    RAY_DEBUG_INFO.num_tri_checks++;
-                }
-            }
-        }
-        else  // Non-leaf node
-        {
-            let left_child  = node.tri_begin_or_first_child;
-            let right_child = left_child + 1;
-            let left_child_node  = bvh_nodes_array[mesh_idx].data[left_child];
-            let right_child_node = bvh_nodes_array[mesh_idx].data[right_child];
-
-            let left_dst  = ray_aabb_dst(ray, left_child_node.aabb_min,  left_child_node.aabb_max);
-            let right_dst = ray_aabb_dst(ray, right_child_node.aabb_min, right_child_node.aabb_max);
-
-            if DEBUG {
-                RAY_DEBUG_INFO.num_aabb_checks += 2;
-            }
-
-            // Push children onto the stack
-            // The closest child should be looked at
-            // first. This order is chosen so that it's more
-            // likely that the second child will never need
-            // to be visited in depth.
-
-            let visit_left_first: bool = left_dst <= right_dst;
-            let push_left:  bool = left_dst < min_hit.x;
-            let push_right: bool = right_dst < min_hit.x;
-
-            if visit_left_first
-            {
-                if push_right
-                {
-                    bvh_stack[stack_idx] = right_child;
-                    stack_idx++;
-                }
-
-                if push_left
-                {
-                    bvh_stack[stack_idx] = left_child;
-                    stack_idx++;
-                }
-            }
-            else
-            {
-                if push_left
-                {
-                    bvh_stack[stack_idx] = left_child;
-                    stack_idx++;
-                }
-
-                if push_right
-                {
-                    bvh_stack[stack_idx] = right_child;
-                    stack_idx++;
-                }
-            }
-        }
-    }
-
-    return RayMeshIntersectionResult(min_hit, tri_idx);
-}
-
-fn ray_instance_intersection(ray: Ray, cur_min_hit_dst: f32, instance_idx: u32) -> RayMeshIntersectionResult
-{
-    let instance = instances[instance_idx];
-
-    let test = transpose(instance.transpose_inverse_transform);
-    let trans_mat4 = mat4x4f(vec4f(test[0], 0.0f), vec4f(test[1], 0.0f), vec4f(test[2], 0.0f), vec4f(test[3], 1.0f));
-
-    let ray_trans = transform_ray_without_normalizing_direction(ray, trans_mat4);
-    let result = ray_mesh_intersection(ray_trans, cur_min_hit_dst, instance.mesh_idx);
-    return result;
+    hit_backside: bool,
 }

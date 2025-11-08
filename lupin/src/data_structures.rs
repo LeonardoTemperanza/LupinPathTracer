@@ -43,7 +43,7 @@ pub fn build_lights(device: &wgpu::Device, queue: &wgpu::Queue, scene: &SceneCPU
             total_area += area;
         }
 
-        // Guard against extreme edgecase where all triangles
+        // Guard against the extreme edgecase where all triangles
         // have 0 area.
         if total_area <= 0.0 { continue; }
 
