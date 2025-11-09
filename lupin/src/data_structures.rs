@@ -110,7 +110,7 @@ pub fn build_lights(device: &wgpu::Device, queue: &wgpu::Queue, scene: &SceneCPU
 }
 
 // From: https://www.pbr-book.org/4ed/Sampling_Algorithms/The_Alias_Method#AliasTable
-pub fn build_alias_table(weights: &[f32]) -> Vec::<AliasBin>
+pub fn build_alias_table(weights: &[f32]) -> Vec<AliasBin>
 {
     if weights.is_empty() { return vec![]; }
 
@@ -676,6 +676,8 @@ pub fn upload_scene_to_gpu(device: &wgpu::Device, queue: &wgpu::Queue, scene: &S
     let lights = build_lights(device, queue, scene, envs_info);
 
     // RT hardware accel structures
+    const RT_MASK_DEFAULT: u8 = 1;
+    const RT_MASK_LIGHT: u8 = 2;
     let mut tlas = device.create_tlas(&wgpu::CreateTlasDescriptor {
         label: None,
         flags: wgpu::AccelerationStructureFlags::PREFER_FAST_TRACE,
@@ -751,12 +753,25 @@ pub fn upload_scene_to_gpu(device: &wgpu::Device, queue: &wgpu::Queue, scene: &S
             rt_transform.m[2][0], rt_transform.m[2][1], rt_transform.m[2][2], rt_transform.m[2][3],
         ];
 
+        let is_light = false;
+        let light_idx = 0;
+        /*
+        for (j, light) in scene.lights.lights.iter().enumerate()
+        {
+            if light.instance_idx == i
+            {
+                is_light = true;
+                light_idx = j;
+            }
+        }
+        */
+
         // Using the index_mut trait for wgpu::Tlas.
         tlas[i] = Some(wgpu::TlasInstance::new(
             &blases[mesh_idx as usize],
             rt_transform_serial,
-            i as u32,
-            0xFF
+            light_idx,
+            if is_light { RT_MASK_LIGHT } else { RT_MASK_DEFAULT },
         ));
     }
 

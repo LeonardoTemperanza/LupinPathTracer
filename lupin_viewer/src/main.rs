@@ -464,7 +464,7 @@ impl<'a> AppState<'a>
             tile_params: Some(&self.tile_params),
             camera_params: self.camera_params,
             camera_transform: self.cam_transform,
-            force_software_bvh: false,
+            force_software_bvh: true,
         };
         let desc_albedo = lp::PathtraceDesc {
             scene: &self.scene,

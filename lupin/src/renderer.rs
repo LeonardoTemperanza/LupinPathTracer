@@ -59,6 +59,14 @@ pub struct SceneCPU
     pub materials: Vec<Material>,
 
     pub environments: Vec<Environment>,
+
+    // pub lights: LightsCPU,
+}
+
+#[derive(Debug)]
+pub struct LightCPU
+{
+    // pub lights: Vec<Light>
 }
 
 #[derive(Debug)]

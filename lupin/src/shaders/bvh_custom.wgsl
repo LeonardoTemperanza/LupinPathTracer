@@ -104,16 +104,46 @@ fn ray_scene_intersection(ray: Ray)->HitInfo
     return hit_info;
 }
 
-fn ray_instance_intersection(ray: Ray, cur_min_hit_dst: f32, instance_idx: u32) -> RayMeshIntersectionResult
+fn compute_instance_lights_pdf(ray: Ray) -> f32
 {
-    let instance = instances[instance_idx];
+    let num_lights = select(arrayLength(&lights), 0u, (constants.flags & FLAG_LIGHTS_EMPTY) != 0);
+    let num_envs = select(arrayLength(&environments), 0u, (constants.flags & FLAG_ENVS_EMPTY) != 0);
 
-    let test = transpose(instance.transpose_inverse_transform);
-    let trans_mat4 = mat4x4f(vec4f(test[0], 0.0f), vec4f(test[1], 0.0f), vec4f(test[2], 0.0f), vec4f(test[3], 1.0f));
+    let pos = ray.ori;
+    let incoming = ray.dir;
 
-    let ray_trans = transform_ray_without_normalizing_direction(ray, trans_mat4);
-    let result = _ray_mesh_intersection(ray_trans, cur_min_hit_dst, instance.mesh_idx);
-    return result;
+    var pdf = 0.0f;
+    for(var i = 0u; i < num_lights; i++)
+    {
+        let light = lights[i];
+        let instance_idx = light.instance_idx;
+
+        var light_pdf = 0.0f;
+        var next_pos = pos;
+        for(var bounce = 0u; bounce < 100; bounce++)
+        {
+            var ray = Ray(next_pos, incoming, 1.0f / incoming);
+            let hit_info = _ray_instance_intersection(ray, F32_MAX, instance_idx);
+            let hit_dst = hit_info.hit.x;
+            let hit_uv  = hit_info.hit.yz;
+            if hit_dst == F32_MAX { break; }  // No intersection.
+
+            let light_normal = compute_tri_geom_normal(instance_idx, hit_info.tri_idx);
+
+            let light_pos = ray.ori + ray.dir * hit_dst;
+
+            let prob = alias_tables[i].data[hit_info.tri_idx].prob;
+            let dist2 = dot(light_pos - pos, light_pos - pos);
+            let cos_theta = abs(dot(light_normal, incoming));
+
+            light_pdf += dist2 / (cos_theta * light.area);
+            next_pos = light_pos + incoming;
+        }
+
+        pdf += light_pdf;
+    }
+
+    return pdf;
 }
 
 /////////////////////
@@ -222,4 +252,16 @@ fn _ray_mesh_intersection(ray: Ray, cur_min_hit_dst: f32, mesh_idx: u32) -> RayM
     }
 
     return RayMeshIntersectionResult(min_hit, tri_idx);
+}
+
+fn _ray_instance_intersection(ray: Ray, cur_min_hit_dst: f32, instance_idx: u32) -> RayMeshIntersectionResult
+{
+    let instance = instances[instance_idx];
+
+    let test = transpose(instance.transpose_inverse_transform);
+    let trans_mat4 = mat4x4f(vec4f(test[0], 0.0f), vec4f(test[1], 0.0f), vec4f(test[2], 0.0f), vec4f(test[3], 1.0f));
+
+    let ray_trans = transform_ray_without_normalizing_direction(ray, trans_mat4);
+    let result = _ray_mesh_intersection(ray_trans, cur_min_hit_dst, instance.mesh_idx);
+    return result;
 }

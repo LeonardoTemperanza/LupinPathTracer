@@ -2231,6 +2231,8 @@ fn sample_lights_pdf(pos: vec3f, incoming: vec3f) -> f32
     let num_lights = select(arrayLength(&lights), 0u, (constants.flags & FLAG_LIGHTS_EMPTY) != 0);
     let num_envs = select(arrayLength(&environments), 0u, (constants.flags & FLAG_ENVS_EMPTY) != 0);
 
+    pdf += compute_instance_lights_pdf(Ray(pos, incoming, 1.0f / incoming));
+
 /*
     for(var i = 0u; i < num_lights; i++)
     {
@@ -2272,9 +2274,6 @@ fn sample_lights_pdf(pos: vec3f, incoming: vec3f) -> f32
         let pixel_idx = pixel_coords.y * env_tex_size.x + pixel_coords.x;
 
         let prob = env_alias_tables[i].data[pixel_idx].prob;
-        //let s = sample_environment(incoming, i);
-        //let prob = max(s.x, max(s.y, s.z)) / 3104071.8;
-
         let solid_angle = (2.0f * PI / f32(env_tex_size.x)) *
                           (PI / f32(env_tex_size.y)) *
                           sin(PI * (f32(pixel_coords.y) + 0.5f) / f32(env_tex_size.y));

@@ -2,6 +2,14 @@
 @group(3) @binding(0) var rt_tlas: acceleration_structure;
 @group(3) @binding(1) var rt_tlas_lights: acceleration_structure;
 
+// NOTE: Requires masks to be set up with the following bitflags
+// and instance_custom_data to be 0 if it's not a light and the light index
+// otherwise. Note that instance_custom_data must only use 24 bits.
+
+// Coupled to RT BVH construction.
+const RT_MASK_DEFAULT: u32 = (1 << 0);
+const RT_MASK_LIGHT:   u32 = (1 << 1);
+
 /*
 RayQuery docs:
 
@@ -109,7 +117,9 @@ const RAY_QUERY_INTERSECTION_AABB = 3;
 fn ray_scene_intersection(ray: Ray) -> HitInfo
 {
     var rq: ray_query;
-    rayQueryInitialize(&rq, rt_tlas, RayDesc(0u, 0xFFu, RAY_EPSILON, F32_MAX, ray.ori, ray.dir));
+    let flags = RAY_FLAG_SKIP_AABBS;
+    let mask = 0xFFu;
+    rayQueryInitialize(&rq, rt_tlas, RayDesc(flags, mask, RAY_EPSILON, F32_MAX, ray.ori, ray.dir));
     rayQueryProceed(&rq);
 
     let hit = rayQueryGetCommittedIntersection(&rq);
@@ -119,7 +129,7 @@ fn ray_scene_intersection(ray: Ray) -> HitInfo
     res.hit = true;
     res.dst = hit.t;
     res.uv  = hit.barycentrics;
-    res.instance_idx = hit.instance_custom_data;
+    res.instance_idx = hit.instance_index;
     res.tri_idx = hit.primitive_index;
     res.hit_backside = !hit.front_face;
     return res;
@@ -130,7 +140,8 @@ fn compute_instance_lights_pdf(ray: Ray) -> f32
     var rq: ray_query;
     // Consider everything to be not opaque, a.k.a consider all hits.
     let flags = RAY_FLAG_SKIP_AABBS | RAY_FLAG_FORCE_NO_OPAQUE;
-    rayQueryInitialize(&rq, rt_tlas_lights, RayDesc(0u, 0xFFu, RAY_EPSILON, F32_MAX, ray.ori, ray.dir));
+    let mask = RT_MASK_LIGHT;
+    rayQueryInitialize(&rq, rt_tlas, RayDesc(flags, mask, RAY_EPSILON, F32_MAX, ray.ori, ray.dir));
 
     var pdf = 0.0f;
     while rayQueryProceed(&rq)
@@ -184,8 +195,12 @@ fn ray_skip_alpha_stochastically(start_ray: Ray) -> HitInfo
         let is_first_hit = closest_opaque_hit.kind == RAY_QUERY_INTERSECTION_NONE;
         if !is_first_hit && hit.t >= closest_opaque_hit.t { continue; }
 
-        // Get alpha, if it's 0 then update closest_opaque_hit
-
+        // Skip if alpha is exactly 0.0f
+        let uv = hit.barycentrics;
+        let instance_idx = hit.instance_custom_data;
+        let tri_idx = hit.primitive_index;
+        let alpha = _get_alpha(uv, tri_idx, instance_idx);
+        if alpha == 0.0f { continue; }
     }
 
     if closest_opaque_hit.kind == RAY_QUERY_INTERSECTION_NONE { return HitInfo(); }
@@ -202,3 +217,32 @@ fn ray_skip_alpha_stochastically(start_ray: Ray) -> HitInfo
 */
 
 // Internals
+
+fn _get_alpha(uv: vec2f, tri_idx: u32, instance_idx: u32) -> f32
+{
+    let instance = instances[instance_idx];
+    let mesh_idx = instance.mesh_idx;
+    let mat = materials[instance.mat_idx];
+    let mesh_info = mesh_infos[mesh_idx];
+
+    const mat_sampler_idx: u32 = 0;  // TODO!
+
+    // Sample textures.
+    var color_sample = vec4f(1.0f);
+    if mesh_info.texcoords_buf_idx != SENTINEL_IDX
+    {
+        let uv0 = verts_texcoord_array[mesh_info.texcoords_buf_idx].data[indices_array[mesh_idx].data[tri_idx*3 + 0]];
+        let uv1 = verts_texcoord_array[mesh_info.texcoords_buf_idx].data[indices_array[mesh_idx].data[tri_idx*3 + 1]];
+        let uv2 = verts_texcoord_array[mesh_info.texcoords_buf_idx].data[indices_array[mesh_idx].data[tri_idx*3 + 2]];
+        let w = 1.0f - uv.x - uv.y;
+        let texcoords = uv0*w + uv1*uv.x + uv2*uv.y;
+
+        if mat.color_tex_idx != SENTINEL_IDX {
+            color_sample = textureSampleLevel(textures[mat.color_tex_idx], samplers[mat_sampler_idx], texcoords, 0.0f);
+            color_sample = vec4f(vec3f_srgb_to_linear(color_sample.rgb), color_sample.a);
+        }
+    }
+
+    let vert_color = get_vert_color(instance_idx, tri_idx, uv);
+    return color_sample.a * mat.color.a * vert_color.a;
+}
