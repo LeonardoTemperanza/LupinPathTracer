@@ -464,7 +464,7 @@ impl<'a> AppState<'a>
             tile_params: Some(&self.tile_params),
             camera_params: self.camera_params,
             camera_transform: self.cam_transform,
-            force_software_bvh: true,
+            force_software_bvh: false,
         };
         let desc_albedo = lp::PathtraceDesc {
             scene: &self.scene,
@@ -590,7 +590,7 @@ impl<'a> AppState<'a>
         }
 
         // Denoise
-        if self.denoising && self.tile_idx == 0
+        if self.denoising && self.tile_idx == 0 && self.accum_counter > 30
         {
             if self.use_gbuffers_for_denoise
             {

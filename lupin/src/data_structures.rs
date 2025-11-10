@@ -972,10 +972,15 @@ fn build_rt_accel_structures(device: &wgpu::Device, queue: &wgpu::Queue, scene: 
         ));
     }
 
+    // We might run out of memory due to the size of temporary scratch buffers.
+    for chunk in build_entries.chunks(10)
+    {
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
+        encoder.build_acceleration_structures(chunk.iter(), std::iter::empty());
+        queue.submit(Some(encoder.finish()));
+    }
+
     let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
-    encoder.build_acceleration_structures(build_entries.iter(), std::iter::empty());
-    queue.submit(Some(encoder.finish()));
-    encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
     encoder.build_acceleration_structures(std::iter::empty(), std::iter::once(&tlas));
     queue.submit(Some(encoder.finish()));
 

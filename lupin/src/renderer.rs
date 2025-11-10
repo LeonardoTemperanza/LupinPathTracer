@@ -786,9 +786,10 @@ pub struct PathtraceDesc<'a>
 pub fn pathtrace_scene(device: &wgpu::Device, queue: &wgpu::Queue, desc: &PathtraceDesc, pathtrace_type: PathtraceType, tile_idx: Option<&mut u32>)
 {
     assert!(desc.render_target.format() == wgpu::TextureFormat::Rgba16Float);
-    if desc.force_software_bvh {
-        // Check that the software BVH is built
-        //assert!(scene.
+
+    let sw_bvh_absent = desc.scene.tlas_nodes.size() <= 0 || desc.scene.bvh_nodes_array.len() <= 0;
+    if desc.force_software_bvh && sw_bvh_absent {
+        panic!("force_software_bvh is set, but no software BVH was built for this scene.");
     }
 
     let scene = desc.scene;
@@ -898,6 +899,11 @@ pub fn pathtrace_scene_falsecolor(device: &wgpu::Device, queue: &wgpu::Queue, de
 {
     assert!(desc.render_target.format() == wgpu::TextureFormat::Rgba16Float);
 
+    let sw_bvh_absent = desc.scene.tlas_nodes.size() <= 0 || desc.scene.bvh_nodes_array.len() <= 0;
+    if desc.force_software_bvh && sw_bvh_absent {
+        panic!("force_software_bvh is set, but no software BVH was built for this scene.");
+    }
+
     let scene = desc.scene;
     let render_target = desc.render_target;
     let target_width = desc.render_target.width();
@@ -992,6 +998,11 @@ pub struct DebugVizDesc
 pub fn pathtrace_scene_debug(device: &wgpu::Device, queue: &wgpu::Queue, desc: &PathtraceDesc, debug_desc: &DebugVizDesc, tile_idx: Option<&mut u32>)
 {
     assert!(desc.render_target.format() == wgpu::TextureFormat::Rgba16Float);
+
+    let sw_bvh_absent = desc.scene.tlas_nodes.size() <= 0 || desc.scene.bvh_nodes_array.len() <= 0;
+    if desc.force_software_bvh && sw_bvh_absent {
+        panic!("force_software_bvh is set, but no software BVH was built for this scene.");
+    }
 
     let scene = desc.scene;
     let render_target = desc.render_target;
@@ -1459,7 +1470,6 @@ fn create_pathtracer_bvh_bindgroup(device: &wgpu::Device, scene: &Scene, resourc
             layout: &layout,
             entries: &[
                 wgpu::BindGroupEntry { binding: 0, resource: tlas.as_binding() },
-                wgpu::BindGroupEntry { binding: 1, resource: tlas.as_binding() },
             ]
         });
     }
@@ -1502,12 +1512,6 @@ fn create_pathtracer_bvh_bindgroup_layout(device: &wgpu::Device, use_software_bv
             entries: &[
                 wgpu::BindGroupLayoutEntry {  // rt_tlas
                     binding: 0,
-                    visibility: wgpu::ShaderStages::COMPUTE,
-                    ty: wgpu::BindingType::AccelerationStructure { vertex_return: false },
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {  // rt_tlas_lights
-                    binding: 1,
                     visibility: wgpu::ShaderStages::COMPUTE,
                     ty: wgpu::BindingType::AccelerationStructure { vertex_return: false },
                     count: None,

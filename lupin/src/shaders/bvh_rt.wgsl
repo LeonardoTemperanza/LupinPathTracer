@@ -1,6 +1,5 @@
 
 @group(3) @binding(0) var rt_tlas: acceleration_structure;
-@group(3) @binding(1) var rt_tlas_lights: acceleration_structure;
 
 // NOTE: Requires masks to be set up with the following bitflags
 // and instance_custom_data to be 0 if it's not a light and the light index
