@@ -38,7 +38,7 @@ pub struct Scene
 
     // Auxiliary data structures.
     pub lights: Lights,
-    pub rt_tlas: wgpu::Tlas,
+    pub rt_tlas: Option<wgpu::Tlas>,
     pub rt_blases: Vec<wgpu::Blas>,
 }
 
@@ -807,7 +807,7 @@ pub fn pathtrace_scene(device: &wgpu::Device, queue: &wgpu::Queue, desc: &Pathtr
     let scene_bindgroup = create_pathtracer_scene_bindgroup(device, queue, resources, scene);
     let settings_bindgroup = create_pathtracer_settings_bindgroup(device, queue, resources, accum_params.prev_frame);
     let output_bindgroup = create_pathtracer_output_bindgroup(device, queue, resources, render_target);
-    let bvh_bindgroup = create_pathtracer_bvh_bindgroup(device, &scene.rt_tlas, scene, resources, use_software_bvh);
+    let bvh_bindgroup = create_pathtracer_bvh_bindgroup(device, scene, resources, use_software_bvh);
 
     let mut encoder = device.create_command_encoder(&Default::default());
     {
@@ -914,7 +914,7 @@ pub fn pathtrace_scene_falsecolor(device: &wgpu::Device, queue: &wgpu::Queue, de
     let scene_bindgroup = create_pathtracer_scene_bindgroup(device, queue, resources, scene);
     let settings_bindgroup = create_pathtracer_settings_bindgroup(device, queue, resources, accum_params.prev_frame);
     let output_bindgroup = create_pathtracer_output_bindgroup(device, queue, resources, render_target);
-    let bvh_bindgroup = create_pathtracer_bvh_bindgroup(device, &scene.rt_tlas, scene, resources, use_software_bvh);
+    let bvh_bindgroup = create_pathtracer_bvh_bindgroup(device, scene, resources, use_software_bvh);
 
     let mut encoder = device.create_command_encoder(&Default::default());
     {
@@ -1009,7 +1009,7 @@ pub fn pathtrace_scene_debug(device: &wgpu::Device, queue: &wgpu::Queue, desc: &
     let scene_bindgroup = create_pathtracer_scene_bindgroup(device, queue, resources, scene);
     let settings_bindgroup = create_pathtracer_settings_bindgroup(device, queue, resources, accum_params.prev_frame);
     let output_bindgroup = create_pathtracer_output_bindgroup(device, queue, resources, render_target);
-    let bvh_bindgroup = create_pathtracer_bvh_bindgroup(device, &scene.rt_tlas, scene, resources, use_software_bvh);
+    let bvh_bindgroup = create_pathtracer_bvh_bindgroup(device, scene, resources, use_software_bvh);
 
     let mut encoder = device.create_command_encoder(&Default::default());
     {
@@ -1428,7 +1428,7 @@ fn create_pathtracer_output_bindgroup_layout(device: &wgpu::Device) -> wgpu::Bin
     });
 }
 
-fn create_pathtracer_bvh_bindgroup(device: &wgpu::Device, tlas: &wgpu::Tlas, scene: &Scene, resources: &PathtraceResources, use_software_bvh: bool) -> wgpu::BindGroup
+fn create_pathtracer_bvh_bindgroup(device: &wgpu::Device, scene: &Scene, resources: &PathtraceResources, use_software_bvh: bool) -> wgpu::BindGroup
 {
     if use_software_bvh
     {
@@ -1450,6 +1450,7 @@ fn create_pathtracer_bvh_bindgroup(device: &wgpu::Device, tlas: &wgpu::Tlas, sce
         assert!(supports_rt(device));
 
         let layout = resources.pipeline.rt.as_ref().unwrap().get_bind_group_layout(3);
+        let tlas = scene.rt_tlas.as_ref().unwrap();
 
         return device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("Pathtracer BVH bindgroup (hardware)"),

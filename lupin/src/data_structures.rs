@@ -676,111 +676,116 @@ pub fn upload_scene_to_gpu(device: &wgpu::Device, queue: &wgpu::Queue, scene: &S
     let lights = build_lights(device, queue, scene, envs_info);
 
     // RT hardware accel structures
-    const RT_MASK_DEFAULT: u8 = 1;
-    const RT_MASK_LIGHT: u8 = 2;
-    let mut tlas = device.create_tlas(&wgpu::CreateTlasDescriptor {
-        label: None,
-        flags: wgpu::AccelerationStructureFlags::PREFER_FAST_TRACE,
-        update_mode: wgpu::AccelerationStructureUpdateMode::Build,
-        max_instances: 1000000,
-    });
-
     let mut blases = Vec::new();
-    let mut build_entries = Vec::new();
-    let mut size_descs = Vec::new();
-
-    for i in 0..scene.verts_pos_array.len()
+    let mut tlas = None;
+    if supports_rt(device)
     {
-        let verts = &scene.verts_pos_array[i];
-        let indices = &scene.indices_array[i];
-
-        let size_desc = wgpu::BlasTriangleGeometrySizeDescriptor {
-            vertex_format: wgpu::VertexFormat::Float32x3,
-            vertex_count: verts.len() as u32,
-            index_format: Some(wgpu::IndexFormat::Uint32),
-            index_count: Some(indices.len() as u32),
-            flags: wgpu::AccelerationStructureGeometryFlags::OPAQUE,
-        };
-        size_descs.push(size_desc);
-    }
-
-    for i in 0..scene.verts_pos_array.len()
-    {
-        let blas = device.create_blas(
-            &wgpu::CreateBlasDescriptor {
-                label: None,
-                flags: wgpu::AccelerationStructureFlags::PREFER_FAST_TRACE,
-                update_mode: wgpu::AccelerationStructureUpdateMode::Build,
-            },
-            wgpu::BlasGeometrySizeDescriptors::Triangles {
-                descriptors: vec![size_descs[i].clone()],
-            },
-        );
-
-        blases.push(blas);
-    }
-
-    for i in 0..scene.verts_pos_array.len()
-    {
-        let verts = &scene.verts_pos_array[i];
-        let indices = &scene.indices_array[i];
-
-        let triangle_geometry = wgpu::BlasTriangleGeometry {
-            size: &size_descs[i],
-            vertex_buffer: &verts_pos_array[i],
-            first_vertex: 0,
-            vertex_stride: std::mem::size_of::<Vec4>() as u64,
-            index_buffer: Some(&indices_array[i]),
-            first_index: Some(0),
-            transform_buffer: None,
-            transform_buffer_offset: None,
-        };
-
-        build_entries.push(wgpu::BlasBuildEntry {
-            blas: &blases[i],
-            geometry: wgpu::BlasGeometries::TriangleGeometries(vec![triangle_geometry]),
+        const RT_MASK_DEFAULT: u8 = 1;
+        const RT_MASK_LIGHT: u8 = 2;
+        let mut _tlas = device.create_tlas(&wgpu::CreateTlasDescriptor {
+            label: None,
+            flags: wgpu::AccelerationStructureFlags::PREFER_FAST_TRACE,
+            update_mode: wgpu::AccelerationStructureUpdateMode::Build,
+            max_instances: 1000000,
         });
-    }
 
-    // Continue work from here.
-    for (i, instance) in scene.instances.iter().enumerate()
-    {
-        let mesh_idx = instance.mesh_idx;
-        let rt_transform = instance.transpose_inverse_transform.transpose().inverse().transpose();
-        let rt_transform_serial = [
-            rt_transform.m[0][0], rt_transform.m[0][1], rt_transform.m[0][2], rt_transform.m[0][3],
-            rt_transform.m[1][0], rt_transform.m[1][1], rt_transform.m[1][2], rt_transform.m[1][3],
-            rt_transform.m[2][0], rt_transform.m[2][1], rt_transform.m[2][2], rt_transform.m[2][3],
-        ];
+        let mut build_entries = Vec::new();
+        let mut size_descs = Vec::new();
 
-        let is_light = false;
-        let light_idx = 0;
-        /*
-        for (j, light) in scene.lights.lights.iter().enumerate()
+        for i in 0..scene.verts_pos_array.len()
         {
-            if light.instance_idx == i
-            {
-                is_light = true;
-                light_idx = j;
-            }
+            let verts = &scene.verts_pos_array[i];
+            let indices = &scene.indices_array[i];
+
+            let size_desc = wgpu::BlasTriangleGeometrySizeDescriptor {
+                vertex_format: wgpu::VertexFormat::Float32x3,
+                vertex_count: verts.len() as u32,
+                index_format: Some(wgpu::IndexFormat::Uint32),
+                index_count: Some(indices.len() as u32),
+                flags: wgpu::AccelerationStructureGeometryFlags::OPAQUE,
+            };
+            size_descs.push(size_desc);
         }
-        */
 
-        // Using the index_mut trait for wgpu::Tlas.
-        tlas[i] = Some(wgpu::TlasInstance::new(
-            &blases[mesh_idx as usize],
-            rt_transform_serial,
-            light_idx,
-            if is_light { RT_MASK_LIGHT } else { RT_MASK_DEFAULT },
-        ));
+        for i in 0..scene.verts_pos_array.len()
+        {
+            let blas = device.create_blas(
+                &wgpu::CreateBlasDescriptor {
+                    label: None,
+                    flags: wgpu::AccelerationStructureFlags::PREFER_FAST_TRACE,
+                    update_mode: wgpu::AccelerationStructureUpdateMode::Build,
+                },
+                wgpu::BlasGeometrySizeDescriptors::Triangles {
+                    descriptors: vec![size_descs[i].clone()],
+                },
+            );
+
+            blases.push(blas);
+        }
+
+        for i in 0..scene.verts_pos_array.len()
+        {
+            let verts = &scene.verts_pos_array[i];
+            let indices = &scene.indices_array[i];
+
+            let triangle_geometry = wgpu::BlasTriangleGeometry {
+                size: &size_descs[i],
+                vertex_buffer: &verts_pos_array[i],
+                first_vertex: 0,
+                vertex_stride: std::mem::size_of::<Vec4>() as u64,
+                index_buffer: Some(&indices_array[i]),
+                first_index: Some(0),
+                transform_buffer: None,
+                transform_buffer_offset: None,
+            };
+
+            build_entries.push(wgpu::BlasBuildEntry {
+                blas: &blases[i],
+                geometry: wgpu::BlasGeometries::TriangleGeometries(vec![triangle_geometry]),
+            });
+        }
+
+        for (i, instance) in scene.instances.iter().enumerate()
+        {
+            let mesh_idx = instance.mesh_idx;
+            let rt_transform = instance.transpose_inverse_transform.transpose().inverse().transpose();
+            let rt_transform_serial = [
+                rt_transform.m[0][0], rt_transform.m[0][1], rt_transform.m[0][2], rt_transform.m[0][3],
+                rt_transform.m[1][0], rt_transform.m[1][1], rt_transform.m[1][2], rt_transform.m[1][3],
+                rt_transform.m[2][0], rt_transform.m[2][1], rt_transform.m[2][2], rt_transform.m[2][3],
+            ];
+
+            let is_light = false;
+            let light_idx = 0;
+            /*
+            for (j, light) in scene.lights.lights.iter().enumerate()
+            {
+                if light.instance_idx == i
+                {
+                    is_light = true;
+                    light_idx = j;
+                }
+            }
+            */
+
+            // Using the index_mut trait for wgpu::Tlas.
+            _tlas[i] = Some(wgpu::TlasInstance::new(
+                &blases[mesh_idx as usize],
+                rt_transform_serial,
+                light_idx,
+                if is_light { RT_MASK_LIGHT } else { RT_MASK_DEFAULT },
+            ));
+        }
+
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
+        encoder.build_acceleration_structures(build_entries.iter(), std::iter::empty());
+        queue.submit(Some(encoder.finish()));
+        encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
+        encoder.build_acceleration_structures(std::iter::empty(), std::iter::once(&_tlas));
+        queue.submit(Some(encoder.finish()));
+
+        tlas = Some(_tlas);
     }
-
-    let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
-    encoder.build_acceleration_structures(build_entries.iter(), std::iter::empty());
-    queue.submit(Some(encoder.finish()));
-    encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
-    encoder.build_acceleration_structures(std::iter::empty(), std::iter::once(&tlas));
-    queue.submit(Some(encoder.finish()));
 
     return Scene {
         mesh_infos,
