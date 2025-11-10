@@ -149,8 +149,9 @@ fn compute_instance_lights_pdf(ray: Ray) -> f32
         if hit.kind != RAY_QUERY_INTERSECTION_TRIANGLE { continue; }
 
         let light_idx = hit.instance_custom_data;
+        let instance_idx = hit.instance_index;
         let light = lights[light_idx];
-        let mesh_idx = instances[light.instance_idx].mesh_idx;
+        let mesh_idx = instances[instance_idx].mesh_idx;
         let tri_idx = hit.primitive_index;
 
         // Compute light geometric normal
@@ -161,7 +162,7 @@ fn compute_instance_lights_pdf(ray: Ray) -> f32
             let v2 = verts_pos_array[mesh_idx].data[indices_array[mesh_idx].data[tri_idx*3 + 2]];
 
             let local_normal = normalize(cross(v2 - v0, v1 - v0));
-            let normal_mat = transpose(mat3x3f(hit.world_to_object[0], hit.world_to_object[1], hit.world_to_object[2]));
+            let normal_mat = transpose(mat3x3f(hit.world_to_object[0].xyz, hit.world_to_object[1].xyz, hit.world_to_object[2].xyz));
             light_normal = normalize(normal_mat * local_normal);
         }
 
