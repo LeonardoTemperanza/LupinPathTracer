@@ -951,18 +951,17 @@ fn build_rt_accel_structures(device: &wgpu::Device, queue: &wgpu::Queue, scene: 
             rt_transform.m[2][0], rt_transform.m[2][1], rt_transform.m[2][2], rt_transform.m[2][3],
         ];
 
-        let is_light = false;
-        let light_idx = 0;
-        /*
+        // TODO: This is "O(n^2)", kinda. Not really a problem right now but fix later
+        let mut is_light = false;
+        let mut light_idx: u32 = 0;
         for (j, light) in scene.lights.lights.iter().enumerate()
         {
-            if light.instance_idx == i
+            if light.instance_idx == i as u32
             {
                 is_light = true;
-                light_idx = j;
+                light_idx = j as u32;
             }
         }
-        */
 
         // Using the index_mut trait for wgpu::Tlas.
         tlas[i] = Some(wgpu::TlasInstance::new(
