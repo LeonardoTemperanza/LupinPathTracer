@@ -6,21 +6,7 @@ use lupin::wgpu as wgpu;
 /// Useful for testing of this library, more than anything else, really.
 pub fn build_scene_empty(device: &wgpu::Device, queue: &wgpu::Queue) -> lp::Scene
 {
-    let scene_cpu = lp::SceneCPU {
-        mesh_infos: vec![],
-        verts_pos_array: vec![],
-        verts_normal_array: vec![],
-        verts_texcoord_array: vec![],
-        verts_color_array: vec![],
-        indices_array: vec![],
-        bvh_nodes_array: vec![],
-        mesh_aabbs: vec![],
-        tlas_nodes: vec![],
-        instances: vec![],
-        materials: vec![],
-        environments: vec![],
-    };
-
+    let scene_cpu = lp::SceneCPU::default();
     lp::validate_scene(&scene_cpu, 0, 0);
     return lp::upload_scene_to_gpu(device, queue, &scene_cpu, vec![], vec![], &[]);
 }

@@ -60,21 +60,23 @@ pub struct SceneCPU
 
     pub environments: Vec<Environment>,
 
-    // pub lights: LightsCPU,
+    pub lights: LightsCPU,
 }
 
-#[derive(Debug)]
-pub struct LightCPU
+#[derive(Default, Debug)]
+pub struct LightsCPU
 {
-    // pub lights: Vec<Light>
+    pub lights: Vec<Light>,
+    pub alias_tables: Vec<Vec<AliasBin>>,
+    pub env_alias_tables: Vec<Vec<AliasBin>>,
 }
 
 #[derive(Debug)]
 pub struct Lights
 {
     pub lights: wgpu::Buffer,
-    pub alias_tables: Vec::<wgpu::Buffer>,
-    pub env_alias_tables: Vec::<wgpu::Buffer>,
+    pub alias_tables: Vec<wgpu::Buffer>,
+    pub env_alias_tables: Vec<wgpu::Buffer>,
 }
 
 #[derive(Clone, Copy, Debug)]

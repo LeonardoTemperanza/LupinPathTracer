@@ -10,7 +10,7 @@ pub struct EnvMapInfo
     pub width: u32,
     pub height: u32,
 }
-pub fn build_lights(device: &wgpu::Device, queue: &wgpu::Queue, scene: &SceneCPU, envs_info: &[EnvMapInfo]) -> Lights
+pub fn build_lights(device: &wgpu::Device, queue: &wgpu::Queue, scene: &SceneCPU, envs_info: &[EnvMapInfo]) -> LightsCPU
 {
     let environments = &scene.environments;
     let instances = &scene.instances;
@@ -20,8 +20,8 @@ pub fn build_lights(device: &wgpu::Device, queue: &wgpu::Queue, scene: &SceneCPU
     assert!(environments.len() == envs_info.len(), "Mismatching sizes for environment data!");
 
     let mut lights = Vec::<Light>::new();
-    let mut alias_tables = Vec::<wgpu::Buffer>::new();
-    let mut env_alias_tables = Vec::<wgpu::Buffer>::new();
+    let mut alias_tables = Vec::<Vec::<AliasBin>>::new();
+    let mut env_alias_tables = Vec::<Vec::<AliasBin>>::new();
     for (i, instance) in instances.iter().enumerate()
     {
         let mat = materials[instance.mat_idx as usize];
@@ -51,10 +51,8 @@ pub fn build_lights(device: &wgpu::Device, queue: &wgpu::Queue, scene: &SceneCPU
         lights.push(light);
 
         let alias_table = build_alias_table(&weights);
-        let alias_table_buf = upload_storage_buffer(device, queue, to_u8_slice(&alias_table));
-        assert!(alias_table_buf.size() > 0);  // WGPU doesn't like 0 size buffers anyway
-
-        alias_tables.push(alias_table_buf);
+        assert!(alias_table.len() > 0);  // WGPU doesn't like 0 size buffers anyway
+        alias_tables.push(alias_table);
     }
 
     for i in 0..environments.len()
@@ -88,14 +86,12 @@ pub fn build_lights(device: &wgpu::Device, queue: &wgpu::Queue, scene: &SceneCPU
         }
 
         let alias_table = build_alias_table(&weights);
-        let alias_table_buf = upload_storage_buffer(device, queue, to_u8_slice(&alias_table));
-        assert!(alias_table_buf.size() > 0);  // WGPU doesn't like 0 size buffers anyway
-
-        env_alias_tables.push(alias_table_buf);
+        assert!(alias_table.len() > 0);  // WGPU doesn't like 0 size buffers anyway
+        env_alias_tables.push(alias_table);
     }
 
-    return Lights {
-        lights: upload_storage_buffer(device, queue, to_u8_slice(&lights)),
+    return LightsCPU {
+        lights: lights,
         alias_tables,
         env_alias_tables,
     };
@@ -786,6 +782,15 @@ pub fn upload_scene_to_gpu(device: &wgpu::Device, queue: &wgpu::Queue, scene: &S
 
         tlas = Some(_tlas);
     }
+
+    let alias_tables_gpu: Vec::<wgpu::Buffer> = scene.lights.alias_tables.iter().map(|x| upload_storage_buffer(device, queue, to_u8_slice(x))).collect();
+    let env_alias_tables_gpu: Vec::<wgpu::Buffer> = scene.lights.env_alias_tables.iter().map(|x| upload_storage_buffer(device, queue, to_u8_slice(x))).collect();
+
+    let lights = Lights {
+        lights: upload_storage_buffer_with_name(device, queue, to_u8_slice(&scene.mesh_infos), "lights"),
+        alias_tables: alias_tables_gpu,
+        env_alias_tables: env_alias_tables_gpu
+    };
 
     return Scene {
         mesh_infos,
