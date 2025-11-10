@@ -143,6 +143,7 @@ fn compute_instance_lights_pdf(ray: Ray) -> f32
     rayQueryInitialize(&rq, rt_tlas, RayDesc(flags, mask, RAY_EPSILON, F32_MAX, ray.ori, ray.dir));
 
     var pdf = 0.0f;
+    var count = 0.0f;
     while rayQueryProceed(&rq)
     {
         let hit = rayQueryGetCandidateIntersection(&rq);
@@ -173,6 +174,7 @@ fn compute_instance_lights_pdf(ray: Ray) -> f32
         let cos_theta = abs(dot(light_normal, ray.dir));
 
         pdf += dist_sqr / (cos_theta * light.area);
+        count += 1.0f;
     }
 
     return pdf;

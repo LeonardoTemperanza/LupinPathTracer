@@ -207,6 +207,7 @@ pub fn build_scene_cornell_box(device: &wgpu::Device, queue: &wgpu::Queue) -> (l
     }
 
     scene.tlas_nodes = lp::build_tlas(&scene.instances, &scene.mesh_aabbs);
+    scene.lights = lp::build_lights(&scene, &[]);
 
     lp::validate_scene(&scene, 0, 0);
 
@@ -891,6 +892,8 @@ pub fn load_scene_yoctogl_v24(path: &std::path::Path, device: &wgpu::Device, que
             });
         }
     }
+
+    scene.lights = lp::build_lights(&scene, &environment_infos);
 
     lp::validate_scene(&scene, textures.len() as u32, samplers.len() as u32);
 

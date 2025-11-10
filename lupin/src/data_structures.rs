@@ -10,7 +10,7 @@ pub struct EnvMapInfo
     pub width: u32,
     pub height: u32,
 }
-pub fn build_lights(device: &wgpu::Device, queue: &wgpu::Queue, scene: &SceneCPU, envs_info: &[EnvMapInfo]) -> LightsCPU
+pub fn build_lights(scene: &SceneCPU, envs_info: &[EnvMapInfo]) -> LightsCPU
 {
     let environments = &scene.environments;
     let instances = &scene.instances;
@@ -669,7 +669,7 @@ pub fn upload_scene_to_gpu(device: &wgpu::Device, queue: &wgpu::Queue, scene: &S
     let environments = upload_storage_buffer_with_name(device, queue, to_u8_slice(&scene.environments), "environments");
 
     // Build auxiliary data structures.
-    let lights = build_lights(device, queue, scene, envs_info);
+    assert!(scene.lights.lights.len() != 0);
 
     let (rt_tlas, rt_blases) = if build_rt_structures {
         build_rt_accel_structures(device, queue, scene, &verts_pos_array, &indices_array)
@@ -681,7 +681,7 @@ pub fn upload_scene_to_gpu(device: &wgpu::Device, queue: &wgpu::Queue, scene: &S
     let env_alias_tables_gpu: Vec::<wgpu::Buffer> = scene.lights.env_alias_tables.iter().map(|x| upload_storage_buffer(device, queue, to_u8_slice(x))).collect();
 
     let lights = Lights {
-        lights: upload_storage_buffer_with_name(device, queue, to_u8_slice(&scene.mesh_infos), "lights"),
+        lights: upload_storage_buffer_with_name(device, queue, to_u8_slice(&scene.lights.lights), "lights"),
         alias_tables: alias_tables_gpu,
         env_alias_tables: env_alias_tables_gpu
     };
@@ -876,8 +876,9 @@ fn build_rt_accel_structures(device: &wgpu::Device, queue: &wgpu::Queue, scene: 
 
     let mut blases = Vec::new();
 
-    const RT_MASK_DEFAULT: u8 = 1;
-    const RT_MASK_LIGHT: u8 = 2;
+    // NOTE: Coupled to shader code.
+    const RT_MASK_DEFAULT: u8 = 1 << 0;
+    const RT_MASK_LIGHT: u8 = 1 << 1;
     let mut tlas = device.create_tlas(&wgpu::CreateTlasDescriptor {
         label: None,
         flags: wgpu::AccelerationStructureFlags::PREFER_FAST_TRACE,

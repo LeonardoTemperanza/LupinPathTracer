@@ -623,7 +623,7 @@ impl<'a> AppState<'a>
         }
 
         // Swap output textures
-        if self.tile_idx == 0
+        if self.tile_idx == 0 && self.accum_counter < self.max_accums
         {
             // Copy the contents of the front buffer onto the back buffer,
             // so that when we swap buffers it won't be as jarring.

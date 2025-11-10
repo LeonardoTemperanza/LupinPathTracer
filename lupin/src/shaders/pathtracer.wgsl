@@ -64,8 +64,8 @@ const SENTINEL_IDX: u32 = U32_MAX;
 
 // Useful for "printf-like" debugging. Ignore.
 const DEBUG_DISABLE_ACCUM = false;
-const DEBUG_DO_OUTPUT_COLOR = false;
-const DEBUG_OUTPUT_COLOR = vec3f();
+var<private> DEBUG_DO_OUTPUT_COLOR = false;
+var<private> DEBUG_OUTPUT_COLOR = vec3f();
 
 // We need these wrappers, or we get a weird
 // compilation error, for some reason...
@@ -283,6 +283,8 @@ fn pathtrace_main(@builtin(local_invocation_id) local_id: vec3u, @builtin(global
     if all(global_id < output_dim) {
         textureStore(output, global_id.xy, vec4f(color, 1.0f));
     }
+
+    write_debug_output(global_id, output_dim);
 }
 
 // Used to visualize different aspects of a scene. Some of these
@@ -441,6 +443,8 @@ fn pathtrace_falsecolor_main(@builtin(local_invocation_id) local_id: vec3u, @bui
     if all(global_id < output_dim) {
         textureStore(output, global_id.xy, vec4f(color, 1.0f));
     }
+
+    write_debug_output(global_id, output_dim);
 }
 
 // Debug visualizations.
@@ -489,6 +493,8 @@ fn pathtrace_debug_main(@builtin(local_invocation_id) local_id: vec3u, @builtin(
     if all(global_id < output_dim) {
         textureStore(output, global_id.xy, vec4f(color, 1.0f));
     }
+
+    write_debug_output(global_id, output_dim);
 }
 
 // pixel_offset is expected to be in the [-0.5, 0.5] range.
@@ -2612,6 +2618,23 @@ fn get_heatmap_color(val: f32, min: f32, max: f32) -> vec3f
 
     color = pow(factor * color, vec3f(gamma));
     return color;
+}
+
+// Used for "printf-like" debugging.
+fn write_debug_output(global_id: vec2u, output_dim: vec2u)
+{
+    if DEBUG_DO_OUTPUT_COLOR
+    {
+        if all(global_id < output_dim) {
+            textureStore(output, global_id.xy, vec4f(DEBUG_OUTPUT_COLOR, 1.0f));
+        }
+    }
+}
+
+fn set_debug_output_color(color: vec3f)
+{
+    DEBUG_DO_OUTPUT_COLOR = true;
+    DEBUG_OUTPUT_COLOR = color;
 }
 
 //////////////////////////////////////////////
