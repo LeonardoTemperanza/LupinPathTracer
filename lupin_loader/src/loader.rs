@@ -8,7 +8,7 @@ pub fn build_scene_empty(device: &wgpu::Device, queue: &wgpu::Queue) -> lp::Scen
 {
     let scene_cpu = lp::SceneCPU::default();
     lp::validate_scene(&scene_cpu, 0, 0);
-    return lp::upload_scene_to_gpu(device, queue, &scene_cpu, vec![], vec![], &[]);
+    return lp::upload_scene_to_gpu(device, queue, &scene_cpu, vec![], vec![], &[], true);
 }
 
 pub fn build_scene_cornell_box(device: &wgpu::Device, queue: &wgpu::Queue) -> (lp::Scene, Vec<SceneCamera>)
@@ -221,7 +221,7 @@ pub fn build_scene_cornell_box(device: &wgpu::Device, queue: &wgpu::Queue) -> (l
             aspect: 1.0,
         },
     }];
-    return (lp::upload_scene_to_gpu(device, queue, &scene, vec![], vec![], &[]), cameras);
+    return (lp::upload_scene_to_gpu(device, queue, &scene, vec![], vec![], &[], true), cameras);
 }
 
 pub fn load_texture(device: &wgpu::Device, queue: &wgpu::Queue, path: &str, hdr: bool) -> Result<wgpu::Texture, image::ImageError>
@@ -478,9 +478,11 @@ struct TextureLoadInfo
 }
 
 /// Load a scene in the format used by the yoctogl library, version 2.4.
-pub fn load_scene_yoctogl_v24(path: &std::path::Path, device: &wgpu::Device, queue: &wgpu::Queue) -> Result<(lp::Scene, Vec<SceneCamera>), LoadError>
+pub fn load_scene_yoctogl_v24(path: &std::path::Path, device: &wgpu::Device, queue: &wgpu::Queue, build_both_bvhs: bool) -> Result<(lp::Scene, Vec<SceneCamera>), LoadError>
 {
     let parent_dir = path.parent().unwrap_or(std::path::Path::new(""));
+
+    let build_sw_bvh = !lp::supports_rt(device) || build_both_bvhs;
 
     let mut scene = lp::SceneCPU::default();
     let mut textures = Vec::<wgpu::Texture>::new();
@@ -490,7 +492,6 @@ pub fn load_scene_yoctogl_v24(path: &std::path::Path, device: &wgpu::Device, que
     let mut num_parsed_textures = 0;
 
     let linear_sampler = push_asset(&mut samplers, lp::create_linear_sampler(device));
-    //let point_sampler = push_asset(&mut samplers, lp::create_point_sampler(device));
 
     let mut scene_cams = Vec::<SceneCamera>::new();
 
@@ -730,7 +731,7 @@ pub fn load_scene_yoctogl_v24(path: &std::path::Path, device: &wgpu::Device, que
                                     {
                                         "ply" =>
                                         {
-                                            let res = load_mesh_ply(&full_path, &mut scene);
+                                            let res = load_mesh_ply(&full_path, &mut scene, build_sw_bvh);
                                             if let Err(err) = res {
                                                 return Err(err);
                                             }
@@ -836,7 +837,11 @@ pub fn load_scene_yoctogl_v24(path: &std::path::Path, device: &wgpu::Device, que
 
     if p.found_error { return Err(LoadError::InvalidJson); }
 
-    scene.tlas_nodes = lp::build_tlas(scene.instances.as_slice(), &scene.mesh_aabbs);
+    scene.tlas_nodes = if build_sw_bvh {
+        lp::build_tlas(scene.instances.as_slice(), &scene.mesh_aabbs)
+    } else {
+        vec![]
+    };
 
     // Load textures.
     for info in &tex_load_infos
@@ -889,7 +894,7 @@ pub fn load_scene_yoctogl_v24(path: &std::path::Path, device: &wgpu::Device, que
 
     lp::validate_scene(&scene, textures.len() as u32, samplers.len() as u32);
 
-    let scene_gpu = lp::upload_scene_to_gpu(device, queue, &scene, textures, samplers, &environment_infos);
+    let scene_gpu = lp::upload_scene_to_gpu(device, queue, &scene, textures, samplers, &environment_infos, true);
     return Ok((scene_gpu, scene_cams));
 }
 
@@ -1409,7 +1414,7 @@ impl From<image::ImageError> for LoadError
 
 // NOTE: Not a complete ply parser, it parses/uses only the features
 // that are expected to be used from the yoctogl 2.4 format.
-fn load_mesh_ply(path: &std::path::Path, scene: &mut lp::SceneCPU) -> Result<u32, LoadError>
+fn load_mesh_ply(path: &std::path::Path, scene: &mut lp::SceneCPU, build_sw_bvh: bool) -> Result<u32, LoadError>
 {
     assert_eq!(scene.verts_pos_array.len(), scene.mesh_infos.len());
     assert_eq!(scene.mesh_infos.len(), scene.indices_array.len());
@@ -1608,7 +1613,11 @@ fn load_mesh_ply(path: &std::path::Path, scene: &mut lp::SceneCPU) -> Result<u32
         lp::grow_aabb_to_include_vert(&mut aabb, lp::Vec3::new(pos.x, pos.y, pos.z));
     }
 
-    let bvh = lp::build_bvh(verts_pos.as_slice(), &mut indices);
+    let bvh = if build_sw_bvh {
+        lp::build_bvh(verts_pos.as_slice(), &mut indices)
+    } else {
+        vec![]
+    };
 
     scene.mesh_infos.push(mesh_info);
     scene.verts_pos_array.push(verts_pos);
