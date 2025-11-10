@@ -668,9 +668,6 @@ pub fn upload_scene_to_gpu(device: &wgpu::Device, queue: &wgpu::Queue, scene: &S
     let materials = upload_storage_buffer_with_name(device, queue, to_u8_slice(&scene.materials), "materials");
     let environments = upload_storage_buffer_with_name(device, queue, to_u8_slice(&scene.environments), "environments");
 
-    // Build auxiliary data structures.
-    assert!(scene.lights.lights.len() != 0);
-
     let (rt_tlas, rt_blases) = if build_rt_structures {
         build_rt_accel_structures(device, queue, scene, &verts_pos_array, &indices_array)
     } else {
