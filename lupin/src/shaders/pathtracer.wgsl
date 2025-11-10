@@ -586,9 +586,9 @@ fn pathtrace_standard(start_ray: Ray) -> vec3f
     var weight = vec3f(1.0f);
     var radiance = vec3f(0.0f);
     var opacity_bounce: u32 = 0;
-    for(var bounce = 0; bounce <= MAX_BOUNCES; bounce++)
+    for(var bounce = 0; bounce <= i32(MAX_BOUNCES); bounce++)
     {
-        let hit = ray_scene_intersection(ray);
+        let hit = ray_skip_alpha_stochastically(ray);
         if !hit.hit
         {
             radiance += weight * sample_environments(ray.dir);
@@ -606,16 +606,6 @@ fn pathtrace_standard(start_ray: Ray) -> vec3f
         let instance = instances[hit.instance_idx];
         let mat = materials[instance.mat_idx];
         let mat_point = get_material_point(hit);
-
-        // Handle coverage.
-        if mat_point.opacity < 1.0f && random_f32() >= mat_point.opacity
-        {
-            opacity_bounce++;
-            if opacity_bounce >= MAX_OPACITY_BOUNCES { break; }
-            ray.ori = hit_pos;
-            bounce--;
-            continue;
-        }
 
         let normal = compute_shading_normal(hit);
 
@@ -684,11 +674,11 @@ fn pathtrace_mis(start_ray: Ray) -> vec3f
     var next_emission = true;
     var next_intersection = HitInfo();
 
-    for(var bounce = 0; bounce <= MAX_BOUNCES; bounce++)
+    for(var bounce = 0; bounce <= i32(MAX_BOUNCES); bounce++)
     {
         var hit = HitInfo();
         if next_emission {
-            hit = ray_scene_intersection(ray);
+            hit = ray_skip_alpha_stochastically(ray);
         } else {
             hit = next_intersection;
         }
@@ -710,16 +700,6 @@ fn pathtrace_mis(start_ray: Ray) -> vec3f
         let instance = instances[hit.instance_idx];
         let mat = materials[instance.mat_idx];
         let mat_point = get_material_point(hit);
-
-        // Handle coverage.
-        if mat_point.opacity < 1.0f && random_f32() >= mat_point.opacity
-        {
-            opacity_bounce++;
-            if opacity_bounce >= MAX_OPACITY_BOUNCES { break; }
-            ray.ori = hit_pos;
-            bounce--;
-            continue;
-        }
 
         let normal = compute_shading_normal(hit);
 
@@ -830,9 +810,9 @@ fn pathtrace_naive(start_ray: Ray) -> vec3f
     var weight = vec3f(1.0f);
     var radiance = vec3f(0.0f);
     var opacity_bounce: u32 = 0;
-    for(var bounce = 0; bounce <= MAX_BOUNCES; bounce++)
+    for(var bounce = 0; bounce <= i32(MAX_BOUNCES); bounce++)
     {
-        let hit = ray_scene_intersection(ray);
+        let hit = ray_skip_alpha_stochastically(ray);
         if !hit.hit
         {
             radiance += weight * sample_environments(ray.dir);
@@ -850,16 +830,6 @@ fn pathtrace_naive(start_ray: Ray) -> vec3f
         let mat_point = get_material_point(hit);
 
         // TODO: No caustics param.
-
-        // Handle coverage.
-        if mat_point.opacity < 1.0f && random_f32() >= mat_point.opacity
-        {
-            opacity_bounce++;
-            if opacity_bounce >= MAX_OPACITY_BOUNCES { break; }
-            ray.ori = hit_pos;
-            bounce--;
-            continue;
-        }
 
         let normal = compute_shading_normal(hit);
 
@@ -913,9 +883,9 @@ fn pathtrace_direct(start_ray: Ray) -> vec3f
 
     var next_emission = true;
 
-    for(var bounce = 0; bounce <= MAX_BOUNCES; bounce++)
+    for(var bounce = 0; bounce <= i32(MAX_BOUNCES); bounce++)
     {
-        let hit = ray_scene_intersection(ray);
+        let hit = ray_skip_alpha_stochastically(ray);
         if !hit.hit
         {
             if next_emission {
@@ -935,16 +905,6 @@ fn pathtrace_direct(start_ray: Ray) -> vec3f
         let instance = instances[hit.instance_idx];
         let mat = materials[instance.mat_idx];
         let mat_point = get_material_point(hit);
-
-        // Handle coverage.
-        if mat_point.opacity < 1.0f && random_f32() >= mat_point.opacity
-        {
-            opacity_bounce++;
-            if opacity_bounce >= MAX_OPACITY_BOUNCES { break; }
-            ray.ori = hit_pos;
-            bounce--;
-            continue;
-        }
 
         let normal = compute_shading_normal(hit);
 

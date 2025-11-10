@@ -150,10 +150,13 @@ fn ray_skip_alpha_stochastically(start_ray: Ray) -> HitInfo
 {
     var hit = HitInfo();
     var ray = start_ray;
+    var dst = 0.0f;
     for(var opacity_bounce = 0u; opacity_bounce < MAX_OPACITY_BOUNCES; opacity_bounce++)
     {
         hit = ray_scene_intersection(ray);
         if !hit.hit { break; }
+
+        dst += hit.dst;
 
         let mat_point = get_material_point(hit);
         if mat_point.opacity < 1.0f && random_f32() >= mat_point.opacity {
@@ -163,6 +166,9 @@ fn ray_skip_alpha_stochastically(start_ray: Ray) -> HitInfo
         }
     }
 
+    // Make sure the distance is accurate to the initial
+    // ray, not the last (shorter) one.
+    hit.dst = dst;
     return hit;
 }
 
