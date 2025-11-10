@@ -62,6 +62,11 @@ const WORKGROUP_SIZE_X: u32 = 4;
 const WORKGROUP_SIZE_Y: u32 = 4;
 const SENTINEL_IDX: u32 = U32_MAX;
 
+// Useful for "printf-like" debugging. Ignore.
+const DEBUG_DISABLE_ACCUM = false;
+const DEBUG_DO_OUTPUT_COLOR = false;
+const DEBUG_OUTPUT_COLOR = vec3f();
+
 // We need these wrappers, or we get a weird
 // compilation error, for some reason...
 struct VertsPos    { data: array<vec3f>    }
@@ -267,7 +272,7 @@ fn pathtrace_main(@builtin(local_invocation_id) local_id: vec3u, @builtin(global
     color = max(color, vec3f(0.0f));
 
     // Progressive rendering.
-    if constants.accum_counter != 0
+    if constants.accum_counter != 0 && !DEBUG_DISABLE_ACCUM
     {
         let weight = 1.0f / f32(constants.accum_counter);
         let prev_color = textureLoad(prev_frame, global_id.xy, 0).rgb;
@@ -425,7 +430,7 @@ fn pathtrace_falsecolor_main(@builtin(local_invocation_id) local_id: vec3u, @bui
     color = max(color, vec3f(0.0f));
 
     // Progressive rendering.
-    if constants.accum_counter != 0
+    if constants.accum_counter != 0 && !DEBUG_DISABLE_ACCUM
     {
         let weight = 1.0f / f32(constants.accum_counter);
         let prev_color = textureLoad(prev_frame, global_id.xy, 0).rgb;
@@ -473,7 +478,7 @@ fn pathtrace_debug_main(@builtin(local_invocation_id) local_id: vec3u, @builtin(
     var color = get_heatmap_color(val, constants.heatmap_min, constants.heatmap_max);
 
     // Progressive rendering.
-    if constants.accum_counter != 0
+    if constants.accum_counter != 0 && !DEBUG_DISABLE_ACCUM
     {
         let weight = 1.0f / f32(constants.accum_counter);
         let prev_color = textureLoad(prev_frame, global_id.xy, 0).rgb;
