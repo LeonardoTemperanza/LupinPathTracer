@@ -537,26 +537,6 @@ fn compute_camera_ray(global_id: vec2u, output_dim: vec2u, pixel_offset: vec2f) 
     }
 }
 
-fn ray_skip_alpha_stochastically(start_ray: Ray) -> HitInfo
-{
-    var hit = HitInfo();
-    var ray = start_ray;
-    for(var opacity_bounce = 0u; opacity_bounce < MAX_OPACITY_BOUNCES; opacity_bounce++)
-    {
-        hit = ray_scene_intersection(ray);
-        if !hit.hit { break; }
-
-        let mat_point = get_material_point(hit);
-        if mat_point.opacity < 1.0f && random_f32() >= mat_point.opacity {
-            ray.ori = ray.ori + ray.dir * hit.dst;
-        } else {
-            break;
-        }
-    }
-
-    return hit;
-}
-
 fn hash_color(id: u32) -> vec3f
 {
     var res = vec3f();
@@ -606,7 +586,7 @@ fn pathtrace_standard(start_ray: Ray) -> vec3f
     var weight = vec3f(1.0f);
     var radiance = vec3f(0.0f);
     var opacity_bounce: u32 = 0;
-    for(var bounce = 0u; bounce <= MAX_BOUNCES; bounce++)
+    for(var bounce = 0; bounce <= MAX_BOUNCES; bounce++)
     {
         let hit = ray_scene_intersection(ray);
         if !hit.hit
@@ -704,7 +684,7 @@ fn pathtrace_mis(start_ray: Ray) -> vec3f
     var next_emission = true;
     var next_intersection = HitInfo();
 
-    for(var bounce = 0u; bounce <= MAX_BOUNCES; bounce++)
+    for(var bounce = 0; bounce <= MAX_BOUNCES; bounce++)
     {
         var hit = HitInfo();
         if next_emission {
@@ -850,7 +830,7 @@ fn pathtrace_naive(start_ray: Ray) -> vec3f
     var weight = vec3f(1.0f);
     var radiance = vec3f(0.0f);
     var opacity_bounce: u32 = 0;
-    for(var bounce = 0u; bounce <= MAX_BOUNCES; bounce++)
+    for(var bounce = 0; bounce <= MAX_BOUNCES; bounce++)
     {
         let hit = ray_scene_intersection(ray);
         if !hit.hit
@@ -933,7 +913,7 @@ fn pathtrace_direct(start_ray: Ray) -> vec3f
 
     var next_emission = true;
 
-    for(var bounce = 0u; bounce <= MAX_BOUNCES; bounce++)
+    for(var bounce = 0; bounce <= MAX_BOUNCES; bounce++)
     {
         let hit = ray_scene_intersection(ray);
         if !hit.hit
@@ -1367,7 +1347,7 @@ var<private> RNG_STATE: u32 = 0u;
 fn init_rng(global_id: u32)
 {
     let seed = 0u;
-    RNG_STATE = hash_u32(global_id * 19349663u ^ constants.accum_counter * 83492791u ^ seed * 73856093u);
+    RNG_STATE = hash_u32((global_id * 19349663u) ^ (constants.accum_counter * 83492791u) ^ (seed * 73856093u));
 }
 
 fn hash_u32(seed: u32) -> u32

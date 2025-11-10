@@ -180,6 +180,26 @@ fn compute_instance_lights_pdf(ray: Ray) -> f32
     return pdf;
 }
 
+fn ray_skip_alpha_stochastically(start_ray: Ray) -> HitInfo
+{
+    var hit = HitInfo();
+    var ray = start_ray;
+    for(var opacity_bounce = 0u; opacity_bounce < MAX_OPACITY_BOUNCES; opacity_bounce++)
+    {
+        hit = ray_scene_intersection(ray);
+        if !hit.hit { break; }
+
+        let mat_point = get_material_point(hit);
+        if mat_point.opacity < 1.0f && random_f32() >= mat_point.opacity {
+            ray.ori = ray.ori + ray.dir * hit.dst;
+        } else {
+            break;
+        }
+    }
+
+    return hit;
+}
+
 /*
 // Will return the closest hit, while skipping hits based on alpha.
 fn ray_skip_alpha_stochastically(start_ray: Ray) -> HitInfo
