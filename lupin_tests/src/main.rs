@@ -10,137 +10,299 @@ pub use lupin as lp;
 pub use lupin_loader as lpl;
 use lupin::wgpu as wgpu;
 
+pub struct Scene
+{
+    pub name: &'static str,
+    pub samples: u32,
+    pub max_radiance: f32,
+    pub credits: &'static str,
+}
+
+pub struct RenderInfo
+{
+    pub output_file: String,
+    pub scene_idx: usize,
+    pub time: f32,
+    pub res_x: u32,
+    pub res_y: u32,
+}
+
 fn main()
 {
-    if std::fs::exists("scenes").is_err() {
-        panic!("It appears that the \"scenes\" directory is missing (it's not directly visible from the current working directory).");
+    let scenes_dir = "lupin_scenes";
+    if std::fs::exists(scenes_dir).is_err() {
+        panic!("It appears that the \"{}\" directory is missing (it's not directly visible from the current working directory).", scenes_dir);
     }
 
     let output_dir_name = "output";
-    if std::fs::exists(output_dir_name).is_err() {
-        std::fs::create_dir("output").expect("Could not create \"output\" folder to put renders into.");
+    let res = std::fs::exists(output_dir_name);
+    if res.is_err() || !res.unwrap() {
+        std::fs::create_dir(output_dir_name).expect("Could not create output folder to put renders into.");
     }
 
-    let scene_names = [
-        "coffee",
-        "bathroom1",
-        "bistroexterior",
-        "bistrointerior",
-        "car2",
-        "classroom",
-        "ecosys",
-        "hairball",
-        "junkshop",
-        "lonemonk",
-        "sanmiguel"
+    let scenes = [
+        //Scene { name: "landscape", samples: 500, max_radiance: 100.0, credits: "Scene by \"Mareck\": \\link{https://benedikt-bitterli.me/resources}" },
+        //Scene { name: "lonemonk", samples: 2000, max_radiance: 100.0, credits: "Scene by \"Mareck\": \\link{https://benedikt-bitterli.me/resources}" },
+        //Scene { name: "coffee", samples: 2000, max_radiance: 100.0, credits: "Scene by \"Mareck\": \\link{https://benedikt-bitterli.me/resources}" },
+        //Scene { name: "bathroom1", samples: 6000, max_radiance: 100.0, credits: "Scene by \"Mareck\": \\link{https://benedikt-bitterli.me/resources}" },
+        Scene { name: "bathroom1", samples: 5, max_radiance: 100.0, credits: "Scene by \"Mareck\": \\link{https://benedikt-bitterli.me/resources}" },
+        //Scene { name: "bistroexterior", samples: 1000, max_radiance: 10.0, credits: "Scene by \"Mareck\": \\link{https://benedikt-bitterli.me/resources}" },
+        //Scene { name: "bistrointerior", samples: 1000, max_radiance: 100.0, credits: "Scene by \"Mareck\": \\link{https://benedikt-bitterli.me/resources}" },
+        //Scene { name: "car2", samples: 1000, max_radiance: 100.0, credits: "Scene by \"Mareck\": \\link{https://benedikt-bitterli.me/resources}" },
+        //Scene { name: "classroom", samples: 2000, max_radiance: 100.0, credits: "Scene by \"Mareck\": \\link{https://benedikt-bitterli.me/resources}" },
+        //Scene { name: "ecosys", samples: 1000, max_radiance: 100.0, credits: "Scene by \"Mareck\": \\link{https://benedikt-bitterli.me/resources}" },
+        //Scene { name: "junkshop", samples: 2000, max_radiance: 100.0, credits: "Scene by \"Mareck\": \\link{https://benedikt-bitterli.me/resources}" },
+        //Scene { name: "sanmiguel", samples: 1000, max_radiance: 20.0, credits: "Scene by \"Mareck\": \\link{https://benedikt-bitterli.me/resources}" },
     ];
 
     let (device, queue, adapter) = lp::init_default_wgpu_context_no_window();
     let tonemap_resources = lp::build_tonemap_resources(&device);
 
-    let max_bounces = 8;
-    let num_samples_per_pixel = 5;
-    let pathtrace_resources = lp::build_pathtrace_resources(&device, &Default::default());
-
-    for scene_name in scene_names
+    let mut render_infos = Vec::new();
+    let mut sw_render_times = Vec::new();
+    let mut scene_stats = Vec::new();
+    for hw_rt in [false, true]
     {
-        let mut path_json_buf = std::path::PathBuf::new();
-        path_json_buf.push("scenes");
-        path_json_buf.push(scene_name);
-        path_json_buf.set_extension("json");
+        let exposure = 0.0;
 
-        let path_json = path_json_buf.as_path();
-
-        if std::fs::exists(path_json).is_err()
-        {
-            eprintln!("Scene \"{}\" not found.", scene_name);
-            continue;
-        }
-
-        let (scene, cameras) = lpl::load_scene_yoctogl_v24(path_json, &device, &queue).unwrap();
-
-        if cameras.len() <= 0
-        {
-            eprintln!("There are no cameras in scene \"{}\".", scene_name);
-        }
-
-        let camera = &cameras[0];
-
-        let (width, height) = compute_dimensions_for_1080p(camera.params.aspect);
-
-        let mut output_tex = DoubleBufferedTexture::create(&device, &wgpu::TextureDescriptor {
-            label: None,
-            size: wgpu::Extent3d { width: width as u32, height: height as u32, depth_or_array_layers: 1 },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba16Float,
-            usage: wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::TEXTURE_BINDING |
-                   wgpu::TextureUsages::COPY_SRC | wgpu::TextureUsages::COPY_DST |
-                   wgpu::TextureUsages::RENDER_ATTACHMENT,
-            view_formats: &[]
+        let max_bounces = 8;
+        let num_samples_per_pixel = 5;
+        let pathtrace_resources = lp::build_pathtrace_resources(&device, &lp::BakedPathtraceParams {
+            with_runtime_checks: false,
+            max_bounces: 8,
+            samples_per_pixel: 5,
         });
 
-        let num_accums = 200;
-        print!("Scene \"{}\": ", scene_name);
-        for accum_idx in 0..num_accums
+        if !hw_rt { continue; } // tmp
+
+        for (scene_idx, scene) in scenes.iter().enumerate()
         {
-            let desc = lp::PathtraceDesc {
-                scene: &scene,
-                render_target: output_tex.front(),
-                resources: &pathtrace_resources,
-                accum_params: &lp::AccumulationParams {
-                    prev_frame: Some(output_tex.back()),
-                    accum_counter: accum_idx,
-                },
-                tile_params: None,
-                camera_params: camera.params,
-                camera_transform: camera.transform,
-            };
-            lp::pathtrace_scene(&device, &queue, &desc, Default::default(), None);
-            output_tex.flip();
+            let mut path_json_buf = std::path::PathBuf::new();
+            path_json_buf.push(scenes_dir);
+            path_json_buf.push(scene.name);
+            path_json_buf.push(scene.name);
+            path_json_buf.set_extension("json");
+
+            let path_json = path_json_buf.as_path();
+
+            let res = std::fs::exists(path_json);
+            if res.is_err() || !res.unwrap()
+            {
+                eprintln!("Scene \"{}\" not found.", scene.name);
+                continue;
+            }
+
+            let (lp_scene, cameras) = lpl::load_scene_yoctogl_v24(path_json, &device, &queue, !hw_rt).unwrap();
+            scene_stats.push(lp::get_scene_stats(&lp_scene));
+
+            if cameras.len() <= 0 {
+                eprintln!("There are no cameras in scene \"{}\".", scene.name);
+            }
+
+            for (i, camera) in cameras.iter().enumerate()
+            {
+                let (width, height) = compute_dimensions_for_1080p(camera.params.aspect);
+
+                let mut output_tex = DoubleBufferedTexture::create(&device, &wgpu::TextureDescriptor {
+                    label: None,
+                    size: wgpu::Extent3d { width: width as u32, height: height as u32, depth_or_array_layers: 1 },
+                    mip_level_count: 1,
+                    sample_count: 1,
+                    dimension: wgpu::TextureDimension::D2,
+                    format: wgpu::TextureFormat::Rgba16Float,
+                    usage: wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::TEXTURE_BINDING |
+                           wgpu::TextureUsages::COPY_SRC | wgpu::TextureUsages::COPY_DST |
+                           wgpu::TextureUsages::RENDER_ATTACHMENT,
+                    view_formats: &[]
+                });
+
+                assert!(scene.samples % num_samples_per_pixel == 0);
+                let num_accums = scene.samples / num_samples_per_pixel;
+                print!("Scene \"{}\": ", scene.name);
+                use std::io::Write;
+                std::io::stdout().flush().unwrap();
+
+                let start_time = std::time::Instant::now();
+
+                for accum_idx in 0..num_accums
+                {
+                    let desc = lp::PathtraceDesc {
+                        scene: &lp_scene,
+                        render_target: output_tex.front(),
+                        resources: &pathtrace_resources,
+                        accum_params: &lp::AccumulationParams {
+                            prev_frame: Some(output_tex.back()),
+                            accum_counter: accum_idx,
+                        },
+                        tile_params: None,
+                        camera_params: camera.params,
+                        camera_transform: camera.transform,
+                        force_software_bvh: !hw_rt,
+                    };
+                    lp::pathtrace_scene(&device, &queue, &desc, Default::default(), None);
+                    output_tex.flip();
+                }
+                output_tex.flip();  // Final image is now in front.
+
+                // Wait for GPU tasks to finish.
+                device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
+                let elapsed = start_time.elapsed();
+                let elapsed_f32 = elapsed.as_millis() as f32 / 1000.0;
+
+                println!("Done. ({}s)", elapsed_f32);
+
+                if hw_rt
+                {
+                    // Save image
+                    let tonemapped = device.create_texture(&wgpu::TextureDescriptor {
+                        label: None,
+                        size: wgpu::Extent3d { width: width as u32, height: height as u32, depth_or_array_layers: 1 },
+                        mip_level_count: 1,
+                        sample_count: 1,
+                        dimension: wgpu::TextureDimension::D2,
+                        format: wgpu::TextureFormat::Rgba8Unorm,
+                        usage: wgpu::TextureUsages::STORAGE_BINDING |
+                               wgpu::TextureUsages::TEXTURE_BINDING |
+                               wgpu::TextureUsages::RENDER_ATTACHMENT |
+                               wgpu::TextureUsages::COPY_SRC,
+                        view_formats: &[]
+                    });
+
+                    lp::tonemap_and_fit_aspect(&device, &queue, &lp::TonemapDesc {
+                        resources: &tonemap_resources,
+                        hdr_texture: output_tex.front(),
+                        render_target: &tonemapped,
+                        viewport: None,
+                    }, exposure, true, true);
+
+                    let mut output_name = String::from(scene.name);
+                    use std::fmt::Write;
+                    if cameras.len() > 1 { write!(output_name, "{}", i+1).unwrap(); }
+
+                    if hw_rt
+                    {
+                        render_infos.push(RenderInfo {
+                            output_file: output_name.clone(),
+                            scene_idx: scene_idx,
+                            time: elapsed_f32,
+                            res_x: width,
+                            res_y: height
+                        });
+                    }
+                    else
+                    {
+                        sw_render_times.push(elapsed_f32);
+                    }
+
+                    let mut output_path_buf = std::path::PathBuf::new();
+                    output_path_buf.push(output_dir_name);
+                    output_path_buf.push(output_name);
+                    output_path_buf.set_extension("png");
+                    let output_path = output_path_buf.as_path();
+
+                    let res = lpl::save_texture(&device, &queue, output_path, &tonemapped);
+                }
+            }
         }
-        output_tex.flip();  // Final image is now in front.
-        println!("Done.");
-
-        // Save image
-        let tonemapped = device.create_texture(&wgpu::TextureDescriptor {
-            label: None,
-            size: wgpu::Extent3d { width: width as u32, height: height as u32, depth_or_array_layers: 1 },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba8Unorm,
-            usage: wgpu::TextureUsages::STORAGE_BINDING |
-                   wgpu::TextureUsages::TEXTURE_BINDING |
-                   wgpu::TextureUsages::RENDER_ATTACHMENT |
-                   wgpu::TextureUsages::COPY_SRC,
-            view_formats: &[]
-        });
-
-        lp::tonemap_and_fit_aspect(&device, &queue, &lp::TonemapDesc {
-            resources: &tonemap_resources,
-            hdr_texture: output_tex.front(),
-            render_target: &tonemapped,
-            tonemap_params: &Default::default(),
-        }, None);
-
-        let mut output_path_buf = std::path::PathBuf::new();
-        output_path_buf.push(output_dir_name);
-        output_path_buf.push(scene_name);
-        output_path_buf.set_extension("png");
-        let output_path = output_path_buf.as_path();
-
-        let res = lpl::save_texture(&device, &queue, output_path, &tonemapped);
     }
+
+    // Print latex table for scene descriptions
+    {
+        println!("\\begin{{table}}[H]");
+        println!("  \\centering");
+        println!("  \\footnotesize");
+        println!("  \\label{{tab:scene_stats}}");
+        println!("  \\sisetup{{");
+        println!("    group-separator={{,}}, % adds commas to large numbers");
+        println!("    table-align-text-post=false,");
+        println!("    detect-weight=true,");
+        println!("    detect-family=true");
+        println!("  }}");
+        println!("  \\begin{{tabular}}{{");
+        println!("    l % scene name");
+        println!("    S % triangles (millions)");
+        println!("    S % instances");
+        println!("    S % materials");
+        println!("    S % lights");
+        println!("    S % textures");
+        println!("    S % overall VRAM size (HW BHV)");
+        println!("    S % overall VRAM size (SW BHV)");
+        println!("  }}");
+        println!("    \\toprule");
+        println!("    {{Scene}} & {{Triangles}} & {{Instances}} & {{Materials}} & {{Lights}} & {{Textures}} & {{VRAM (HW)}} & {{VRAM (SW)}}\\\\");
+        println!("    \\midrule");
+        for i in 0..scenes.len()
+        {
+            println!("    {} & {} & {} & {} & {} & {} & {} & {} \\\\", scenes[i].name, 1, 2, 3, 4, 5, 6, 7);
+        }
+        println!("    \\bottomrule");
+        println!("  \\end{{tabular}}");
+        println!("\\end{{table}}");
+    }
+
+    // Print latex table for timings
+    {
+        let base_image_id = 15;
+
+        println!("\\begin{{table}}[H]");
+        println!("  \\centering");
+        println!("  \\footnotesize");
+        println!("  \\label{{tab:scene_stats}}");
+        println!("  \\sisetup{{");
+        println!("    group-separator={{,}}, % adds commas to large numbers");
+        println!("    table-align-text-post=false,");
+        println!("    detect-weight=true,");
+        println!("    detect-family=true");
+        println!("  }}");
+        println!("  \\begin{{tabular}}{{");
+        println!("    l % image reference");
+        println!("    S % scene name");
+        println!("    S % resolution");
+        println!("    S % number of samples");
+        println!("    S % time software bvh");
+        println!("    S % time hardware bvh");
+        println!("  }}");
+        println!("    \\toprule");
+        println!("    {{Render}} & {{Scene}} & {{Resolution}} & {{Samples}} & {{Time SW}} & {{Time HW}}\\\\");
+        println!("    \\midrule");
+        for render_info in &render_infos
+        {
+            let image_id = render_info.scene_idx + base_image_id;
+            let scene = &scenes[render_info.scene_idx];
+            println!("    Image {} & {} & {}x{} & {} & {} & {} \\\\", image_id, scene.name, render_info.res_x, render_info.res_y, scene.samples, "/", render_info.time);
+        }
+        println!("    \\bottomrule");
+        println!("  \\end{{tabular}}");
+        println!("\\end{{table}}");
+        println!("");
+    }
+
+    // Print latex table for images themselves
+    {
+        for render_info in &render_infos
+        {
+            let image_name = &render_info.output_file;
+            let credits = scenes[render_info.scene_idx].credits;
+
+            println!("\\begin{{sidewaysfigure}}");
+            println!("  \\centering");
+            println!("  \\includegraphics[width=1.0\\textwidth]{{images/renders/{image_name}.png}}");
+            println!("  \\caption{{{credits}}}");
+            println!("  \\label{{lst:caustics}}");
+            println!("\\end{{sidewaysfigure}}");
+            println!("");
+        }
+    }
+
+    unsafe { std::arch::asm!("int3"); }
 }
 
 fn compute_dimensions_for_1080p(aspect: f32) -> (u32, u32)
 {
-    if aspect > 1.0 {  // Taller than wide
-        return ((1920.0 / aspect) as u32, 1920);
+    if aspect < 1.0 {  // Taller than wide
+        return ((1920.0 * aspect) as u32, 1920);
     } else {  // Wider than tall
-        return (1920, (1920.0 * aspect) as u32);
+        return (1920, (1920.0 / aspect) as u32);
     }
 }
 

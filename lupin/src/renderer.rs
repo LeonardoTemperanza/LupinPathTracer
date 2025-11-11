@@ -429,8 +429,8 @@ impl Default for BakedPathtraceParams
     {
         return Self {
             with_runtime_checks: true,
-            max_bounces: 5,
-            samples_per_pixel: 1,
+            max_bounces: 8,
+            samples_per_pixel: 5,
         };
     }
 }
