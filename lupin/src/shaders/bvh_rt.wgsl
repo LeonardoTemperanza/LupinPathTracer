@@ -185,15 +185,15 @@ fn ray_skip_alpha_stochastically(start_ray: Ray) -> HitInfo
     var hit = HitInfo();
     var ray = start_ray;
     var dst = 0.0f;
-    for(var opacity_bounce = 0u; opacity_bounce < MAX_OPACITY_BOUNCES; opacity_bounce++)
+    for(var opacity_bounce = 0u; opacity_bounce < 100000; opacity_bounce++)
     {
         hit = ray_scene_intersection(ray);
         if !hit.hit { break; }
 
         dst += hit.dst;
 
-        let mat_point = get_material_point(hit);
-        if mat_point.opacity < 1.0f && random_f32() >= mat_point.opacity {
+        let alpha = _get_alpha(hit.uv, hit.tri_idx, hit.instance_idx);
+        if alpha < 1.0f && random_f32() >= alpha {
             ray.ori = ray.ori + ray.dir * hit.dst;
         } else {
             break;
@@ -208,43 +208,48 @@ fn ray_skip_alpha_stochastically(start_ray: Ray) -> HitInfo
 
 /*
 // Will return the closest hit, while skipping hits based on alpha.
-fn ray_skip_alpha_stochastically(start_ray: Ray) -> HitInfo
+fn ray_skip_alpha_stochastically(ray: Ray) -> HitInfo
 {
     var rq: ray_query;
-    rayQueryInitialize(&rq, rt_tlas, RayDesc(0u, 0xFFu, RAY_EPSILON, F32_MAX, ray.ori, ray.dir));
-    rayQueryProceed(&rq);
 
-    var closest_opaque_hit = RayIntersection();
+    let flags = RAY_FLAG_SKIP_AABBS | RAY_FLAG_FORCE_NO_OPAQUE;
+    let mask = 0xFFu;
+    rayQueryInitialize(&rq, rt_tlas, RayDesc(flags, mask, RAY_EPSILON, F32_MAX, ray.ori, ray.dir));
+
     while rayQueryProceed(&rq)
     {
         let hit = rayQueryGetCandidateIntersection(&rq);
         if hit.kind != RAY_QUERY_INTERSECTION_TRIANGLE { continue; }
 
-        let is_first_hit = closest_opaque_hit.kind == RAY_QUERY_INTERSECTION_NONE;
-        if !is_first_hit && hit.t >= closest_opaque_hit.t { continue; }
-
-        // Skip if alpha is exactly 0.0f
+        // Stochastically skip hit.
         let uv = hit.barycentrics;
-        let instance_idx = hit.instance_custom_data;
+        let instance_idx = hit.instance_index;
         let tri_idx = hit.primitive_index;
         let alpha = _get_alpha(uv, tri_idx, instance_idx);
-        if alpha == 0.0f { continue; }
+        if alpha < 1.0f && random_f32() >= alpha { continue; }
+
+        // Stochastically accept current hit.
+        rayQueryConfirmIntersection(&rq);
     }
 
-    if closest_opaque_hit.kind == RAY_QUERY_INTERSECTION_NONE { return HitInfo(); }
+    // Get the closest accepted (or opaque) hit.
+    let hit = rayQueryGetCommittedIntersection(&rq);
+    if hit.kind != RAY_QUERY_INTERSECTION_TRIANGLE { return HitInfo(); }
 
     var res = HitInfo();
     res.hit = true;
-    res.dst = closest_opaque_hit.t;
-    res.uv  = closest_opaque_hit.barycentrics;
-    res.instance_idx = closest_opaque_hit.instance_custom_data;
-    res.tri_idx = closest_opaque_hit.primitive_index;
-    res.hit_backside = !closest_opaque_hit.front_face;
+    res.dst = hit.t;
+    res.uv  = hit.barycentrics;
+    res.instance_idx = hit.instance_index;
+    res.tri_idx = hit.primitive_index;
+    res.hit_backside = !hit.front_face;
     return res;
 }
 */
 
+////////////////////////
 // Internals
+////////////////////////
 
 fn _get_alpha(uv: vec2f, tri_idx: u32, instance_idx: u32) -> f32
 {
