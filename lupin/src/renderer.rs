@@ -394,13 +394,7 @@ pub struct PathtraceResources
     pub pipeline: PathtracePipeline,
     pub falsecolor_pipeline: PathtracePipeline,
     pub debug_pipeline: PathtracePipeline,
-    //pub pipeline: wgpu::ComputePipeline,
-    //pub falsecolor_pipeline: wgpu::ComputePipeline,
-    //pub debug_pipeline: wgpu::ComputePipeline,
     pub dummy_prev_frame_texture: wgpu::Texture,
-    pub dummy_albedo_texture: wgpu::Texture,
-    pub dummy_normals_texture: wgpu::Texture,
-    pub dummy_output_texture: wgpu::Texture,
 
     // NOTE: Hack to guard for 0 size buffers.
     // WGPU doesn't allow 0 size buffers and
@@ -666,9 +660,6 @@ pub fn build_pathtrace_resources(device: &wgpu::Device, baked_pathtrace_params: 
         debug_pipeline: PathtracePipeline { custom: debug_pipeline, rt: debug_pipeline_rt },
         falsecolor_pipeline: PathtracePipeline { custom: falsecolor_pipeline, rt: falsecolor_pipeline_rt },
         dummy_prev_frame_texture,
-        dummy_output_texture,
-        dummy_albedo_texture,
-        dummy_normals_texture,
 
         // NOTE: Hack to guard for 0 size buffers.
         // WGPU doesn't allow 0 size bindings and

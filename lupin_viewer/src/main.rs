@@ -125,24 +125,6 @@ pub enum RenderType
     Debug(lp::DebugVizType),
 }
 
-#[derive(PartialEq, Eq, Clone, Copy, Debug)]
-enum TonemapKind
-{
-    Aces,
-    FilmicUC2,
-    FilmicCustom,
-}
-
-fn to_tonemap_kind(op: lp::TonemapOperator) -> TonemapKind
-{
-    return match op
-    {
-        lp::TonemapOperator::Aces => TonemapKind::Aces,
-        lp::TonemapOperator::FilmicUC2 => TonemapKind::FilmicUC2,
-        lp::TonemapOperator::FilmicCustom {..} => TonemapKind::FilmicCustom,
-    }
-}
-
 #[derive(Default, Debug, Copy, Clone, PartialEq)]
 pub struct DebugVizInfo
 {
@@ -164,7 +146,9 @@ pub struct AppState<'a>
     pub max_accums: u32,
     pub max_bounces: u32,
     pub samples_per_pixel: u32,
-    pub tonemap_params: lp::TonemapParams,
+    pub filmic: bool,
+    pub srgb: bool,
+    pub exposure: f32,
     pub debug_viz: DebugVizInfo,
     pub show_normals_when_moving: bool,
     pub should_rebuild_pathtrace_resources: bool,
@@ -291,7 +275,9 @@ impl<'a> AppState<'a>
             samples_per_pixel: DEFAULT_SAMPLES_PER_PIXEL,
             max_bounces: DEFAULT_MAX_BOUNCES,
             max_accums: 200,
-            tonemap_params: Default::default(),
+            filmic: false,
+            srgb: true,
+            exposure: 0.0,
             debug_viz: Default::default(),
             show_normals_when_moving: true,
             should_rebuild_pathtrace_resources: false,
@@ -504,7 +490,7 @@ impl<'a> AppState<'a>
             resources: &self.tonemap_resources,
             hdr_texture: self.output.front(),
             render_target: &swapchain,
-            tonemap_params: &self.tonemap_params
+            viewport: Some(viewport)
         };
 
         // TODO: Refactor this!!!!
@@ -518,8 +504,7 @@ impl<'a> AppState<'a>
                 }
 
                 lp::pathtrace_scene_falsecolor(self.device, self.queue, &desc, falsecolor_type, Some(&mut self.tile_idx));
-                lp::blit_texture_and_fit_aspect(&self.device, &self.queue, &self.tonemap_resources,
-                                                &self.output.front(), &swapchain, Some(viewport));
+                lp::tonemap_and_fit_aspect(&self.device, &self.queue, &tonemap_desc, 0.0, false, false);
             }
             RenderType::Pathtrace =>
             {
@@ -532,8 +517,7 @@ impl<'a> AppState<'a>
                             desc.tile_params = None;
                         }
                         lp::pathtrace_scene_falsecolor(self.device, self.queue, &desc, lp::FalsecolorType::NormalsUnsigned, Some(&mut self.tile_idx));
-                        lp::blit_texture_and_fit_aspect(&self.device, &self.queue, &self.tonemap_resources,
-                                                        &self.output.front(), &swapchain, Some(viewport));
+                        lp::tonemap_and_fit_aspect(&self.device, &self.queue, &tonemap_desc, 0.0, false, false);
                     }
                     else
                     {
@@ -545,7 +529,7 @@ impl<'a> AppState<'a>
                             //}
                         }
 
-                        lp::tonemap_and_fit_aspect(&self.device, &self.queue, &tonemap_desc, Some(viewport));
+                        lp::tonemap_and_fit_aspect(&self.device, &self.queue, &tonemap_desc, self.exposure, self.filmic, self.srgb);
                     }
                 }
                 else
@@ -571,7 +555,7 @@ impl<'a> AppState<'a>
                         //}
                     }
 
-                    lp::tonemap_and_fit_aspect(&self.device, &self.queue, &tonemap_desc, Some(viewport));
+                    lp::tonemap_and_fit_aspect(&self.device, &self.queue, &tonemap_desc, self.exposure, self.filmic, self.srgb);
                 }
             }
             RenderType::Debug(debug_viz_type) =>
@@ -584,8 +568,7 @@ impl<'a> AppState<'a>
                 };
 
                 lp::pathtrace_scene_debug(&self.device, &self.queue, &desc, &debug_desc, Some(&mut self.tile_idx));
-                lp::blit_texture_and_fit_aspect(&self.device, &self.queue, &self.tonemap_resources,
-                                                self.output.front(), &swapchain, Some(viewport));
+                lp::tonemap_and_fit_aspect(&self.device, &self.queue, &tonemap_desc, 0.0, false, false);
             }
         }
 
@@ -617,9 +600,9 @@ impl<'a> AppState<'a>
                 resources: &self.tonemap_resources,
                 hdr_texture: &self.denoised,
                 render_target: &swapchain,
-                tonemap_params: &self.tonemap_params
+                viewport: Some(viewport)
             };
-            lp::tonemap_and_fit_aspect(&self.device, &self.queue, &tonemap_desc, Some(viewport));
+            lp::tonemap_and_fit_aspect(&self.device, &self.queue, &tonemap_desc, self.exposure, self.filmic, self.srgb);
         }
 
         // Swap output textures
@@ -960,12 +943,13 @@ impl<'a> AppState<'a>
                 ui.heading("Tonemapping:");
                 ui.add_space(4.0);
                 {
-                    self.ui_tonemap_operator(ui);
-
                     ui.horizontal(|ui| {
-                        ui.add(egui::DragValue::new(&mut self.tonemap_params.exposure).speed(0.05));
+                        ui.add(egui::DragValue::new(&mut self.exposure).speed(0.05));
                         ui.label("Exposure");
                     });
+
+                    ui.checkbox(&mut self.filmic, "Filmic");
+                    ui.checkbox(&mut self.srgb, "SRGB");
                 }
 
                 ui.add_space(12.0);
@@ -1050,8 +1034,8 @@ impl<'a> AppState<'a>
                                 resources: &self.tonemap_resources,
                                 hdr_texture: self.output.front(),
                                 render_target: &tmp_tex,
-                                tonemap_params: &self.tonemap_params,
-                            }, None);
+                                viewport: None,
+                            }, self.exposure, self.filmic, self.srgb);
 
                             let res = lpl::save_texture(&self.device, &self.queue,
                                                         &path,
@@ -1118,95 +1102,6 @@ impl<'a> AppState<'a>
     fn ui_heatmap_params(&mut self, ui: &mut egui::Ui)
     {
         ui_min_max(ui, "Heatmap:", &mut self.debug_viz.heatmap_min, &mut self.debug_viz.heatmap_max, 0.0..=1000.0);
-    }
-
-    fn ui_tonemap_operator(&mut self, ui: &mut egui::Ui)
-    {
-        let mut tonemap_kind = to_tonemap_kind(self.tonemap_params.operator);
-
-        egui::ComboBox::from_label("Operator")
-            .selected_text(format!("{:?}", tonemap_kind))
-            .show_ui(ui, |ui| {
-                ui.selectable_value(&mut tonemap_kind, TonemapKind::Aces, "Aces");
-                ui.selectable_value(&mut tonemap_kind, TonemapKind::FilmicUC2, "Filmic (Uncharted 2)");
-                ui.selectable_value(&mut tonemap_kind, TonemapKind::FilmicCustom, "Filmic (Custom)");
-            });
-
-        match tonemap_kind
-        {
-            TonemapKind::Aces =>
-            {
-                self.tonemap_params.operator = lp::TonemapOperator::Aces;
-            },
-            TonemapKind::FilmicUC2 =>
-            {
-                self.tonemap_params.operator = lp::TonemapOperator::FilmicUC2;
-            },
-            TonemapKind::FilmicCustom =>
-            {
-                let mut linear_white_ = 0.0;
-                let mut a_ = 0.0;
-                let mut b_ = 0.0;
-                let mut c_ = 0.0;
-                let mut d_ = 0.0;
-                let mut e_ = 0.0;
-                let mut f_ = 0.0;
-
-                match self.tonemap_params.operator
-                {
-                    lp::TonemapOperator::FilmicCustom {linear_white, a, b, c, d, e, f} =>
-                    {
-                        linear_white_ = linear_white;
-                        a_ = a;
-                        b_ = b;
-                        c_ = c;
-                        d_ = d;
-                        e_ = e;
-                        f_ = f;
-                    },
-                    _ => {}
-                }
-
-                ui.horizontal(|ui| {
-                    ui.add(egui::DragValue::new(&mut linear_white_).speed(0.05));
-                    ui.label("Linear white");
-                });
-                ui.horizontal(|ui| {
-                    ui.add(egui::DragValue::new(&mut a_).speed(0.05));
-                    ui.label("A");
-                });
-                ui.horizontal(|ui| {
-                    ui.add(egui::DragValue::new(&mut b_).speed(0.05));
-                    ui.label("B");
-                });
-                ui.horizontal(|ui| {
-                    ui.add(egui::DragValue::new(&mut c_).speed(0.05));
-                    ui.label("C");
-                });
-                ui.horizontal(|ui| {
-                    ui.add(egui::DragValue::new(&mut d_).speed(0.05));
-                    ui.label("D");
-                });
-                ui.horizontal(|ui| {
-                    ui.add(egui::DragValue::new(&mut e_).speed(0.05));
-                    ui.label("E");
-                });
-                ui.horizontal(|ui| {
-                    ui.add(egui::DragValue::new(&mut f_).speed(0.05));
-                    ui.label("F");
-                });
-
-                self.tonemap_params.operator = lp::TonemapOperator::FilmicCustom {
-                    linear_white: linear_white_,
-                    a: a_,
-                    b: b_,
-                    c: c_,
-                    d: d_,
-                    e: e_,
-                    f: f_,
-                };
-            },
-        }
     }
 
     fn reset_accumulation(&mut self)

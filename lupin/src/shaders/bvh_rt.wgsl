@@ -185,7 +185,7 @@ fn ray_skip_alpha_stochastically(start_ray: Ray) -> HitInfo
     var hit = HitInfo();
     var ray = start_ray;
     var dst = 0.0f;
-    for(var opacity_bounce = 0u; opacity_bounce < 100000; opacity_bounce++)
+    for(var opacity_bounce = 0u; opacity_bounce < MAX_OPACITY_BOUNCES; opacity_bounce++)
     {
         hit = ray_scene_intersection(ray);
         if !hit.hit { break; }
@@ -226,6 +226,7 @@ fn ray_skip_alpha_stochastically(ray: Ray) -> HitInfo
         let instance_idx = hit.instance_index;
         let tri_idx = hit.primitive_index;
         let alpha = _get_alpha(uv, tri_idx, instance_idx);
+        if alpha == 0.0f { continue; }
         if alpha < 1.0f && random_f32() >= alpha { continue; }
 
         // Stochastically accept current hit.
