@@ -11,7 +11,7 @@ pub fn build_scene_empty(device: &wgpu::Device, queue: &wgpu::Queue) -> lp::Scen
     return lp::upload_scene_to_gpu(device, queue, &scene_cpu, vec![], vec![], &[], true);
 }
 
-pub fn build_scene_cornell_box(device: &wgpu::Device, queue: &wgpu::Queue) -> (lp::Scene, Vec<SceneCamera>)
+pub fn build_scene_cornell_box(device: &wgpu::Device, queue: &wgpu::Queue, build_sw_bvh: bool) -> (lp::Scene, Vec<SceneCamera>)
 {
     // Values taken from YoctoGL.
 
@@ -47,7 +47,9 @@ pub fn build_scene_cornell_box(device: &wgpu::Device, queue: &wgpu::Queue) -> (l
         ]);
         scene.indices_array.push(vec![0, 1, 2, 2, 3, 0]);
         scene.mesh_aabbs.push(lp::compute_mesh_aabb(&scene.verts_pos_array[floor_mesh as usize]));
-        scene.bvh_nodes_array.push(lp::build_bvh(&scene.verts_pos_array[floor_mesh as usize], &mut scene.indices_array[floor_mesh as usize]));
+        if build_sw_bvh {
+            scene.bvh_nodes_array.push(lp::build_bvh(&scene.verts_pos_array[floor_mesh as usize], &mut scene.indices_array[floor_mesh as usize]));
+        }
 
         let floor_instance = push_asset(&mut scene.instances, {
             let mut instance = lp::Instance::default();
@@ -66,7 +68,9 @@ pub fn build_scene_cornell_box(device: &wgpu::Device, queue: &wgpu::Queue) -> (l
         ]);
         scene.indices_array.push(vec![0, 1, 2, 2, 3, 0]);
         scene.mesh_aabbs.push(lp::compute_mesh_aabb(&scene.verts_pos_array[ceiling_mesh as usize]));
-        scene.bvh_nodes_array.push(lp::build_bvh(&scene.verts_pos_array[ceiling_mesh as usize], &mut scene.indices_array[ceiling_mesh as usize]));
+        if build_sw_bvh {
+            scene.bvh_nodes_array.push(lp::build_bvh(&scene.verts_pos_array[ceiling_mesh as usize], &mut scene.indices_array[ceiling_mesh as usize]));
+        }
 
         let ceiling_instance = push_asset(&mut scene.instances, {
             let mut instance = lp::Instance::default();
@@ -85,7 +89,9 @@ pub fn build_scene_cornell_box(device: &wgpu::Device, queue: &wgpu::Queue) -> (l
         ]);
         scene.indices_array.push(vec![0, 1, 2, 2, 3, 0]);
         scene.mesh_aabbs.push(lp::compute_mesh_aabb(&scene.verts_pos_array[backwall_mesh as usize]));
-        scene.bvh_nodes_array.push(lp::build_bvh(&scene.verts_pos_array[backwall_mesh as usize], &mut scene.indices_array[backwall_mesh as usize]));
+        if build_sw_bvh {
+            scene.bvh_nodes_array.push(lp::build_bvh(&scene.verts_pos_array[backwall_mesh as usize], &mut scene.indices_array[backwall_mesh as usize]));
+        }
 
         let backwall_instance = push_asset(&mut scene.instances, {
             let mut instance = lp::Instance::default();
@@ -104,7 +110,9 @@ pub fn build_scene_cornell_box(device: &wgpu::Device, queue: &wgpu::Queue) -> (l
         ]);
         scene.indices_array.push(vec![0, 1, 2, 2, 3, 0]);
         scene.mesh_aabbs.push(lp::compute_mesh_aabb(&scene.verts_pos_array[rightwall_mesh as usize]));
-        scene.bvh_nodes_array.push(lp::build_bvh(&scene.verts_pos_array[rightwall_mesh as usize], &mut scene.indices_array[rightwall_mesh as usize]));
+        if build_sw_bvh {
+            scene.bvh_nodes_array.push(lp::build_bvh(&scene.verts_pos_array[rightwall_mesh as usize], &mut scene.indices_array[rightwall_mesh as usize]));
+        }
 
         let rightwall_instance = push_asset(&mut scene.instances, {
             let mut instance = lp::Instance::default();
@@ -123,7 +131,9 @@ pub fn build_scene_cornell_box(device: &wgpu::Device, queue: &wgpu::Queue) -> (l
         ]);
         scene.indices_array.push(vec![0, 1, 2, 2, 3, 0]);
         scene.mesh_aabbs.push(lp::compute_mesh_aabb(&scene.verts_pos_array[leftwall_mesh as usize]));
-        scene.bvh_nodes_array.push(lp::build_bvh(&scene.verts_pos_array[leftwall_mesh as usize], &mut scene.indices_array[leftwall_mesh as usize]));
+        if build_sw_bvh {
+            scene.bvh_nodes_array.push(lp::build_bvh(&scene.verts_pos_array[leftwall_mesh as usize], &mut scene.indices_array[leftwall_mesh as usize]));
+        }
 
         let leftwall_instance = push_asset(&mut scene.instances, {
             let mut instance = lp::Instance::default();
@@ -150,7 +160,9 @@ pub fn build_scene_cornell_box(device: &wgpu::Device, queue: &wgpu::Queue) -> (l
                                       8, 9, 10, 10, 11, 8, 12, 13, 14, 14, 15, 12,
                                       16, 17, 18, 18, 19, 16, 20, 21, 22, 22, 23, 20]);
         scene.mesh_aabbs.push(lp::compute_mesh_aabb(&scene.verts_pos_array[shortbox_mesh as usize]));
-        scene.bvh_nodes_array.push(lp::build_bvh(&scene.verts_pos_array[shortbox_mesh as usize], &mut scene.indices_array[shortbox_mesh as usize]));
+        if build_sw_bvh {
+            scene.bvh_nodes_array.push(lp::build_bvh(&scene.verts_pos_array[shortbox_mesh as usize], &mut scene.indices_array[shortbox_mesh as usize]));
+        }
 
         let shortbox_instance = push_asset(&mut scene.instances, {
             let mut instance = lp::Instance::default();
@@ -206,7 +218,9 @@ pub fn build_scene_cornell_box(device: &wgpu::Device, queue: &wgpu::Queue) -> (l
         });
     }
 
-    scene.tlas_nodes = lp::build_tlas(&scene.instances, &scene.mesh_aabbs);
+    if build_sw_bvh {
+        scene.tlas_nodes = lp::build_tlas(&scene.instances, &scene.mesh_aabbs);
+    }
     scene.lights = lp::build_lights(&scene, &[]);
 
     lp::validate_scene(&scene, 0, 0);

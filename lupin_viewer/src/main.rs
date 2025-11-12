@@ -7,6 +7,8 @@
 // Don't spawn a terminal window on windows
 //#![windows_subsystem = "windows"]
 
+const FORCE_SW_RT: bool = true;
+
 use std::time::Instant;
 
 pub use winit::
@@ -208,7 +210,7 @@ impl<'a> AppState<'a>
 
         let denoise_resources = lp::build_denoise_resources(&device, &denoise_device, width, height);
 
-        let (scene, scene_cameras) = lpl::build_scene_cornell_box(&device, &queue);
+        let (scene, scene_cameras) = lpl::build_scene_cornell_box(&device, &queue, FORCE_SW_RT);
 
         let output = DoubleBufferedTexture::create(device, &wgpu::TextureDescriptor {
             label: None,
@@ -452,7 +454,7 @@ impl<'a> AppState<'a>
             tile_params: Some(&self.tile_params),
             camera_params: self.camera_params,
             camera_transform: self.cam_transform,
-            force_software_bvh: false,
+            force_software_bvh: FORCE_SW_RT,
             advanced: lp::AdvancedParams {
                 max_radiance: self.max_radiance,
             }
@@ -468,7 +470,7 @@ impl<'a> AppState<'a>
             tile_params: Some(&self.tile_params),
             camera_params: self.camera_params,
             camera_transform: self.cam_transform,
-            force_software_bvh: false,
+            force_software_bvh: FORCE_SW_RT,
             advanced: lp::AdvancedParams {
                 max_radiance: self.max_radiance,
             }
@@ -484,7 +486,7 @@ impl<'a> AppState<'a>
             tile_params: Some(&self.tile_params),
             camera_params: self.camera_params,
             camera_transform: self.cam_transform,
-            force_software_bvh: false,
+            force_software_bvh: FORCE_SW_RT,
             advanced: lp::AdvancedParams {
                 max_radiance: self.max_radiance,
             }
@@ -765,7 +767,7 @@ impl<'a> AppState<'a>
                         {
                             ui.checkbox(&mut self.show_normals_when_moving, "Show normals when moving");
                             ui.horizontal(|ui| {
-                                let response = ui.add(egui::DragValue::new(&mut self.max_radiance));
+                                let response = ui.add(egui::DragValue::new(&mut self.max_radiance).range(0.0..=100000000.0));
                                 if response.changed() { self.reset_accumulation(); }
                                 ui.label("Max radiance");
                             });
@@ -921,7 +923,7 @@ impl<'a> AppState<'a>
                             .add_filter("json", &["json"])
                             .pick_file()
                         {
-                            if let Ok(res) = lpl::load_scene_yoctogl_v24(&path, self.device, self.queue, false)
+                            if let Ok(res) = lpl::load_scene_yoctogl_v24(&path, self.device, self.queue, FORCE_SW_RT)
                             {
                                 (self.scene, self.scene_cameras) = res;
                                 self.reset_accumulation();

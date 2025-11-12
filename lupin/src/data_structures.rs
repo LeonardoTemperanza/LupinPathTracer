@@ -708,7 +708,7 @@ pub fn upload_scene_to_gpu(device: &wgpu::Device, queue: &wgpu::Queue, scene: &S
 pub fn validate_scene(scene: &SceneCPU, num_textures: u32, num_samplers: u32)
 {
     // TODO: Put readable messages on all of them.
-    assert_eq!(scene.verts_pos_array.len(), scene.bvh_nodes_array.len());
+    //assert_eq!(scene.verts_pos_array.len(), scene.bvh_nodes_array.len());
     assert_eq!(scene.verts_pos_array.len(), scene.mesh_infos.len());
     assert_eq!(scene.verts_pos_array.len(), scene.mesh_aabbs.len(), "verts_pos_array.len() doesn't match mesh_aabbs.len()");
 
