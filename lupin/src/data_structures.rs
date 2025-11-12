@@ -539,8 +539,6 @@ pub fn build_tlas(instances: &[Instance], model_aabbs: &[Aabb]) -> Vec<TlasNode>
 {
     if instances.is_empty() || model_aabbs.is_empty() { return vec![]; }
 
-    assert!(instances.len() < (2 << TLAS_MAX_DEPTH));
-
     let mut node_indices = Vec::<u32>::with_capacity(instances.len());
     let mut tlas = Vec::<TlasNode>::with_capacity(instances.len() * 2 - 1);
 
