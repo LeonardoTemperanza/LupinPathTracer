@@ -161,6 +161,7 @@ pub struct AppState<'a>
     pub tile_params: lp::TileParams,
     pub denoising: bool,
     pub use_gbuffers_for_denoise: bool,
+    pub max_radiance: f32,
 
     // Camera
     pub cam_pos: lp::Vec3,
@@ -291,6 +292,7 @@ impl<'a> AppState<'a>
             tile_params: Default::default(),
             denoising: false,
             use_gbuffers_for_denoise: false,
+            max_radiance: 100.0,
 
             // Camera
             cam_pos: Default::default(),
@@ -451,6 +453,9 @@ impl<'a> AppState<'a>
             camera_params: self.camera_params,
             camera_transform: self.cam_transform,
             force_software_bvh: false,
+            advanced: lp::AdvancedParams {
+                max_radiance: self.max_radiance,
+            }
         };
         let desc_albedo = lp::PathtraceDesc {
             scene: &self.scene,
@@ -464,6 +469,9 @@ impl<'a> AppState<'a>
             camera_params: self.camera_params,
             camera_transform: self.cam_transform,
             force_software_bvh: false,
+            advanced: lp::AdvancedParams {
+                max_radiance: self.max_radiance,
+            }
         };
         let desc_normals = lp::PathtraceDesc {
             scene: &self.scene,
@@ -477,6 +485,9 @@ impl<'a> AppState<'a>
             camera_params: self.camera_params,
             camera_transform: self.cam_transform,
             force_software_bvh: false,
+            advanced: lp::AdvancedParams {
+                max_radiance: self.max_radiance,
+            }
         };
 
         let mut desc_no_tiles = desc;
@@ -753,6 +764,11 @@ impl<'a> AppState<'a>
                         RenderType::Pathtrace =>
                         {
                             ui.checkbox(&mut self.show_normals_when_moving, "Show normals when moving");
+                            ui.horizontal(|ui| {
+                                let response = ui.add(egui::DragValue::new(&mut self.max_radiance));
+                                if response.changed() { self.reset_accumulation(); }
+                                ui.label("Max radiance");
+                            });
                         }
                         RenderType::Debug(lp::DebugVizType::BVHTriChecks) =>
                         {
