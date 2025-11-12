@@ -60,7 +60,7 @@ fn main()
     let mut render_infos = Vec::new();
     let mut sw_render_times = Vec::new();
     let mut scene_stats = Vec::new();
-    for hw_rt in [true, false]
+    for hw_rt in [false, true]
     {
         let exposure = 0.0;
 
@@ -158,6 +158,11 @@ fn main()
                     };
                     lp::pathtrace_scene(&device, &queue, &desc, Default::default(), None);
                     output_tex.flip();
+
+                    // Avoid overloading the command buffer.
+                    if accum_idx % 50 == 0 {
+                        device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
+                    }
                 }
                 output_tex.flip();  // Final image is now in front.
 

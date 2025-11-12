@@ -627,23 +627,37 @@ pub fn build_tlas(instances: &[Instance], model_aabbs: &[Aabb]) -> Vec<TlasNode>
         }
     }
 
-    let tlas_depth = compute_tlas_depth(tlas.as_slice(), 0);
+    let tlas_depth = compute_tlas_depth(tlas.as_slice());
     assert!(tlas_depth < TLAS_MAX_DEPTH as u32);
 
     return tlas;
 }
 
-pub fn compute_tlas_depth(tlas: &[TlasNode], node: u32) -> u32
+pub fn compute_tlas_depth(tlas: &[TlasNode]) -> u32
 {
-    let mut depth = 0;
-    if tlas[node as usize].left != 0 {
-        depth = depth.max(compute_tlas_depth(tlas, tlas[node as usize].left));
-    }
-    if tlas[node as usize].right != 0 {
-        depth = depth.max(compute_tlas_depth(tlas, tlas[node as usize].right));
+    let mut res: u32 = 0;
+
+    let mut stack = Vec::<u32>::new();
+    stack.push(0);
+
+    while let Some(node) = stack.pop()
+    {
+        for el in &stack {
+            assert!(node != *el, "Infinite loop in TLAS!");
+        }
+
+        if tlas[node as usize].left != 0
+        {
+            assert!(tlas[node as usize].right != 0);
+
+            stack.push(tlas[node as usize].left);
+            stack.push(tlas[node as usize].right);
+        }
+
+        res = res.max(stack.len() as u32);
     }
 
-    return depth + 1;
+    return res;
 }
 
 pub fn tlas_find_best_match(tlas: &[TlasNode], idx_array: &[u32], node_a: u32) -> u32
