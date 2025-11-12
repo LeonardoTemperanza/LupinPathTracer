@@ -768,13 +768,26 @@ pub fn validate_scene(scene: &SceneCPU, num_textures: u32, num_samplers: u32)
 #[derive(Default, Clone, Copy, Debug)]
 pub struct SceneStats
 {
-    /// Does not count multiple instances of the same mesh
+    /// Does not count multiple instances of the same mesh.
     pub total_tri_count: u64,
-    pub num_instances: u64,
+    pub instances: u64,
+    pub materials: u64,
+    pub lights: u64,
+    pub textures: u64,
 }
 pub fn get_scene_stats(scene: &Scene) -> SceneStats
 {
-    return Default::default();
+    let mut res = SceneStats::default();
+
+    for indices in &scene.indices_array {
+        res.total_tri_count += (indices.size() / std::mem::size_of::<u32>() as u64) / 3;
+    }
+
+    res.instances = scene.instances.size() / std::mem::size_of::<Instance>() as u64;
+    res.materials = scene.materials.size() / std::mem::size_of::<Material>() as u64;
+    res.lights = scene.lights.lights.size() / std::mem::size_of::<Light>() as u64;
+    res.textures = scene.textures.len() as u64;
+    return res;
 }
 
 pub fn compute_mesh_aabb(verts_pos: &[Vec4]) -> Aabb

@@ -47,10 +47,11 @@ struct PushConstants
 
     falsecolor_type: u32,
     pathtrace_type: u32,
+
+    max_radiance: f32,
 }
 
 var<push_constant> constants: PushConstants;
-const max_radiance = 100.0f;
 
 // Override constants
 override MAX_BOUNCES: u32 = 5;
@@ -1519,8 +1520,8 @@ fn clamp_radiance(radiance: vec3f) -> vec3f
     var res = radiance;
     if !vec3f_is_finite(res) { res = vec3f(0.0f); }
 
-    if any(res > vec3f(max_radiance)) {
-        res *= max_radiance / max(res.x, max(res.y, res.z));
+    if any(res > vec3f(constants.max_radiance)) {
+        res *= constants.max_radiance / max(res.x, max(res.y, res.z));
     }
     return res;
 }

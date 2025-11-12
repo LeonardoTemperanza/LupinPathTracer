@@ -247,6 +247,8 @@ pub struct PushConstants
 
     pub falsecolor_type: u32,
     pub pathtrace_type: u32,
+
+    pub max_radiance: f32,
 }
 
 static_assert!(std::mem::size_of::<PushConstants>() < MAX_PUSH_CONSTANTS_SIZE as usize);
@@ -753,6 +755,22 @@ pub enum PathtraceType
     Direct = 3,
 }
 
+#[derive(Copy, Clone, Debug, PartialEq)]
+pub struct AdvancedParams
+{
+    pub max_radiance: f32,
+}
+
+impl Default for AdvancedParams
+{
+    fn default() -> Self
+    {
+        return Self {
+            max_radiance: 100.0,
+        };
+    }
+}
+
 #[derive(Clone, Copy)]
 pub struct PathtraceDesc<'a>
 {
@@ -770,6 +788,7 @@ pub struct PathtraceDesc<'a>
     pub camera_params: CameraParams,
     pub camera_transform: Mat3x4,
     pub force_software_bvh: bool,
+    pub advanced: AdvancedParams,
 }
 
 // TODO: Just make the user modify the tile_idx. This is bad.
@@ -1566,6 +1585,8 @@ fn get_push_constants(desc: &PathtraceDesc, pathtrace_type: Option<PathtraceType
     }
 
     push_constants.accum_counter = desc.accum_params.accum_counter;
+
+    push_constants.max_radiance = desc.advanced.max_radiance;
 
     return push_constants;
 }

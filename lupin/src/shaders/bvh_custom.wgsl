@@ -2,9 +2,11 @@
 @group(3) @binding(0) var<storage, read> bvh_nodes_array: binding_array<BvhNodes>;
 @group(3) @binding(1) var<storage, read> tlas_nodes: array<TlasNode>;
 
+const _MAX_TLAS_DEPTH: u32 = 20;  // This supports 2^MAX_TLAS_DEPTH objects.
+
 fn ray_scene_intersection(ray: Ray)->HitInfo
 {
-    var tlas_stack: array<u32, MAX_TLAS_DEPTH+1>;  // local
+    var tlas_stack: array<u32, _MAX_TLAS_DEPTH+1>;  // local
     var stack_idx: u32 = 2;
     tlas_stack[0] = 0u;
     tlas_stack[1] = 0u;
@@ -176,8 +178,7 @@ fn ray_skip_alpha_stochastically(start_ray: Ray) -> HitInfo
 // Internals
 ////////////////////
 
-const MAX_TLAS_DEPTH: u32 = 20;  // This supports 2^MAX_TLAS_DEPTH objects.
-const MAX_BVH_DEPTH: u32 = 25;
+const _MAX_BVH_DEPTH: u32 = 25;
 
 struct RayMeshIntersectionResult
 {
@@ -188,7 +189,7 @@ struct RayMeshIntersectionResult
 // cur_min_hit_dst should be F32_MAX if absent.
 fn _ray_mesh_intersection(ray: Ray, cur_min_hit_dst: f32, mesh_idx: u32) -> RayMeshIntersectionResult
 {
-    var bvh_stack: array<u32, MAX_BVH_DEPTH+1>;  // local
+    var bvh_stack: array<u32, _MAX_BVH_DEPTH+1>;  // local
     var stack_idx = 2u;
     bvh_stack[0] = 0u;
     bvh_stack[1] = 0u;

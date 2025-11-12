@@ -41,18 +41,17 @@ fn main()
     }
 
     let scenes = [
-        //Scene { name: "landscape", samples: 500, max_radiance: 100.0, credits: "Scene by \"Mareck\": \\link{https://benedikt-bitterli.me/resources}" },
-        //Scene { name: "lonemonk", samples: 2000, max_radiance: 100.0, credits: "Scene by \"Mareck\": \\link{https://benedikt-bitterli.me/resources}" },
-        //Scene { name: "coffee", samples: 2000, max_radiance: 100.0, credits: "Scene by \"Mareck\": \\link{https://benedikt-bitterli.me/resources}" },
-        //Scene { name: "bathroom1", samples: 6000, max_radiance: 100.0, credits: "Scene by \"Mareck\": \\link{https://benedikt-bitterli.me/resources}" },
-        Scene { name: "bathroom1", samples: 5, max_radiance: 100.0, credits: "Scene by \"Mareck\": \\link{https://benedikt-bitterli.me/resources}" },
-        //Scene { name: "bistroexterior", samples: 1000, max_radiance: 10.0, credits: "Scene by \"Mareck\": \\link{https://benedikt-bitterli.me/resources}" },
-        //Scene { name: "bistrointerior", samples: 1000, max_radiance: 100.0, credits: "Scene by \"Mareck\": \\link{https://benedikt-bitterli.me/resources}" },
-        //Scene { name: "car2", samples: 1000, max_radiance: 100.0, credits: "Scene by \"Mareck\": \\link{https://benedikt-bitterli.me/resources}" },
-        //Scene { name: "classroom", samples: 2000, max_radiance: 100.0, credits: "Scene by \"Mareck\": \\link{https://benedikt-bitterli.me/resources}" },
-        //Scene { name: "ecosys", samples: 1000, max_radiance: 100.0, credits: "Scene by \"Mareck\": \\link{https://benedikt-bitterli.me/resources}" },
-        //Scene { name: "junkshop", samples: 2000, max_radiance: 100.0, credits: "Scene by \"Mareck\": \\link{https://benedikt-bitterli.me/resources}" },
-        //Scene { name: "sanmiguel", samples: 1000, max_radiance: 20.0, credits: "Scene by \"Mareck\": \\link{https://benedikt-bitterli.me/resources}" },
+        Scene { name: "landscape", samples: 500, max_radiance: 100.0, credits: "Scene by Jan-Walter Schliep, Burak Kahraman, Timm Dapper: \\link{pbrt.org/scenes-v3.html}" },
+        Scene { name: "lonemonk", samples: 2000, max_radiance: 100.0, credits: "Scene by Carlo Bergonzini: \\link{www.blender.org/download/demo-files/}" },
+        Scene { name: "coffee", samples: 2000, max_radiance: 100.0, credits: "Scene by \"Cekuhnen\": \\link{benedikt-bitterli.me/resources}" },
+        Scene { name: "classroom", samples: 2000, max_radiance: 100.0, credits: "Scene by Christophe Seux: \\link{www.blender.org/download/demo-files/}" },
+        Scene { name: "bistroexterior", samples: 1000, max_radiance: 10.0, credits: "Scene by Amazon Lumberyard: \\link{casual-effects.com/data}" },
+        Scene { name: "bistrointerior", samples: 1000, max_radiance: 100.0, credits: "Scene by Amazon Lumberyard: \\link{casual-effects.com/data}" },
+        Scene { name: "junkshop", samples: 2000, max_radiance: 100.0, credits: "Model by Alex Treviño, concept by Anaïs Maamar: \\link{www.blender.org/download/demo-files/}" },
+        Scene { name: "bathroom1", samples: 6000, max_radiance: 100.0, credits: "Scene by \"Mareck\": \\link{https://benedikt-bitterli.me/resources}" },
+        //Scene { name: "car2", samples: 1000, max_radiance: 100.0, credits: "Scene by \"Thecali\": \\link{https://benedikt-bitterli.me/resources}" },
+        //Scene { name: "ecosys", samples: 1000, max_radiance: 100.0, credits: "Scene by \"Deussen et al.\": \\link{pbrt.org/scenes-v3.html}" },
+        Scene { name: "sanmiguel", samples: 1000, max_radiance: 20.0, credits: "Scene by Guillermo M. Leal Llaguno: \\link{https://benedikt-bitterli.me/resources}" },
     ];
 
     let (device, queue, adapter) = lp::init_default_wgpu_context_no_window();
@@ -61,22 +60,37 @@ fn main()
     let mut render_infos = Vec::new();
     let mut sw_render_times = Vec::new();
     let mut scene_stats = Vec::new();
-    for hw_rt in [false, true]
+    for hw_rt in [true, false]
     {
         let exposure = 0.0;
 
         let max_bounces = 8;
-        let num_samples_per_pixel = 5;
+        let num_samples_per_pixel = if hw_rt { 5 } else { 1 };
         let pathtrace_resources = lp::build_pathtrace_resources(&device, &lp::BakedPathtraceParams {
             with_runtime_checks: false,
             max_bounces: 8,
-            samples_per_pixel: 5,
+            samples_per_pixel: num_samples_per_pixel,
         });
 
-        if !hw_rt { continue; } // tmp
+        if hw_rt { println!("HW RT:"); } else { println!("SW_RT:"); }
 
         for (scene_idx, scene) in scenes.iter().enumerate()
         {
+            if !hw_rt && scene.name == "sanmiguel"
+            {
+                sw_render_times.push(0.0);
+                sw_render_times.push(0.0);
+                continue;
+            }
+            if !hw_rt && scene.name == "landscape"
+            {
+                sw_render_times.push(0.0);
+                sw_render_times.push(0.0);
+                sw_render_times.push(0.0);
+                sw_render_times.push(0.0);
+                continue;
+            }
+
             let mut path_json_buf = std::path::PathBuf::new();
             path_json_buf.push(scenes_dir);
             path_json_buf.push(scene.name);
@@ -138,6 +152,9 @@ fn main()
                         camera_params: camera.params,
                         camera_transform: camera.transform,
                         force_software_bvh: !hw_rt,
+                        advanced: lp::AdvancedParams {
+                            max_radiance: scene.max_radiance,
+                        }
                     };
                     lp::pathtrace_scene(&device, &queue, &desc, Default::default(), None);
                     output_tex.flip();
@@ -150,6 +167,10 @@ fn main()
                 let elapsed_f32 = elapsed.as_millis() as f32 / 1000.0;
 
                 println!("Done. ({}s)", elapsed_f32);
+
+                if !hw_rt {
+                    sw_render_times.push(elapsed_f32);
+                }
 
                 if hw_rt
                 {
@@ -179,28 +200,21 @@ fn main()
                     use std::fmt::Write;
                     if cameras.len() > 1 { write!(output_name, "{}", i+1).unwrap(); }
 
-                    if hw_rt
-                    {
-                        render_infos.push(RenderInfo {
-                            output_file: output_name.clone(),
-                            scene_idx: scene_idx,
-                            time: elapsed_f32,
-                            res_x: width,
-                            res_y: height
-                        });
-                    }
-                    else
-                    {
-                        sw_render_times.push(elapsed_f32);
-                    }
-
                     let mut output_path_buf = std::path::PathBuf::new();
                     output_path_buf.push(output_dir_name);
-                    output_path_buf.push(output_name);
+                    output_path_buf.push(output_name.clone());
                     output_path_buf.set_extension("png");
                     let output_path = output_path_buf.as_path();
 
                     let res = lpl::save_texture(&device, &queue, output_path, &tonemapped);
+
+                    render_infos.push(RenderInfo {
+                        output_file: output_name.clone(),
+                        scene_idx: scene_idx,
+                        time: elapsed_f32,
+                        res_x: width,
+                        res_y: height
+                    });
                 }
             }
         }
@@ -225,15 +239,14 @@ fn main()
         println!("    S % materials");
         println!("    S % lights");
         println!("    S % textures");
-        println!("    S % overall VRAM size (HW BHV)");
-        println!("    S % overall VRAM size (SW BHV)");
         println!("  }}");
         println!("    \\toprule");
-        println!("    {{Scene}} & {{Triangles}} & {{Instances}} & {{Materials}} & {{Lights}} & {{Textures}} & {{VRAM (HW)}} & {{VRAM (SW)}}\\\\");
+        println!("    {{Scene}} & {{Triangles}} & {{Instances}} & {{Materials}} & {{Lights}} & {{Textures}}\\\\");
         println!("    \\midrule");
         for i in 0..scenes.len()
         {
-            println!("    {} & {} & {} & {} & {} & {} & {} & {} \\\\", scenes[i].name, 1, 2, 3, 4, 5, 6, 7);
+            let stats = &scene_stats[i];
+            println!("    {} & {} & {} & {} & {} & {} \\\\", scenes[i].name, stats.total_tri_count, stats.instances, stats.materials, stats.lights, stats.textures);
         }
         println!("    \\bottomrule");
         println!("  \\end{{tabular}}");
@@ -265,11 +278,16 @@ fn main()
         println!("    \\toprule");
         println!("    {{Render}} & {{Scene}} & {{Resolution}} & {{Samples}} & {{Time SW}} & {{Time HW}}\\\\");
         println!("    \\midrule");
-        for render_info in &render_infos
+        for (i, render_info) in render_infos.iter().enumerate()
         {
             let image_id = render_info.scene_idx + base_image_id;
             let scene = &scenes[render_info.scene_idx];
-            println!("    Image {} & {} & {}x{} & {} & {} & {} \\\\", image_id, scene.name, render_info.res_x, render_info.res_y, scene.samples, "/", render_info.time);
+            let sw_time = sw_render_times[i];
+            if sw_time == 0.0 {
+                println!("    Image {} & {} & {}x{} & {} & {}s & {}s \\\\", image_id, scene.name, render_info.res_x, render_info.res_y, scene.samples, "/", render_info.time);
+            } else {
+                println!("    Image {} & {} & {}x{} & {} & {}s & {}s \\\\", image_id, scene.name, render_info.res_x, render_info.res_y, scene.samples, sw_time, render_info.time);
+            }
         }
         println!("    \\bottomrule");
         println!("  \\end{{tabular}}");
@@ -277,7 +295,7 @@ fn main()
         println!("");
     }
 
-    // Print latex table for images themselves
+    // Print latex images
     {
         for render_info in &render_infos
         {
