@@ -265,7 +265,10 @@ pub const FLAG_DEBUG_FIRST_HIT_ONLY: u32 = 1 << 6;
 
 // Constants
 pub const MAX_PUSH_CONSTANTS_SIZE: u32 = 128;
+// NOTE: Coupled to shader.
 pub const BVH_MAX_DEPTH: i32 = 25;
+// NOTE: Coupled to shader.
+pub const TLAS_MAX_DEPTH: i32 = 50;
 pub const MAX_MESHES:    u32 = 15000;
 pub const MAX_ENVS:      u32 = 10;
 pub const MAX_TEXTURES:  u32 = 15000;

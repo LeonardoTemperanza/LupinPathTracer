@@ -2,7 +2,7 @@
 @group(3) @binding(0) var<storage, read> bvh_nodes_array: binding_array<BvhNodes>;
 @group(3) @binding(1) var<storage, read> tlas_nodes: array<TlasNode>;
 
-const _MAX_TLAS_DEPTH: u32 = 20;  // This supports 2^MAX_TLAS_DEPTH objects.
+const _MAX_TLAS_DEPTH: u32 = 50;  // This roughly supports 2^MAX_TLAS_DEPTH / 3 objects.
 
 fn ray_scene_intersection(ray: Ray)->HitInfo
 {
@@ -18,6 +18,7 @@ fn ray_scene_intersection(ray: Ray)->HitInfo
     while stack_idx > 1
     {
         stack_idx--;
+        //if stack_idx >= (_MAX_TLAS_DEPTH+1) { set_debug_output_color(vec3f(1.0f, 0.0f, 0.0f)); }
         let node = tlas_nodes[tlas_stack[stack_idx]];
 
         if node.left == 0u  // Leaf node
@@ -200,6 +201,7 @@ fn _ray_mesh_intersection(ray: Ray, cur_min_hit_dst: f32, mesh_idx: u32) -> RayM
     while stack_idx > 1
     {
         stack_idx--;
+        //if stack_idx >= (_MAX_BVH_DEPTH+1) { set_debug_output_color(vec3f(0.0f, 1.0f, 0.0f)); }
         let node = bvh_nodes_array[mesh_idx].data[bvh_stack[stack_idx]];
 
         if node.tri_count > 0u  // Leaf node

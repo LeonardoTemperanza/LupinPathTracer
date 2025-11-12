@@ -533,9 +533,13 @@ fn compute_aabb(_indices: &[u32], tri_bounds: &mut[Aabb], tri_begin: u32, tri_co
 }
 
 // The aabbs are in model space, and they're indexed using the instance mesh_idx member.
+
+
 pub fn build_tlas(instances: &[Instance], model_aabbs: &[Aabb]) -> Vec<TlasNode>
 {
     if instances.is_empty() || model_aabbs.is_empty() { return vec![]; }
+
+    assert!(instances.len() < (2 << TLAS_MAX_DEPTH));
 
     let mut node_indices = Vec::<u32>::with_capacity(instances.len());
     let mut tlas = Vec::<TlasNode>::with_capacity(instances.len() * 2 - 1);
@@ -606,7 +610,7 @@ pub fn build_tlas(instances: &[Instance], model_aabbs: &[Aabb]) -> Vec<TlasNode>
     // Reverse TLAS for better memory layout. This puts
     // the root at index 0.
     let tlas_len = tlas.len();
-    for i in 0..tlas_len / 2 + tlas_len % 2
+    for i in 0..(tlas_len / 2) + (tlas_len % 2)
     {
         let tmp = tlas[i];
         tlas[i] = tlas[tlas_len - 1 - i];
@@ -625,7 +629,23 @@ pub fn build_tlas(instances: &[Instance], model_aabbs: &[Aabb]) -> Vec<TlasNode>
         }
     }
 
+    let tlas_depth = compute_tlas_depth(tlas.as_slice(), 0);
+    assert!(tlas_depth < TLAS_MAX_DEPTH as u32);
+
     return tlas;
+}
+
+pub fn compute_tlas_depth(tlas: &[TlasNode], node: u32) -> u32
+{
+    let mut depth = 0;
+    if tlas[node as usize].left != 0 {
+        depth = depth.max(compute_tlas_depth(tlas, tlas[node as usize].left));
+    }
+    if tlas[node as usize].right != 0 {
+        depth = depth.max(compute_tlas_depth(tlas, tlas[node as usize].right));
+    }
+
+    return depth + 1;
 }
 
 pub fn tlas_find_best_match(tlas: &[TlasNode], idx_array: &[u32], node_a: u32) -> u32
