@@ -1015,9 +1015,16 @@ impl<'a> AppState<'a>
                             .add_filter("HDR Image", &["hdr", "exr"])
                             .save_file()
                         {
-                            let res = lpl::save_texture(self.device, self.queue,
-                                                        &path,
-                                                        self.output.front());
+                            let res = if self.denoising {
+                                lpl::save_texture(self.device, self.queue,
+                                                  &path,
+                                                  &self.denoised)
+                            } else {
+                                lpl::save_texture(self.device, self.queue,
+                                                  &path,
+                                                  self.output.front())
+                            };
+
                             if let Err(err) = res {
                                 println!("Failed to save texture: {}", err);
                             }
@@ -1051,7 +1058,7 @@ impl<'a> AppState<'a>
 
                             lp::tonemap_and_fit_aspect(&self.device, &self.queue, &lp::TonemapDesc {
                                 resources: &self.tonemap_resources,
-                                hdr_texture: self.output.front(),
+                                hdr_texture: if self.denoising { &self.denoised } else { self.output.front() },
                                 render_target: &tmp_tex,
                                 viewport: None,
                             }, self.exposure, self.filmic, self.srgb);
