@@ -60,7 +60,7 @@ fn main()
     let mut render_infos = Vec::new();
     let mut sw_render_times = Vec::new();
     let mut scene_stats = Vec::new();
-    for hw_rt in [false, true]
+    for hw_rt in [true, false]
     {
         let exposure = 0.0;
 
@@ -107,7 +107,9 @@ fn main()
             }
 
             let (lp_scene, cameras) = lpl::load_scene_yoctogl_v24(path_json, &device, &queue, !hw_rt).unwrap();
-            scene_stats.push(lp::get_scene_stats(&lp_scene));
+            if hw_rt {
+                scene_stats.push(lp::get_scene_stats(&lp_scene));
+            }
 
             if cameras.len() <= 0 {
                 eprintln!("There are no cameras in scene \"{}\".", scene.name);
