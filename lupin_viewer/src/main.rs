@@ -7,7 +7,7 @@
 // Don't spawn a terminal window on windows
 //#![windows_subsystem = "windows"]
 
-const FORCE_SW_RT: bool = true;
+const FORCE_SW_RT: bool = false;
 
 use std::time::Instant;
 
