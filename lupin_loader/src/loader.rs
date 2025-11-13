@@ -84,10 +84,10 @@ pub fn build_scene_cornell_box(device: &wgpu::Device, queue: &wgpu::Queue, build
     {
         let backwall_mesh = push_asset(&mut scene.mesh_infos, lp::MeshInfo::default());
         scene.verts_pos_array.push(vec![
-            lp::Vec4::new(-1.0, 0.0, -1.0, 0.0), lp::Vec4::new( 1.0, 0.0, -1.0, 0.0),
-            lp::Vec4::new( 1.0, 2.0, -1.0, 0.0), lp::Vec4::new(-1.0, 2.0, -1.0, 0.0),
+            lp::Vec4::new(-1.0, 0.0, 1.0, 0.0), lp::Vec4::new( 1.0, 0.0, 1.0, 0.0),
+            lp::Vec4::new( 1.0, 2.0, 1.0, 0.0), lp::Vec4::new(-1.0, 2.0, 1.0, 0.0),
         ]);
-        scene.indices_array.push(vec![0, 1, 2, 2, 3, 0]);
+        scene.indices_array.push(vec![0, 2, 1, 2, 0, 3]);
         scene.mesh_aabbs.push(lp::compute_mesh_aabb(&scene.verts_pos_array[backwall_mesh as usize]));
         if build_sw_bvh {
             scene.bvh_nodes_array.push(lp::build_bvh(&scene.verts_pos_array[backwall_mesh as usize], &mut scene.indices_array[backwall_mesh as usize]));
@@ -147,18 +147,18 @@ pub fn build_scene_cornell_box(device: &wgpu::Device, queue: &wgpu::Queue, build
     {
         let shortbox_mesh = push_asset(&mut scene.mesh_infos, lp::MeshInfo::default());
         scene.verts_pos_array.push(vec![
-            lp::Vec4::new(0.53, 0.6, 0.75, 0.0), lp::Vec4::new(0.7, 0.6, 0.17, 0.0), lp::Vec4::new(0.13, 0.6, 0.0, 0.0),
-            lp::Vec4::new(-0.05, 0.6, 0.57, 0.0), lp::Vec4::new(-0.05, 0.0, 0.57, 0.0), lp::Vec4::new(-0.05, 0.6, 0.57, 0.0),
-            lp::Vec4::new(0.13, 0.6, 0.0, 0.0), lp::Vec4::new(0.13, 0.0, 0.0, 0.0), lp::Vec4::new(0.53, 0.0, 0.75, 0.0),
-            lp::Vec4::new(0.53, 0.6, 0.75, 0.0), lp::Vec4::new(-0.05, 0.6, 0.57, 0.0), lp::Vec4::new(-0.05, 0.0, 0.57, 0.0),
-            lp::Vec4::new(0.7, 0.0, 0.17, 0.0), lp::Vec4::new(0.7, 0.6, 0.17, 0.0), lp::Vec4::new(0.53, 0.6, 0.75, 0.0),
-            lp::Vec4::new(0.53, 0.0, 0.75, 0.0), lp::Vec4::new(0.13, 0.0, 0.0, 0.0), lp::Vec4::new(0.13, 0.6, 0.0, 0.0),
-            lp::Vec4::new(0.7, 0.6, 0.17, 0.0), lp::Vec4::new(0.7, 0.0, 0.17, 0.0), lp::Vec4::new(0.53, 0.0, 0.75, 0.0),
-            lp::Vec4::new(0.7, 0.0, 0.17, 0.0), lp::Vec4::new(0.13, 0.0, 0.0, 0.0), lp::Vec4::new(-0.05, 0.0, 0.57, 0.0),
+            lp::Vec4::new(0.53, 0.6, -0.75, 0.0), lp::Vec4::new(0.7, 0.6, -0.17, 0.0), lp::Vec4::new(0.13, 0.6, -0.0, 0.0),
+            lp::Vec4::new(-0.05, 0.6, -0.57, 0.0), lp::Vec4::new(-0.05, 0.0, -0.57, 0.0), lp::Vec4::new(-0.05, 0.6, -0.57, 0.0),
+            lp::Vec4::new(0.13, 0.6, -0.0, 0.0), lp::Vec4::new(0.13, 0.0, -0.0, 0.0), lp::Vec4::new(0.53, 0.0, -0.75, 0.0),
+            lp::Vec4::new(0.53, 0.6, -0.75, 0.0), lp::Vec4::new(-0.05, 0.6, -0.57, 0.0), lp::Vec4::new(-0.05, 0.0, -0.57, 0.0),
+            lp::Vec4::new(0.7, 0.0, -0.17, 0.0), lp::Vec4::new(0.7, 0.6, -0.17, 0.0), lp::Vec4::new(0.53, 0.6, -0.75, 0.0),
+            lp::Vec4::new(0.53, 0.0, -0.75, 0.0), lp::Vec4::new(0.13, 0.0, -0.0, 0.0), lp::Vec4::new(0.13, 0.6, -0.0, 0.0),
+            lp::Vec4::new(0.7, 0.6, -0.17, 0.0), lp::Vec4::new(0.7, 0.0, -0.17, 0.0), lp::Vec4::new(0.53, 0.0, -0.75, 0.0),
+            lp::Vec4::new(0.7, 0.0, -0.17, 0.0), lp::Vec4::new(0.13, 0.0, -0.0, 0.0), lp::Vec4::new(-0.05, 0.0, -0.57, 0.0),
         ]);
-        scene.indices_array.push(vec![0, 1, 2, 2, 3, 0, 4, 5, 6, 6, 7, 4,
-                                      8, 9, 10, 10, 11, 8, 12, 13, 14, 14, 15, 12,
-                                      16, 17, 18, 18, 19, 16, 20, 21, 22, 22, 23, 20]);
+        scene.indices_array.push(vec![0, 2, 1, 2, 0, 3, 4, 6, 5, 6, 4, 7,
+                                      8, 10, 9, 10, 8, 11, 12, 14, 13, 14, 12, 15,
+                                      16, 18, 17, 18, 16, 19, 20, 22, 21, 22, 20, 23]);
         scene.mesh_aabbs.push(lp::compute_mesh_aabb(&scene.verts_pos_array[shortbox_mesh as usize]));
         if build_sw_bvh {
             scene.bvh_nodes_array.push(lp::build_bvh(&scene.verts_pos_array[shortbox_mesh as usize], &mut scene.indices_array[shortbox_mesh as usize]));
@@ -176,18 +176,18 @@ pub fn build_scene_cornell_box(device: &wgpu::Device, queue: &wgpu::Queue, build
     {
         let tallbox_mesh = push_asset(&mut scene.mesh_infos, lp::MeshInfo::default());
         scene.verts_pos_array.push(vec![
-            lp::Vec4::new(-0.53, 1.2, 0.09, 0.0), lp::Vec4::new(0.04, 1.2, -0.09, 0.0), lp::Vec4::new(-0.14, 1.2, -0.67, 0.0),
-            lp::Vec4::new(-0.71, 1.2, -0.49, 0.0), lp::Vec4::new(-0.53, 0.0, 0.09, 0.0), lp::Vec4::new(-0.53, 1.2, 0.09, 0.0),
-            lp::Vec4::new(-0.71, 1.2, -0.49, 0.0), lp::Vec4::new(-0.71, 0.0, -0.49, 0.0), lp::Vec4::new(-0.71, 0.0, -0.49, 0.0),
-            lp::Vec4::new(-0.71, 1.2, -0.49, 0.0), lp::Vec4::new(-0.14, 1.2, -0.67, 0.0), lp::Vec4::new(-0.14, 0.0, -0.67, 0.0),
-            lp::Vec4::new(-0.14, 0.0, -0.67, 0.0), lp::Vec4::new(-0.14, 1.2, -0.67, 0.0), lp::Vec4::new(0.04, 1.2, -0.09, 0.0),
-            lp::Vec4::new(0.04, 0.0, -0.09, 0.0), lp::Vec4::new(0.04, 0.0, -0.09, 0.0), lp::Vec4::new(0.04, 1.2, -0.09, 0.0),
-            lp::Vec4::new(-0.53, 1.2, 0.09, 0.0), lp::Vec4::new(-0.53, 0.0, 0.09, 0.0), lp::Vec4::new(-0.53, 0.0, 0.09, 0.0),
-            lp::Vec4::new(0.04, 0.0, -0.09, 0.0), lp::Vec4::new(-0.14, 0.0, -0.67, 0.0), lp::Vec4::new(-0.71, 0.0, -0.49, 0.0),
+            lp::Vec4::new(-0.53, 1.2, -0.09, 0.0), lp::Vec4::new(0.04, 1.2, 0.09, 0.0), lp::Vec4::new(-0.14, 1.2, 0.67, 0.0),
+            lp::Vec4::new(-0.71, 1.2, 0.49, 0.0), lp::Vec4::new(-0.53, 0.0, -0.09, 0.0), lp::Vec4::new(-0.53, 1.2, -0.09, 0.0),
+            lp::Vec4::new(-0.71, 1.2, 0.49, 0.0), lp::Vec4::new(-0.71, 0.0, 0.49, 0.0), lp::Vec4::new(-0.71, 0.0, 0.49, 0.0),
+            lp::Vec4::new(-0.71, 1.2, 0.49, 0.0), lp::Vec4::new(-0.14, 1.2, 0.67, 0.0), lp::Vec4::new(-0.14, 0.0, 0.67, 0.0),
+            lp::Vec4::new(-0.14, 0.0, 0.67, 0.0), lp::Vec4::new(-0.14, 1.2, 0.67, 0.0), lp::Vec4::new(0.04, 1.2, 0.09, 0.0),
+            lp::Vec4::new(0.04, 0.0, 0.09, 0.0), lp::Vec4::new(0.04, 0.0, 0.09, 0.0), lp::Vec4::new(0.04, 1.2, 0.09, 0.0),
+            lp::Vec4::new(-0.53, 1.2, -0.09, 0.0), lp::Vec4::new(-0.53, 0.0, -0.09, 0.0), lp::Vec4::new(-0.53, 0.0, -0.09, 0.0),
+            lp::Vec4::new(0.04, 0.0, 0.09, 0.0), lp::Vec4::new(-0.14, 0.0, 0.67, 0.0), lp::Vec4::new(-0.71, 0.0, 0.49, 0.0),
         ]);
-        scene.indices_array.push(vec![0, 1, 2, 2, 3, 0, 4, 5, 6, 6, 7, 4,
-                                      8, 9, 10, 10, 11, 8, 12, 13, 14, 14, 15, 12,
-                                      16, 17, 18, 18, 19, 16, 20, 21, 22, 22, 23, 20]);
+        scene.indices_array.push(vec![0, 2, 1, 2, 0, 3, 4, 6, 5, 6, 4, 7,
+                                      8, 10, 9, 10, 8, 11, 12, 14, 13, 14, 12, 15,
+                                      16, 18, 17, 18, 16, 19, 20, 22, 21, 22, 20, 23]);
         scene.mesh_aabbs.push(lp::compute_mesh_aabb(&scene.verts_pos_array[tallbox_mesh as usize]));
         scene.bvh_nodes_array.push(lp::build_bvh(&scene.verts_pos_array[tallbox_mesh as usize], &mut scene.indices_array[tallbox_mesh as usize]));
 
@@ -203,10 +203,10 @@ pub fn build_scene_cornell_box(device: &wgpu::Device, queue: &wgpu::Queue, build
     {
         let light_mesh = push_asset(&mut scene.mesh_infos, lp::MeshInfo::default());
         scene.verts_pos_array.push(vec![
-            lp::Vec4::new(-0.25, 1.99, 0.25,  0.0), lp::Vec4::new(-0.25, 1.99, -0.25, 0.0),
-            lp::Vec4::new(0.25,  1.99, -0.25, 0.0), lp::Vec4::new(0.25,  1.99, 0.25,  0.0),
+            lp::Vec4::new(-0.25, 1.99, -0.25,  0.0), lp::Vec4::new(-0.25, 1.99, 0.25, 0.0),
+            lp::Vec4::new(0.25,  1.99, 0.25, 0.0), lp::Vec4::new(0.25,  1.99, -0.25,  0.0),
         ]);
-        scene.indices_array.push(vec![0, 1, 2, 2, 3, 0]);
+        scene.indices_array.push(vec![0, 2, 1, 2, 0, 3]);
         scene.mesh_aabbs.push(lp::compute_mesh_aabb(&scene.verts_pos_array[light_mesh as usize]));
         scene.bvh_nodes_array.push(lp::build_bvh(&scene.verts_pos_array[light_mesh as usize], &mut scene.indices_array[light_mesh as usize]));
 
@@ -226,7 +226,7 @@ pub fn build_scene_cornell_box(device: &wgpu::Device, queue: &wgpu::Queue, build
     lp::validate_scene(&scene, 0, 0);
 
     let cameras = vec![SceneCamera {
-        transform: lp::Mat3x4 { m: [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, -1.0], [0.0, 1.0, 3.9]] },
+        transform: lp::Mat3x4 { m: [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0], [0.0, 1.0, -3.9]] },
         params: lp::CameraParams {
             is_orthographic: false,
             lens: 0.035,

@@ -168,6 +168,8 @@ pub struct AppState<'a>
     // Camera
     pub cam_pos: lp::Vec3,
     pub cam_rot: lp::Quat,
+    pub cam_angles: lp::Vec2,
+    pub cam_vel: lp::Vec3,
     pub cam_transform: lp::Mat3x4,
 
     // Lupin resources
@@ -299,6 +301,8 @@ impl<'a> AppState<'a>
             // Camera
             cam_pos: Default::default(),
             cam_rot: Default::default(),
+            cam_angles: Default::default(),
+            cam_vel: Default::default(),
             cam_transform: Default::default(),
 
             // Lupin resources
@@ -580,6 +584,11 @@ impl<'a> AppState<'a>
                     first_hit_only: !self.debug_viz.multibounce,
                 };
 
+                let mut desc = desc;
+                if !self.tiled_rendering {
+                    desc.tile_params = None;
+                }
+
                 lp::pathtrace_scene_debug(&self.device, &self.queue, &desc, &debug_desc, Some(&mut self.tile_idx));
                 lp::tonemap_and_fit_aspect(&self.device, &self.queue, &tonemap_desc, 0.0, false, false);
             }
@@ -655,7 +664,6 @@ impl<'a> AppState<'a>
         }
 
         let mouse_sensitivity = deg_to_rad(0.2);
-        static mut ANGLE: lp::Vec2 = lp::Vec2 { x: 0.0, y: 0.0 };
         let mut mouse = lp::Vec2::default();
         if input.rmouse.pressing
         {
@@ -663,21 +671,17 @@ impl<'a> AppState<'a>
             mouse.y = input.mouse_dy * mouse_sensitivity;
         }
 
-        unsafe
-        {
-            ANGLE += mouse;
-            // Wrap ANGLE.x
-            while ANGLE.x < 0.0                        { ANGLE.x += 2.0 * std::f32::consts::PI; }
-            while ANGLE.x > 2.0 * std::f32::consts::PI { ANGLE.x -= 2.0 * std::f32::consts::PI; }
+        self.cam_angles += mouse;
+        // Wrap self.cam_angles.x
+        while self.cam_angles.x < 0.0                        { self.cam_angles.x += 2.0 * std::f32::consts::PI; }
+        while self.cam_angles.x > 2.0 * std::f32::consts::PI { self.cam_angles.x -= 2.0 * std::f32::consts::PI; }
 
-            ANGLE.y = ANGLE.y.clamp(deg_to_rad(-90.0), deg_to_rad(90.0));
-            let y_rot = lp::angle_axis(lp::Vec3 { x: -1.0, y: 0.0, z: 0.0 }, ANGLE.y);
-            let x_rot = lp::angle_axis(lp::Vec3 { x:  0.0, y: 1.0, z: 0.0 }, ANGLE.x);
-            self.cam_rot = x_rot * y_rot;
-        }
+        self.cam_angles.y = self.cam_angles.y.clamp(deg_to_rad(-90.0), deg_to_rad(90.0));
+        let y_rot = lp::angle_axis(lp::Vec3 { x: -1.0, y: 0.0, z: 0.0 }, self.cam_angles.y);
+        let x_rot = lp::angle_axis(lp::Vec3 { x:  0.0, y: 1.0, z: 0.0 }, self.cam_angles.x);
+        self.cam_rot = x_rot * y_rot;
 
         // Movement
-        static mut CUR_VEL: lp::Vec3 = lp::Vec3 { x: 0.0, y: 0.0, z: 0.0 };
         let move_speed: f32 = 6.0;
         let move_speed_fast: f32 = 15.0;
         let move_speed_slow: f32 = 0.5;
@@ -714,10 +718,8 @@ impl<'a> AppState<'a>
         target_vel = lp::vec3_quat_mul(self.cam_rot, target_vel);
         target_vel.y += keyboard_dir_y * cur_move_speed;
 
-        unsafe {
-            CUR_VEL = approach_linear(CUR_VEL, target_vel, move_accel * delta_time);
-            self.cam_pos += CUR_VEL * self.cam_speed_multiplier * delta_time;
-        }
+        self.cam_vel = approach_linear(self.cam_vel, target_vel, move_accel * delta_time);
+        self.cam_pos += self.cam_vel * self.cam_speed_multiplier * delta_time;
 
         fn approach_linear(cur: lp::Vec3, target: lp::Vec3, delta: f32) -> lp::Vec3
         {
@@ -941,13 +943,12 @@ impl<'a> AppState<'a>
                     for i in 0..self.scene_cameras.len()
                     {
                         let selected = self.selected_cam == i as i32;
-                        if ui.add(egui::RadioButton::new(selected, format!("Camera {}", i+1))).clicked()
-                        {
+                        if ui.add(egui::RadioButton::new(selected, format!("Camera {}", i+1))).clicked() {
                             self.switch_to_cam(i as i32);
                         }
                     }
 
-                    ui.add(egui::RadioButton::new(self.selected_cam == -1, "Free-roam"));
+                    ui.label("Right-click to enter free-roam mode. (First-person camera controls)");
 
                     egui::CollapsingHeader::new("Stats").id_salt("stats_scene").show(ui, |ui| {
                         ui.label(format!("Num instances: {:?}", self.scene.instances.size() as usize / std::mem::size_of::<lp::Instance>()));
@@ -1133,9 +1134,15 @@ impl<'a> AppState<'a>
     {
         if self.selected_cam == -1 { return; }
         self.selected_cam = -1;
-        let old = self.cam_rot;
-        //(self.cam_pos, self.cam_rot, _) = lp::matrix_to_xform(self.cam_transform);
-        self.cam_transform = Default::default();
+
+        if is_transform_flipped(self.cam_transform.to_mat4()) {
+            println!("flipped");
+        }
+
+        (self.cam_pos, self.cam_rot, _) = lp::matrix_to_xform(self.cam_transform.to_mat4());
+        self.cam_angles = get_euler_angles(self.cam_rot);
+        //self.cam_angles.x += std::f32::consts::PI;
+        self.cam_angles.y *= -1.0;
     }
 
     fn switch_to_cam(&mut self, cam_idx: i32)
@@ -1145,6 +1152,37 @@ impl<'a> AppState<'a>
         self.cam_transform = self.scene_cameras[cam_idx as usize].transform;
         self.camera_params = self.scene_cameras[cam_idx as usize].params;
     }
+}
+
+pub fn is_transform_flipped(mat: lp::Mat4) -> bool
+{
+    let x_axis = lp::Vec3 { x: mat.m[0][0], y: mat.m[0][1], z: mat.m[0][2] };
+    let y_axis = lp::Vec3 { x: mat.m[1][0], y: mat.m[1][1], z: mat.m[1][2] };
+    let z_axis = lp::Vec3 { x: mat.m[2][0], y: mat.m[2][1], z: mat.m[2][2] };
+
+    // Determinant of the 3x3 matrix
+    let det = lp::dot_vec3(x_axis, lp::cross_vec3(y_axis, z_axis));
+    return det < 0.0;
+}
+
+fn get_euler_angles(quat: lp::Quat) -> lp::Vec2
+{
+    use std::f32::consts::FRAC_PI_2;
+
+    // Yaw (rotation around Y axis)
+    let siny_cosp = 2.0 * (quat.w * quat.y + quat.x * quat.z);
+    let cosy_cosp = 1.0 - 2.0 * (quat.y * quat.y + quat.x * quat.x);
+    let yaw = siny_cosp.atan2(cosy_cosp);
+
+    // Pitch (rotation around X axis)
+    let sinp = 2.0 * (quat.w * quat.x - quat.z * quat.y);
+    let pitch = if sinp.abs() >= 1.0 {
+        sinp.signum() * FRAC_PI_2 // clamp to ±90 degrees
+    } else {
+        sinp.asin()
+    };
+
+    return lp::Vec2 { x: yaw, y: pitch }
 }
 
 fn resize_texture(device: &wgpu::Device, texture: &mut wgpu::Texture, new_width: u32, new_height: u32)
