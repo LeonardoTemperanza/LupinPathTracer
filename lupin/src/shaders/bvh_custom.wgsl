@@ -2,7 +2,7 @@
 @group(3) @binding(0) var<storage, read> bvh_nodes_array: binding_array<BvhNodes>;
 @group(3) @binding(1) var<storage, read> tlas_nodes: array<TlasNode>;
 
-const _MAX_TLAS_DEPTH: u32 = 50;  // This roughly supports 2^MAX_TLAS_DEPTH / 3 objects.
+const _MAX_TLAS_DEPTH: u32 = 50;  // This roughly supports 2^(_MAX_TLAS_DEPTH / 3) objects.
 
 fn ray_scene_intersection(ray: Ray)->HitInfo
 {
