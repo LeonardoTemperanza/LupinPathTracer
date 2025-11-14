@@ -63,6 +63,8 @@ fn main()
     for hw_rt in [true, false]
     {
         let exposure = 0.0;
+        let filmic = false;
+        let srgb = true;
 
         let max_bounces = 8;
         let num_samples_per_pixel = if hw_rt { 5 } else { 1 };
@@ -201,7 +203,7 @@ fn main()
                         hdr_texture: output_tex.front(),
                         render_target: &tonemapped,
                         viewport: None,
-                    }, exposure, true, true);
+                    }, exposure, filmic, srgb);
 
                     let mut output_name = String::from(scene.name);
                     use std::fmt::Write;
