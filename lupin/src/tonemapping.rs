@@ -109,12 +109,29 @@ pub fn build_tonemap_resources(device: &wgpu::Device) -> TonemapResources
     };
 }
 
-pub struct TonemapDesc<'a>
+pub struct TonemapDesc
 {
-    pub resources: &'a TonemapResources,
-    pub hdr_texture: &'a wgpu::Texture,
-    pub render_target: &'a wgpu::Texture,
-    pub viewport: Option<Viewport>
+    /// If None, the whole image is tonemapped.
+    pub viewport: Option<Viewport>,
+    /// Applied as: color = color * 2^exposure
+    pub exposure: f32,
+    /// Whether or not to perform filmic tonemapping.
+    pub filmic: bool,
+    /// Whether or not to perform Linear -> SRGB conversion.
+    pub srgb: bool,
+}
+
+impl Default for TonemapDesc
+{
+    fn default() -> Self
+    {
+        return Self {
+            viewport: None,
+            exposure: 0.0,
+            filmic: false,
+            srgb: true,
+        };
+    }
 }
 
 // NOTE: Coupled to the tonemapping shader
@@ -137,23 +154,21 @@ pub struct Viewport
     pub h: f32
 }
 
-pub fn tonemap_and_fit_aspect(device: &wgpu::Device, queue: &wgpu::Queue, desc: &TonemapDesc, exposure: f32, filmic: bool, srgb: bool)
+/// src and dst are required to be different textures, because of underlying limitations of graphics APIs.
+pub fn tonemap_and_fit_aspect(device: &wgpu::Device, queue: &wgpu::Queue, resources: &TonemapResources,
+                              src: &wgpu::Texture, dst: &wgpu::Texture, desc: &TonemapDesc)
 {
-    let resources = desc.resources;
-    let hdr_texture = desc.hdr_texture;
-    let render_target = desc.render_target;
-
-    let render_target_view = render_target.create_view(&Default::default());
-    let hdr_texture_view = hdr_texture.create_view(&Default::default());
+    let render_target_view = dst.create_view(&Default::default());
+    let hdr_texture_view = src.create_view(&Default::default());
 
     let viewport = desc.viewport.unwrap_or(Viewport {
         x: 0.0,
         y: 0.0,
-        w: desc.render_target.size().width as f32,
-        h: desc.render_target.size().height as f32
+        w: dst.width() as f32,
+        h: dst.height() as f32
     });
 
-    let src_aspect = desc.hdr_texture.size().width as f32 / desc.hdr_texture.size().height as f32;
+    let src_aspect = src.width() as f32 / src.height() as f32;
     let dst_aspect = viewport.w / viewport.h;
     let scale = if src_aspect > dst_aspect {
         Vec2 { x: 1.0, y: dst_aspect / src_aspect }
@@ -163,9 +178,9 @@ pub fn tonemap_and_fit_aspect(device: &wgpu::Device, queue: &wgpu::Queue, desc: 
 
     let params = TonemapUniforms {
         scale: scale,
-        exposure: exposure,
-        filmic: if filmic { 1 } else { 0 },
-        srgb: if srgb { 1 } else { 0 },
+        exposure: desc.exposure,
+        filmic: if desc.filmic { 1 } else { 0 },
+        srgb: if desc.srgb { 1 } else { 0 },
     };
 
     let pipeline = &resources.pipeline;

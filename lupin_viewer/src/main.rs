@@ -493,14 +493,12 @@ impl<'a> AppState<'a>
         let mut desc_normals_no_tiles = desc_normals;
         desc_normals_no_tiles.tile_params = None;
 
-        let tonemap_desc = lp::TonemapDesc {
-            resources: &self.tonemap_resources,
-            hdr_texture: self.output.front(),
-            render_target: &swapchain,
-            viewport: Some(viewport)
+        let mut tonemap_desc = lp::TonemapDesc {
+            viewport: Some(viewport),
+            exposure: self.exposure,
+            filmic: self.filmic,
+            srgb: self.srgb
         };
-
-        let mut should_tonemap = false;
 
         match self.render_type
         {
@@ -513,6 +511,8 @@ impl<'a> AppState<'a>
 
                 lp::pathtrace_scene_falsecolor(self.device, self.queue, &self.pathtrace_resources, &self.scene, self.output.front(),
                                                falsecolor_type, &desc);
+                tonemap_desc.filmic = false;
+                tonemap_desc.srgb = false;
             }
             RenderType::Pathtrace =>
             {
@@ -524,6 +524,8 @@ impl<'a> AppState<'a>
                     }
                     lp::pathtrace_scene_falsecolor(self.device, self.queue, &self.pathtrace_resources, &self.scene, self.output.front(),
                                                    lp::FalsecolorType::Normals, &desc);
+                    tonemap_desc.filmic = false;
+                    tonemap_desc.srgb = false;
                 }
                 else
                 {
@@ -544,8 +546,6 @@ impl<'a> AppState<'a>
                                                            lp::FalsecolorType::Normals, &desc_albedo_no_tiles);
                         }
                     }
-
-                    should_tonemap = true;
                 }
             }
             RenderType::Debug(debug_viz_type) =>
@@ -568,20 +568,7 @@ impl<'a> AppState<'a>
         }
 
         // Tonemap
-        {
-            let tonemap_desc = lp::TonemapDesc {
-                resources: &self.tonemap_resources,
-                hdr_texture: self.output.front(),
-                render_target: &swapchain,
-                viewport: Some(viewport)
-            };
-
-            if should_tonemap {
-                lp::tonemap_and_fit_aspect(&self.device, &self.queue, &tonemap_desc, self.exposure, self.filmic, self.srgb);
-            } else {
-                lp::tonemap_and_fit_aspect(&self.device, &self.queue, &tonemap_desc, 0.0, false, false);
-            }
-        }
+        lp::tonemap_and_fit_aspect(&self.device, &self.queue, &self.tonemap_resources, self.output.front(), &swapchain, &tonemap_desc);
 
         // Denoise
         if self.denoising && self.tile_idx == 0 && self.accum_counter > 30
@@ -607,13 +594,7 @@ impl<'a> AppState<'a>
                 });
             }
 
-            let tonemap_desc = lp::TonemapDesc {
-                resources: &self.tonemap_resources,
-                hdr_texture: &self.denoised,
-                render_target: &swapchain,
-                viewport: Some(viewport)
-            };
-            lp::tonemap_and_fit_aspect(&self.device, &self.queue, &tonemap_desc, self.exposure, self.filmic, self.srgb);
+            lp::tonemap_and_fit_aspect(&self.device, &self.queue, &self.tonemap_resources, self.output.front(), &swapchain, &tonemap_desc);
         }
 
         // Increment tile_idx
@@ -1050,12 +1031,13 @@ impl<'a> AppState<'a>
                                 view_formats: &[]
                             });
 
-                            lp::tonemap_and_fit_aspect(&self.device, &self.queue, &lp::TonemapDesc {
-                                resources: &self.tonemap_resources,
-                                hdr_texture: if self.denoising { &self.denoised } else { self.output.front() },
-                                render_target: &tmp_tex,
+                            let src = if self.denoising { &self.denoised } else { self.output.front() };
+                            lp::tonemap_and_fit_aspect(&self.device, &self.queue, &self.tonemap_resources, src, &tmp_tex, &lp::TonemapDesc {
                                 viewport: None,
-                            }, self.exposure, self.filmic, self.srgb);
+                                exposure: self.exposure,
+                                filmic: self.filmic,
+                                srgb: self.srgb,
+                            });
 
                             let res = lpl::save_texture(&self.device, &self.queue,
                                                         &path,

@@ -160,7 +160,7 @@ fn main()
                             max_radiance: scene.max_radiance,
                         }
                     };
-                    lp::pathtrace_scene(&device, &queue, &desc, Default::default(), None);
+                    lp::pathtrace_scene(&device, &queue, &scene, &render_target, &desc);
                     output_tex.flip();
 
                     // Avoid overloading the command buffer.
