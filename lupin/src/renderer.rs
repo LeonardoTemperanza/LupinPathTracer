@@ -687,9 +687,10 @@ pub fn build_pathtrace_resources(device: &wgpu::Device, baked_pathtrace_params: 
     };
 }
 
+#[derive(Copy, Clone, Debug)]
 pub struct AccumulationParams<'a>
 {
-    pub prev_frame: Option<&'a wgpu::Texture>,
+    pub prev_frame: &'a wgpu::Texture,
     pub accum_counter: u32,
 }
 
@@ -698,6 +699,9 @@ pub struct TileParams
 {
     /// In number of GPU workgroups.
     pub tile_size: u32,
+    /// Current tile index. Must be
+    /// explicitly incremented by the user.
+    pub tile_idx: u32,
 }
 
 impl Default for TileParams
@@ -706,8 +710,20 @@ impl Default for TileParams
     {
         return Self {
             tile_size: 100,
+            tile_idx: 0,
         };
     }
+}
+
+/// Computes the total number of tiles that will be required
+/// to complete a single accumulation frame for a given texture size.
+/// * `tile_size` - In GPU workgroups, just like in TileParams.
+pub fn get_num_tiles(tile_size: u32, width: u32, height: u32) -> u32
+{
+    let num_tiles_x = (u32::max(1, width) - 1)  / (tile_size * WORKGROUP_SIZE) + 1;
+    let num_tiles_y = (u32::max(1, height) - 1) / (tile_size * WORKGROUP_SIZE) + 1;
+    let total_tiles = num_tiles_x * num_tiles_y;
+    return total_tiles;
 }
 
 #[derive(Copy, Clone, Debug, PartialEq)]
@@ -774,15 +790,12 @@ impl Default for AdvancedParams
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Default, Clone, Copy)]
 pub struct PathtraceDesc<'a>
 {
-    pub scene: &'a Scene,
     /// Output texture to store the result. This must be different from
     /// accum_params.prev_frame, due to underlying graphics API limitations.
-    pub render_target: &'a wgpu::Texture,
-    pub resources: &'a PathtraceResources,
-    pub accum_params: &'a AccumulationParams<'a>,
+    pub accum_params: Option<AccumulationParams<'a>>,
     /// For tiled rendering. This makes it possible to break up a single pathtrace
     /// call. Useful when your scene is particularly big and you have real-time things
     /// running in your application (e.g. a GUI). For big scenes this is recommended,
@@ -794,22 +807,17 @@ pub struct PathtraceDesc<'a>
     pub advanced: AdvancedParams,
 }
 
-// TODO: Just make the user modify the tile_idx. This is bad.
-/// * `tile_idx` - Current tile. Will be incremented by the function and set to 0 once all tiles are finished. If absent, 0 will be used instead.
-pub fn pathtrace_scene(device: &wgpu::Device, queue: &wgpu::Queue, desc: &PathtraceDesc, pathtrace_type: PathtraceType, tile_idx: Option<&mut u32>)
+pub fn pathtrace_scene(device: &wgpu::Device, queue: &wgpu::Queue, resources: &PathtraceResources, scene: &Scene, render_target: &wgpu::Texture, pathtrace_type: PathtraceType, desc: &PathtraceDesc)
 {
-    assert!(desc.render_target.format() == wgpu::TextureFormat::Rgba16Float);
+    assert!(render_target.format() == wgpu::TextureFormat::Rgba16Float);
 
-    let sw_bvh_absent = desc.scene.tlas_nodes.size() <= 0 || desc.scene.bvh_nodes_array.len() <= 0;
+    let sw_bvh_absent = scene.tlas_nodes.size() <= 0 || scene.bvh_nodes_array.len() <= 0;
     if desc.force_software_bvh && sw_bvh_absent {
         panic!("force_software_bvh is set, but no software BVH was built for this scene.");
     }
 
-    let scene = desc.scene;
-    let render_target = desc.render_target;
-    let target_width = desc.render_target.width();
-    let target_height = desc.render_target.height();
-    let resources = desc.resources;
+    let target_width = render_target.width();
+    let target_height = render_target.height();
     let accum_params = desc.accum_params;
     let camera_params = desc.camera_params;
     let camera_transform = desc.camera_transform;
@@ -821,7 +829,7 @@ pub fn pathtrace_scene(device: &wgpu::Device, queue: &wgpu::Queue, desc: &Pathtr
     };
 
     let scene_bindgroup = create_pathtracer_scene_bindgroup(device, queue, resources, scene);
-    let settings_bindgroup = create_pathtracer_settings_bindgroup(device, queue, resources, accum_params.prev_frame);
+    let settings_bindgroup = create_pathtracer_settings_bindgroup(device, queue, resources, accum_params.map(|params| params.prev_frame));
     let output_bindgroup = create_pathtracer_output_bindgroup(device, queue, resources, render_target);
     let bvh_bindgroup = create_pathtracer_bvh_bindgroup(device, scene, resources, use_software_bvh);
 
@@ -840,35 +848,30 @@ pub fn pathtrace_scene(device: &wgpu::Device, queue: &wgpu::Queue, desc: &Pathtr
 
         if let Some(tile_params) = desc.tile_params  // Tiled rendering.
         {
-            let tile_counter = tile_idx.as_ref().map_or(0, |v| **v);
-            let tiles_to_render = 1;
+            let tile_idx = tile_params.tile_idx;
             let tile_size = tile_params.tile_size;
             let num_tiles_x = (u32::max(1, target_width) - 1)  / (tile_size * WORKGROUP_SIZE) + 1;
             let num_tiles_y = (u32::max(1, target_height) - 1) / (tile_size * WORKGROUP_SIZE) + 1;
             let total_tiles = num_tiles_x * num_tiles_y;
-            assert!(tile_counter < total_tiles, "tile_counter out of range!");
+            assert!(tile_idx < total_tiles, "tile_idx out of range!");
 
-            for i in tile_counter..u32::min(tile_counter + tiles_to_render, total_tiles)
+            let tiles_to_render = 1;
+            for i in tile_idx..u32::min(tile_idx + tiles_to_render, total_tiles)
             {
                 let offset_x = (i % num_tiles_x) * tile_size * WORKGROUP_SIZE;
                 let offset_y = (i / num_tiles_x) * tile_size * WORKGROUP_SIZE;
 
-                let push_constants = get_push_constants_tiled(desc, Some(pathtrace_type), None, None, num_tiles_x, tile_size, i);
+                let push_constants = get_push_constants_tiled(desc, scene, Some(pathtrace_type), None, None, num_tiles_x, tile_size, i);
                 pass.set_push_constants(0, to_u8_slice(&[push_constants]));
 
                 let num_workers_x = u32::min(tile_size, (target_width - offset_x) / WORKGROUP_SIZE);
                 let num_workers_y = u32::min(tile_size, (target_height - offset_y) / WORKGROUP_SIZE);
                 pass.dispatch_workgroups(num_workers_x, num_workers_y, 1);
             }
-
-            // Advance tile_counter.
-            if let Some(tile_idx) = tile_idx {
-                *tile_idx = u32::min(*tile_idx + tiles_to_render, total_tiles) % (total_tiles);
-            }
         }
         else  // Full-screen rendering.
         {
-            let push_constants = get_push_constants(desc, Some(pathtrace_type), None, None);
+            let push_constants = get_push_constants(desc, scene, Some(pathtrace_type), None, None);
             pass.set_push_constants(0, to_u8_slice(&[push_constants]));
 
             let num_workers_x = (render_target.width() + WORKGROUP_SIZE - 1) / WORKGROUP_SIZE;
@@ -908,20 +911,19 @@ pub enum FalsecolorType
     Tri = 11,
 }
 
-pub fn pathtrace_scene_falsecolor(device: &wgpu::Device, queue: &wgpu::Queue, desc: &PathtraceDesc, falsecolor_type: FalsecolorType, tile_idx: Option<&mut u32>)
+pub fn pathtrace_scene_falsecolor(device: &wgpu::Device, queue: &wgpu::Queue, resources: &PathtraceResources,
+                                  scene: &Scene, render_target: &wgpu::Texture, falsecolor_type: FalsecolorType,
+                                  desc: &PathtraceDesc)
 {
-    assert!(desc.render_target.format() == wgpu::TextureFormat::Rgba16Float);
+    assert!(render_target.format() == wgpu::TextureFormat::Rgba16Float);
 
-    let sw_bvh_absent = desc.scene.tlas_nodes.size() <= 0 || desc.scene.bvh_nodes_array.len() <= 0;
+    let sw_bvh_absent = scene.tlas_nodes.size() <= 0 || scene.bvh_nodes_array.len() <= 0;
     if desc.force_software_bvh && sw_bvh_absent {
         panic!("force_software_bvh is set, but no software BVH was built for this scene.");
     }
 
-    let scene = desc.scene;
-    let render_target = desc.render_target;
-    let target_width = desc.render_target.width();
-    let target_height = desc.render_target.height();
-    let resources = desc.resources;
+    let target_width = render_target.width();
+    let target_height = render_target.height();
     let accum_params = desc.accum_params;
     let camera_params = desc.camera_params;
     let camera_transform = desc.camera_transform;
@@ -933,7 +935,7 @@ pub fn pathtrace_scene_falsecolor(device: &wgpu::Device, queue: &wgpu::Queue, de
     };
 
     let scene_bindgroup = create_pathtracer_scene_bindgroup(device, queue, resources, scene);
-    let settings_bindgroup = create_pathtracer_settings_bindgroup(device, queue, resources, accum_params.prev_frame);
+    let settings_bindgroup = create_pathtracer_settings_bindgroup(device, queue, resources, accum_params.map(|params| params.prev_frame));
     let output_bindgroup = create_pathtracer_output_bindgroup(device, queue, resources, render_target);
     let bvh_bindgroup = create_pathtracer_bvh_bindgroup(device, scene, resources, use_software_bvh);
 
@@ -952,35 +954,30 @@ pub fn pathtrace_scene_falsecolor(device: &wgpu::Device, queue: &wgpu::Queue, de
 
         if let Some(tile_params) = desc.tile_params  // Tiled rendering.
         {
-            let tile_counter = tile_idx.as_ref().map_or(0, |v| **v);
-            let tiles_to_render = 1;
+            let tile_idx = tile_params.tile_idx;
             let tile_size = tile_params.tile_size;
             let num_tiles_x = (u32::max(1, target_width) - 1)  / (tile_size * WORKGROUP_SIZE) + 1;
             let num_tiles_y = (u32::max(1, target_height) - 1) / (tile_size * WORKGROUP_SIZE) + 1;
             let total_tiles = num_tiles_x * num_tiles_y;
-            assert!(tile_counter < total_tiles, "tile_counter out of range!");
+            assert!(tile_idx < total_tiles, "tile_idx out of range!");
 
-            for i in tile_counter..u32::min(tile_counter + tiles_to_render, total_tiles)
+            let tiles_to_render = 1;
+            for i in tile_idx..u32::min(tile_idx + tiles_to_render, total_tiles)
             {
                 let offset_x = (i % num_tiles_x) * tile_size * WORKGROUP_SIZE;
                 let offset_y = (i / num_tiles_x) * tile_size * WORKGROUP_SIZE;
 
-                let push_constants = get_push_constants_tiled(desc, None, Some(falsecolor_type), None, num_tiles_x, tile_size, i);
+                let push_constants = get_push_constants_tiled(desc, scene, None, Some(falsecolor_type), None, num_tiles_x, tile_size, i);
                 pass.set_push_constants(0, to_u8_slice(&[push_constants]));
 
                 let num_workers_x = u32::min(tile_size, (target_width - offset_x) / WORKGROUP_SIZE);
                 let num_workers_y = u32::min(tile_size, (target_height - offset_y) / WORKGROUP_SIZE);
                 pass.dispatch_workgroups(num_workers_x, num_workers_y, 1);
             }
-
-            // Advance tile_counter.
-            if let Some(tile_idx) = tile_idx {
-                *tile_idx = u32::min(*tile_idx + tiles_to_render, total_tiles) % (total_tiles);
-            }
         }
         else  // Full-screen rendering.
         {
-            let push_constants = get_push_constants(desc, None, Some(falsecolor_type), None);
+            let push_constants = get_push_constants(desc, scene, None, Some(falsecolor_type), None);
             pass.set_push_constants(0, to_u8_slice(&[push_constants]));
 
             let num_workers_x = (render_target.width() + WORKGROUP_SIZE - 1) / WORKGROUP_SIZE;
@@ -1008,20 +1005,17 @@ pub struct DebugVizDesc
     pub first_hit_only: bool,
 }
 
-pub fn pathtrace_scene_debug(device: &wgpu::Device, queue: &wgpu::Queue, desc: &PathtraceDesc, debug_desc: &DebugVizDesc, tile_idx: Option<&mut u32>)
+pub fn pathtrace_scene_debug(device: &wgpu::Device, queue: &wgpu::Queue, resources: &PathtraceResources, scene: &Scene, render_target: &wgpu::Texture, debug_desc: &DebugVizDesc, desc: &PathtraceDesc)
 {
-    assert!(desc.render_target.format() == wgpu::TextureFormat::Rgba16Float);
+    assert!(render_target.format() == wgpu::TextureFormat::Rgba16Float);
 
-    let sw_bvh_absent = desc.scene.tlas_nodes.size() <= 0 || desc.scene.bvh_nodes_array.len() <= 0;
+    let sw_bvh_absent = scene.tlas_nodes.size() <= 0 || scene.bvh_nodes_array.len() <= 0;
     if desc.force_software_bvh && sw_bvh_absent {
         panic!("force_software_bvh is set, but no software BVH was built for this scene.");
     }
 
-    let scene = desc.scene;
-    let render_target = desc.render_target;
-    let target_width = desc.render_target.width();
-    let target_height = desc.render_target.height();
-    let resources = desc.resources;
+    let target_width = render_target.width();
+    let target_height = render_target.height();
     let accum_params = desc.accum_params;
     let camera_params = desc.camera_params;
     let camera_transform = desc.camera_transform;
@@ -1033,7 +1027,7 @@ pub fn pathtrace_scene_debug(device: &wgpu::Device, queue: &wgpu::Queue, desc: &
     };
 
     let scene_bindgroup = create_pathtracer_scene_bindgroup(device, queue, resources, scene);
-    let settings_bindgroup = create_pathtracer_settings_bindgroup(device, queue, resources, accum_params.prev_frame);
+    let settings_bindgroup = create_pathtracer_settings_bindgroup(device, queue, resources, accum_params.map(|params| params.prev_frame));
     let output_bindgroup = create_pathtracer_output_bindgroup(device, queue, resources, render_target);
     let bvh_bindgroup = create_pathtracer_bvh_bindgroup(device, scene, resources, use_software_bvh);
 
@@ -1052,35 +1046,30 @@ pub fn pathtrace_scene_debug(device: &wgpu::Device, queue: &wgpu::Queue, desc: &
 
         if let Some(tile_params) = desc.tile_params  // Tiled rendering.
         {
-            let tile_counter = tile_idx.as_ref().map_or(0, |v| **v);
-            let tiles_to_render = 1;
+            let tile_idx = tile_params.tile_idx;
             let tile_size = tile_params.tile_size;
             let num_tiles_x = (u32::max(1, target_width) - 1)  / (tile_size * WORKGROUP_SIZE) + 1;
             let num_tiles_y = (u32::max(1, target_height) - 1) / (tile_size * WORKGROUP_SIZE) + 1;
             let total_tiles = num_tiles_x * num_tiles_y;
-            assert!(tile_counter < total_tiles, "tile_counter out of range!");
+            assert!(tile_idx < total_tiles, "tile_idx out of range!");
 
-            for i in tile_counter..u32::min(tile_counter + tiles_to_render, total_tiles)
+            let tiles_to_render = 1;
+            for i in tile_idx..u32::min(tile_idx + tiles_to_render, total_tiles)
             {
                 let offset_x = (i % num_tiles_x) * tile_size * WORKGROUP_SIZE;
                 let offset_y = (i / num_tiles_x) * tile_size * WORKGROUP_SIZE;
 
-                let push_constants = get_push_constants_tiled(desc, None, None, Some(debug_desc), num_tiles_x, tile_size, i);
+                let push_constants = get_push_constants_tiled(desc, scene, None, None, Some(debug_desc), num_tiles_x, tile_size, i);
                 pass.set_push_constants(0, to_u8_slice(&[push_constants]));
 
                 let num_workers_x = u32::min(tile_size, (target_width - offset_x) / WORKGROUP_SIZE);
                 let num_workers_y = u32::min(tile_size, (target_height - offset_y) / WORKGROUP_SIZE);
                 pass.dispatch_workgroups(num_workers_x, num_workers_y, 1);
             }
-
-            // Advance tile_counter.
-            if let Some(tile_idx) = tile_idx {
-                *tile_idx = u32::min(*tile_idx + tiles_to_render, total_tiles) % (total_tiles);
-            }
         }
         else  // Full-screen rendering.
         {
-            let push_constants = get_push_constants(desc, None, None, Some(debug_desc));
+            let push_constants = get_push_constants(desc, scene, None, None, Some(debug_desc));
             pass.set_push_constants(0, to_u8_slice(&[push_constants]));
 
             let num_workers_x = (render_target.width() + WORKGROUP_SIZE - 1) / WORKGROUP_SIZE;
@@ -1534,7 +1523,7 @@ fn create_pathtracer_bvh_bindgroup_layout(device: &wgpu::Device, use_software_bv
     }
 }
 
-fn get_push_constants(desc: &PathtraceDesc, pathtrace_type: Option<PathtraceType>, falsecolor_type: Option<FalsecolorType>, debug_desc: Option<&DebugVizDesc>) -> PushConstants
+fn get_push_constants(desc: &PathtraceDesc, scene: &Scene, pathtrace_type: Option<PathtraceType>, falsecolor_type: Option<FalsecolorType>, debug_desc: Option<&DebugVizDesc>) -> PushConstants
 {
     let mut push_constants = PushConstants::default();
 
@@ -1573,10 +1562,10 @@ fn get_push_constants(desc: &PathtraceDesc, pathtrace_type: Option<PathtraceType
     push_constants.camera_focus = desc.camera_params.focus;
     push_constants.camera_aperture = desc.camera_params.aperture;
 
-    if desc.scene.environments.size() <= 0 {
+    if scene.environments.size() <= 0 {
         push_constants.flags |= FLAG_ENVS_EMPTY;
     }
-    if desc.scene.lights.lights.size() <= 0 {
+    if scene.lights.lights.size() <= 0 {
         push_constants.flags |= FLAG_LIGHTS_EMPTY;
     }
 
@@ -1587,16 +1576,20 @@ fn get_push_constants(desc: &PathtraceDesc, pathtrace_type: Option<PathtraceType
         push_constants.falsecolor_type = falsecolor_type as u32;
     }
 
-    push_constants.accum_counter = desc.accum_params.accum_counter;
+    if let Some(accum_params) = desc.accum_params {
+        push_constants.accum_counter = accum_params.accum_counter;
+    } else {
+        push_constants.accum_counter = 0;
+    }
 
     push_constants.max_radiance = desc.advanced.max_radiance;
 
     return push_constants;
 }
 
-fn get_push_constants_tiled(desc: &PathtraceDesc, pathtrace_type: Option<PathtraceType>, falsecolor_type: Option<FalsecolorType>, debug_desc: Option<&DebugVizDesc>, num_tiles_x: u32, tile_size: u32, i: u32) -> PushConstants
+fn get_push_constants_tiled(desc: &PathtraceDesc, scene: &Scene, pathtrace_type: Option<PathtraceType>, falsecolor_type: Option<FalsecolorType>, debug_desc: Option<&DebugVizDesc>, num_tiles_x: u32, tile_size: u32, i: u32) -> PushConstants
 {
-    let mut push_constants = get_push_constants(desc, pathtrace_type, falsecolor_type, debug_desc);
+    let mut push_constants = get_push_constants(desc, scene, pathtrace_type, falsecolor_type, debug_desc);
 
     let offset_x = (i % num_tiles_x) * tile_size * WORKGROUP_SIZE;
     let offset_y = (i / num_tiles_x) * tile_size * WORKGROUP_SIZE;

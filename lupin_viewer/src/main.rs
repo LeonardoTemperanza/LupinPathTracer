@@ -434,8 +434,7 @@ impl<'a> AppState<'a>
 
     fn render_scene(&mut self, swapchain: &wgpu::Texture)
     {
-        if self.cam_transform.m != self.prev_cam_transform.m
-        {
+        if self.cam_transform.m != self.prev_cam_transform.m {
             self.reset_accumulation();
         }
         self.prev_cam_transform = self.cam_transform;
@@ -448,13 +447,10 @@ impl<'a> AppState<'a>
         };
 
         let desc = lp::PathtraceDesc {
-            scene: &self.scene,
-            render_target: self.output.front(),
-            resources: &self.pathtrace_resources,
-            accum_params: &lp::AccumulationParams {
-                prev_frame: Some(self.output.back()),
+            accum_params: Some(lp::AccumulationParams {
+                prev_frame: self.output.back(),
                 accum_counter: self.accum_counter,
-            },
+            }),
             tile_params: Some(&self.tile_params),
             camera_params: self.camera_params,
             camera_transform: self.cam_transform,
@@ -464,13 +460,10 @@ impl<'a> AppState<'a>
             }
         };
         let desc_albedo = lp::PathtraceDesc {
-            scene: &self.scene,
-            render_target: self.albedo.front(),
-            resources: &self.pathtrace_resources,
-            accum_params: &lp::AccumulationParams {
-                prev_frame: Some(self.albedo.back()),
+            accum_params: Some(lp::AccumulationParams {
+                prev_frame: self.albedo.back(),
                 accum_counter: self.gbuffers_accum_counter,
-            },
+            }),
             tile_params: Some(&self.tile_params),
             camera_params: self.camera_params,
             camera_transform: self.cam_transform,
@@ -480,13 +473,10 @@ impl<'a> AppState<'a>
             }
         };
         let desc_normals = lp::PathtraceDesc {
-            scene: &self.scene,
-            render_target: self.normals.front(),
-            resources: &self.pathtrace_resources,
-            accum_params: &lp::AccumulationParams {
-                prev_frame: Some(self.normals.back()),
+            accum_params: Some(lp::AccumulationParams {
+                prev_frame: self.normals.back(),
                 accum_counter: self.gbuffers_accum_counter,
-            },
+            }),
             tile_params: Some(&self.tile_params),
             camera_params: self.camera_params,
             camera_transform: self.cam_transform,
@@ -510,7 +500,8 @@ impl<'a> AppState<'a>
             viewport: Some(viewport)
         };
 
-        // TODO: Refactor this!!!!
+        let mut should_tonemap = false;
+
         match self.render_type
         {
             RenderType::Falsecolor(falsecolor_type) =>
@@ -520,59 +511,41 @@ impl<'a> AppState<'a>
                     desc.tile_params = None;
                 }
 
-                lp::pathtrace_scene_falsecolor(self.device, self.queue, &desc, falsecolor_type, Some(&mut self.tile_idx));
-                lp::tonemap_and_fit_aspect(&self.device, &self.queue, &tonemap_desc, 0.0, false, false);
+                lp::pathtrace_scene_falsecolor(self.device, self.queue, &self.pathtrace_resources, &self.scene, self.output.front(),
+                                               falsecolor_type, &desc);
             }
             RenderType::Pathtrace =>
             {
-                if self.controlling_camera
+                if self.controlling_camera && self.show_normals_when_moving
                 {
-                    if self.show_normals_when_moving
-                    {
-                        let mut desc = desc;
-                        if !self.tiled_rendering {
-                            desc.tile_params = None;
-                        }
-                        lp::pathtrace_scene_falsecolor(self.device, self.queue, &desc, lp::FalsecolorType::NormalsUnsigned, Some(&mut self.tile_idx));
-                        lp::tonemap_and_fit_aspect(&self.device, &self.queue, &tonemap_desc, 0.0, false, false);
+                    let mut desc = desc;
+                    if !self.tiled_rendering {
+                        desc.tile_params = None;
                     }
-                    else
-                    {
-                        if self.accum_counter < self.max_accums {
-                            lp::pathtrace_scene(&self.device, &self.queue, &desc_no_tiles, self.pathtrace_type, None);
-                            //if self.denoising {
-                            //    lp::pathtrace_scene_falsecolor(self.device, self.queue, &desc_albedo_no_tiles, lp::FalsecolorType::Albedo,  Some(&mut self.tile_idx));
-                            //    lp::pathtrace_scene_falsecolor(self.device, self.queue, &desc_normals_no_tiles, lp::FalsecolorType::Normals, Some(&mut self.tile_idx));
-                            //}
-                        }
-
-                        lp::tonemap_and_fit_aspect(&self.device, &self.queue, &tonemap_desc, self.exposure, self.filmic, self.srgb);
-                    }
+                    lp::pathtrace_scene_falsecolor(self.device, self.queue, &self.pathtrace_resources, &self.scene, self.output.front(),
+                                                   lp::FalsecolorType::Normals, &desc);
                 }
                 else
                 {
-                    if !self.tiled_rendering
-                    {
-                        let mut desc = desc;
+                    let mut desc = desc;
+                    if self.controlling_camera || !self.tiled_rendering {
                         desc.tile_params = None;
-                        if self.accum_counter < self.max_accums {
-                            lp::pathtrace_scene(&self.device, &self.queue, &desc, self.pathtrace_type, None);
-                            if self.denoising {
-                                lp::pathtrace_scene_falsecolor(self.device, self.queue, &desc_albedo_no_tiles, lp::FalsecolorType::Albedo,   None);
-                                lp::pathtrace_scene_falsecolor(self.device, self.queue, &desc_normals_no_tiles, lp::FalsecolorType::Normals, None);
-                            }
-                        }
-                    }
-                    else if self.accum_counter < self.max_accums
-                    {
-                        lp::pathtrace_scene(&self.device, &self.queue, &desc, self.pathtrace_type, Some(&mut self.tile_idx));
-                        //if self.denoising {
-                        //    lp::pathtrace_scene_falsecolor(self.device, self.queue, &desc_albedo, lp::FalsecolorType::Albedo,  Some(&mut self.tile_idx));
-                        //    lp::pathtrace_scene_falsecolor(self.device, self.queue, &desc_normals, lp::FalsecolorType::Normals, Some(&mut self.tile_idx));
-                        //}
                     }
 
-                    lp::tonemap_and_fit_aspect(&self.device, &self.queue, &tonemap_desc, self.exposure, self.filmic, self.srgb);
+                    if self.accum_counter < self.max_accums
+                    {
+                        lp::pathtrace_scene(self.device, self.queue, &self.pathtrace_resources, &self.scene, self.output.front(),
+                                            self.pathtrace_type, &desc);
+                        if self.denoising
+                        {
+                            lp::pathtrace_scene_falsecolor(self.device, self.queue, &self.pathtrace_resources, &self.scene, self.albedo.front(),
+                                                           lp::FalsecolorType::Albedo, &desc_albedo_no_tiles);
+                            lp::pathtrace_scene_falsecolor(self.device, self.queue, &self.pathtrace_resources, &self.scene, self.normals.front(),
+                                                           lp::FalsecolorType::Normals, &desc_albedo_no_tiles);
+                        }
+                    }
+
+                    should_tonemap = true;
                 }
             }
             RenderType::Debug(debug_viz_type) =>
@@ -589,7 +562,23 @@ impl<'a> AppState<'a>
                     desc.tile_params = None;
                 }
 
-                lp::pathtrace_scene_debug(&self.device, &self.queue, &desc, &debug_desc, Some(&mut self.tile_idx));
+                lp::pathtrace_scene_debug(self.device, self.queue, &self.pathtrace_resources, &self.scene, self.output.front(),
+                                    &debug_desc, &desc);
+            }
+        }
+
+        // Tonemap
+        {
+            let tonemap_desc = lp::TonemapDesc {
+                resources: &self.tonemap_resources,
+                hdr_texture: self.output.front(),
+                render_target: &swapchain,
+                viewport: Some(viewport)
+            };
+
+            if should_tonemap {
+                lp::tonemap_and_fit_aspect(&self.device, &self.queue, &tonemap_desc, self.exposure, self.filmic, self.srgb);
+            } else {
                 lp::tonemap_and_fit_aspect(&self.device, &self.queue, &tonemap_desc, 0.0, false, false);
             }
         }
@@ -626,6 +615,11 @@ impl<'a> AppState<'a>
             };
             lp::tonemap_and_fit_aspect(&self.device, &self.queue, &tonemap_desc, self.exposure, self.filmic, self.srgb);
         }
+
+        // Increment tile_idx
+        let width = self.output.front().width();
+        let height = self.output.front().height();
+        self.tile_idx = (self.tile_idx + 1) % lp::get_num_tiles(self.tile_params.tile_size, width, height);
 
         // Swap output textures
         if self.tile_idx == 0 && self.accum_counter < self.max_accums
