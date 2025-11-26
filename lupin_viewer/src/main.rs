@@ -498,7 +498,12 @@ impl<'a> AppState<'a>
             srgb: self.srgb
         };
 
-        match self.render_type
+        let mut render_type = self.render_type;
+        if render_type == RenderType::Pathtrace && self.controlling_camera && self.show_normals_when_moving {
+            render_type = RenderType::Falsecolor(lp::FalsecolorType::NormalsUnsigned);
+        }
+
+        match render_type
         {
             RenderType::Falsecolor(falsecolor_type) =>
             {
@@ -514,35 +519,21 @@ impl<'a> AppState<'a>
             }
             RenderType::Pathtrace =>
             {
-                if self.controlling_camera && self.show_normals_when_moving
-                {
-                    let mut desc = desc;
-                    if !self.tiled_rendering {
-                        desc.tile_params = None;
-                    }
-                    lp::pathtrace_scene_falsecolor(self.device, self.queue, &self.pathtrace_resources, &self.scene, self.output.front(),
-                                                   lp::FalsecolorType::Normals, &desc);
-                    tonemap_desc.filmic = false;
-                    tonemap_desc.srgb = false;
+                let mut desc = desc;
+                if self.controlling_camera || !self.tiled_rendering {
+                    desc.tile_params = None;
                 }
-                else
-                {
-                    let mut desc = desc;
-                    if self.controlling_camera || !self.tiled_rendering {
-                        desc.tile_params = None;
-                    }
 
-                    if self.accum_counter < self.max_accums
+                if self.accum_counter < self.max_accums
+                {
+                    lp::pathtrace_scene(self.device, self.queue, &self.pathtrace_resources, &self.scene, self.output.front(),
+                                        self.pathtrace_type, &desc);
+                    if self.denoising
                     {
-                        lp::pathtrace_scene(self.device, self.queue, &self.pathtrace_resources, &self.scene, self.output.front(),
-                                            self.pathtrace_type, &desc);
-                        if self.denoising
-                        {
-                            lp::pathtrace_scene_falsecolor(self.device, self.queue, &self.pathtrace_resources, &self.scene, self.albedo.front(),
-                                                           lp::FalsecolorType::Albedo, &desc_albedo_no_tiles);
-                            lp::pathtrace_scene_falsecolor(self.device, self.queue, &self.pathtrace_resources, &self.scene, self.normals.front(),
-                                                           lp::FalsecolorType::Normals, &desc_albedo_no_tiles);
-                        }
+                        lp::pathtrace_scene_falsecolor(self.device, self.queue, &self.pathtrace_resources, &self.scene, self.albedo.front(),
+                                                       lp::FalsecolorType::Albedo, &desc_albedo_no_tiles);
+                        lp::pathtrace_scene_falsecolor(self.device, self.queue, &self.pathtrace_resources, &self.scene, self.normals.front(),
+                                                       lp::FalsecolorType::Normals, &desc_albedo_no_tiles);
                     }
                 }
             }
@@ -565,11 +556,9 @@ impl<'a> AppState<'a>
             }
         }
 
-        // Tonemap
-        lp::tonemap_and_fit_aspect(&self.device, &self.queue, &self.tonemap_resources, self.output.front(), &swapchain, &tonemap_desc);
-
         // Denoise
-        if self.denoising && self.tile_params.tile_idx == 0 && self.accum_counter > 30
+        let do_denoise = self.denoising && self.tile_params.tile_idx == 0 && self.accum_counter > 30;
+        if do_denoise
         {
             if self.use_gbuffers_for_denoise
             {
@@ -591,8 +580,12 @@ impl<'a> AppState<'a>
                     quality: Default::default(),
                 });
             }
+        }
 
-            lp::tonemap_and_fit_aspect(&self.device, &self.queue, &self.tonemap_resources, self.output.front(), &swapchain, &tonemap_desc);
+        // Tonemap
+        {
+            let src = if do_denoise { &self.denoised } else { self.output.front() };
+            lp::tonemap_and_fit_aspect(&self.device, &self.queue, &self.tonemap_resources, src, &swapchain, &tonemap_desc);
         }
 
         // Increment tile_idx
@@ -829,7 +822,8 @@ impl<'a> AppState<'a>
                     ui.checkbox(&mut self.denoising, "Denoise");
 
                     if self.denoising {
-                        ui.checkbox(&mut self.use_gbuffers_for_denoise, "Use GBuffers");
+                        let response = ui.checkbox(&mut self.use_gbuffers_for_denoise, "Use GBuffers");
+                        if response.changed() { self.reset_accumulation(); }
                     }
 
                     egui::CollapsingHeader::new("Stats").id_salt("stats_pathtrace").show(ui, |ui| {
