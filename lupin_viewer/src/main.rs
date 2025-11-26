@@ -444,7 +444,7 @@ impl<'a> AppState<'a>
             h: swapchain.size().height as f32,
         };
 
-        let desc = lp::PathtraceDesc {
+        let mut desc = lp::PathtraceDesc {
             accum_params: Some(lp::AccumulationParams {
                 prev_frame: self.output.back(),
                 accum_counter: self.accum_counter,
@@ -503,15 +503,14 @@ impl<'a> AppState<'a>
             render_type = RenderType::Falsecolor(lp::FalsecolorType::NormalsUnsigned);
         }
 
+        if self.controlling_camera || !self.tiled_rendering {
+            desc.tile_params = None;
+        }
+
         match render_type
         {
             RenderType::Falsecolor(falsecolor_type) =>
             {
-                let mut desc = desc;
-                if !self.tiled_rendering {
-                    desc.tile_params = None;
-                }
-
                 lp::pathtrace_scene_falsecolor(self.device, self.queue, &self.pathtrace_resources, &self.scene, self.output.front(),
                                                falsecolor_type, &desc);
                 tonemap_desc.filmic = false;
@@ -519,11 +518,6 @@ impl<'a> AppState<'a>
             }
             RenderType::Pathtrace =>
             {
-                let mut desc = desc;
-                if self.controlling_camera || !self.tiled_rendering {
-                    desc.tile_params = None;
-                }
-
                 if self.accum_counter < self.max_accums
                 {
                     lp::pathtrace_scene(self.device, self.queue, &self.pathtrace_resources, &self.scene, self.output.front(),
@@ -545,12 +539,6 @@ impl<'a> AppState<'a>
                     heatmap_max: self.debug_viz.heatmap_max,
                     first_hit_only: !self.debug_viz.multibounce,
                 };
-
-                let mut desc = desc;
-                if !self.tiled_rendering {
-                    desc.tile_params = None;
-                }
-
                 lp::pathtrace_scene_debug(self.device, self.queue, &self.pathtrace_resources, &self.scene, self.output.front(),
                                     &debug_desc, &desc);
             }
@@ -589,7 +577,7 @@ impl<'a> AppState<'a>
         }
 
         // Increment tile_idx
-        if self.tiled_rendering
+        if self.tiled_rendering && !self.controlling_camera
         {
             let width = self.output.front().width();
             let height = self.output.front().height();
