@@ -190,7 +190,6 @@ pub struct AppState<'a>
     pub prev_cam_transform: lp::Mat3x4,
     pub accum_counter: u32,
     pub gbuffers_accum_counter: u32,
-    pub tile_idx: u32,
 }
 
 impl<'a> AppState<'a>
@@ -322,7 +321,6 @@ impl<'a> AppState<'a>
             prev_cam_transform: lp::Mat3x4::zeros(),
             accum_counter: 0,
             gbuffers_accum_counter: 0,
-            tile_idx: 0,
         };
 
         res.switch_to_cam(if num_cameras > 0 { 0 } else { -1 });
@@ -571,7 +569,7 @@ impl<'a> AppState<'a>
         lp::tonemap_and_fit_aspect(&self.device, &self.queue, &self.tonemap_resources, self.output.front(), &swapchain, &tonemap_desc);
 
         // Denoise
-        if self.denoising && self.tile_idx == 0 && self.accum_counter > 30
+        if self.denoising && self.tile_params.tile_idx == 0 && self.accum_counter > 30
         {
             if self.use_gbuffers_for_denoise
             {
@@ -598,12 +596,15 @@ impl<'a> AppState<'a>
         }
 
         // Increment tile_idx
-        let width = self.output.front().width();
-        let height = self.output.front().height();
-        self.tile_idx = (self.tile_idx + 1) % lp::get_num_tiles(self.tile_params.tile_size, width, height);
+        if self.tiled_rendering
+        {
+            let width = self.output.front().width();
+            let height = self.output.front().height();
+            self.tile_params.tile_idx = (self.tile_params.tile_idx + 1) % lp::get_num_tiles(self.tile_params.tile_size, width, height);
+        }
 
         // Swap output textures
-        if self.tile_idx == 0 && self.accum_counter < self.max_accums
+        if self.tile_params.tile_idx == 0 && self.accum_counter < self.max_accums
         {
             // Copy the contents of the front buffer onto the back buffer,
             // so that when we swap buffers it won't be as jarring.
@@ -833,7 +834,7 @@ impl<'a> AppState<'a>
 
                     egui::CollapsingHeader::new("Stats").id_salt("stats_pathtrace").show(ui, |ui| {
                         ui.label(format!("Iteration: {:?}", self.accum_counter));
-                        ui.label(format!("Tile: {:?}", self.tile_idx));
+                        ui.label(format!("Tile: {:?}", self.tile_params.tile_idx));
                     });
 
                     ui.add(egui::ProgressBar::new(self.accum_counter as f32 / self.max_accums as f32)
@@ -1110,7 +1111,7 @@ impl<'a> AppState<'a>
     {
         self.accum_counter = 0;
         self.gbuffers_accum_counter = 0;
-        self.tile_idx = 0;
+        self.tile_params.tile_idx = 0;
     }
 
     fn switch_to_freeroam(&mut self)
