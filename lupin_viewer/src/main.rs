@@ -1264,6 +1264,6 @@ impl<'a> DoubleBufferedTexture
     // TODO
     pub fn fill_black(&mut self, device: &wgpu::Device)
     {
-
+        
     }
 }

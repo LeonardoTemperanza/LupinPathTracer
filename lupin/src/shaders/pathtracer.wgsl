@@ -2436,27 +2436,27 @@ fn vec4f_srgb_to_linear(srgb: vec4f) -> vec4f
 // https://sakibsaikia.github.io/graphics/2022/01/04/Nan-Checks-In-HLSL.html
 fn is_finite(x: f32) -> bool
 {
-    return (u32(x) & 0x7F800000) != 0x7F800000;
+    return (bitcast<u32>(x) & 0x7F800000) != 0x7F800000;
 }
 
 fn is_positive_finite(x: f32) -> bool
 {
-    return u32(x) < 0x7F800000;
+    return bitcast<u32>(x) < 0x7F800000;
 }
 
 fn is_nan(x: f32) -> bool
 {
-    return (u32(x) & 0x7FFFFFFF) > 0x7F800000;
+    return (bitcast<u32>(x) & 0x7FFFFFFF) > 0x7F800000;
 }
 
 fn is_inf(x: f32) -> bool
 {
-    return (u32(x) & 0x7FFFFFFF) == 0x7F800000;
+    return (bitcast<u32>(x) & 0x7FFFFFFF) == 0x7F800000;
 }
 
 fn vec3f_is_finite(v: vec3f) -> bool
 {
-    return all((vec3u(v) & vec3u(0x7F800000)) != vec3u(0x7F800000));
+    return all((bitcast<vec3u>(v) & vec3u(0x7F800000)) != vec3u(0x7F800000));
 }
 
 fn orthonormalize(a: vec3f, b: vec3f) -> vec3f
