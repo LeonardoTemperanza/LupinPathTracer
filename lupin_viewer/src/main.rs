@@ -820,7 +820,7 @@ impl<'a> AppState<'a>
                     });
 
                     ui.add(egui::ProgressBar::new(self.accum_counter as f32 / self.max_accums as f32)
-                        .text(format!("{}/{}", self.accum_counter, self.max_accums)));
+                        .text(format!("{}/{} samples", self.accum_counter * self.samples_per_pixel, self.max_accums * self.samples_per_pixel)));
                 }
 
                 ui.add_space(12.0);
@@ -1264,6 +1264,6 @@ impl<'a> DoubleBufferedTexture
     // TODO
     pub fn fill_black(&mut self, device: &wgpu::Device)
     {
-        
+
     }
 }
