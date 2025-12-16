@@ -3,12 +3,11 @@ use crate::base::*;
 use crate::wgpu_utils::*;
 use crate::renderer::*;
 
-/// Used for denoising an image of a given format and dimensions.
+/// Used for denoising an image of a given dimension.
 /// Can be reused for multiple images/renders given that they have the same
-/// format and dimensions.
+/// dimensions. Formats are all assumed to be rgbaf16 linear.
 pub struct DenoiseResources
 {
-    /// Assumed to be rgbaf16 linear.
     pub beauty: oidn_wgpu_interop::SharedBuffer,
     pub albedo: oidn_wgpu_interop::SharedBuffer,
     pub normals: oidn_wgpu_interop::SharedBuffer,
@@ -50,6 +49,7 @@ pub fn build_denoise_resources(device: &wgpu::Device, denoise_device: &DenoiseDe
 
     match denoise_device
     {
+        // Supports shared device.
         DenoiseDevice::InteropDevice(interop_device) =>
         {
             beauty  = interop_device.allocate_shared_buffers(texture_size as u64).unwrap();
@@ -76,6 +76,7 @@ pub fn build_denoise_resources(device: &wgpu::Device, denoise_device: &DenoiseDe
                 oidn_check(device_raw);
             }
         }
+        // Doesn't support shared device.
         DenoiseDevice::OidnDevice(oidn_device) =>
         {
             panic!("unsupported");
@@ -146,26 +147,72 @@ pub fn denoise(device: &wgpu::Device, queue: &wgpu::Queue,
     let width = resources.width;
     let height = resources.height;
 
-    // Copy pathtrace_output to shared buffer
-    let mut encoder = device.create_command_encoder(&Default::default());
-    encoder.copy_texture_to_buffer(
-        wgpu::TexelCopyTextureInfo {
-            texture: desc.pathtrace_output,
-            mip_level: 0,
-            origin: Default::default(),
-            aspect: Default::default()
-        },
-        wgpu::TexelCopyBufferInfo {
-            buffer: resources.beauty.wgpu_buffer(),
-            layout: wgpu::TexelCopyBufferLayout {
-                offset: 0,
-                bytes_per_row: Some(8 * width),
-                rows_per_image: Some(height)
-            }
-        },
-        desc.pathtrace_output.size()
-    );
-    queue.submit(Some(encoder.finish()));
+    // Copy local buffers to shared buffers
+    {
+        let mut encoder = device.create_command_encoder(&Default::default());
+
+        encoder.copy_texture_to_buffer(
+            wgpu::TexelCopyTextureInfo {
+                texture: desc.pathtrace_output,
+                mip_level: 0,
+                origin: Default::default(),
+                aspect: Default::default()
+            },
+            wgpu::TexelCopyBufferInfo {
+                buffer: resources.beauty.wgpu_buffer(),
+                layout: wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(8 * width),
+                    rows_per_image: Some(height)
+                }
+            },
+            desc.pathtrace_output.size()
+        );
+
+        if let Some(albedo) = desc.albedo
+        {
+            encoder.copy_texture_to_buffer(
+                wgpu::TexelCopyTextureInfo {
+                    texture: albedo,
+                    mip_level: 0,
+                    origin: Default::default(),
+                    aspect: Default::default()
+                },
+                wgpu::TexelCopyBufferInfo {
+                    buffer: resources.albedo.wgpu_buffer(),
+                    layout: wgpu::TexelCopyBufferLayout {
+                        offset: 0,
+                        bytes_per_row: Some(8 * width),
+                        rows_per_image: Some(height)
+                    }
+                },
+                desc.pathtrace_output.size()
+            );
+        }
+
+        if let Some(normals) = desc.normals
+        {
+            encoder.copy_texture_to_buffer(
+                wgpu::TexelCopyTextureInfo {
+                    texture: normals,
+                    mip_level: 0,
+                    origin: Default::default(),
+                    aspect: Default::default()
+                },
+                wgpu::TexelCopyBufferInfo {
+                    buffer: resources.normals.wgpu_buffer(),
+                    layout: wgpu::TexelCopyBufferLayout {
+                        offset: 0,
+                        bytes_per_row: Some(8 * width),
+                        rows_per_image: Some(height)
+                    }
+                },
+                desc.pathtrace_output.size()
+            );
+        }
+
+        queue.submit(Some(encoder.finish()));
+    }
 
     let filter_quality = match desc.quality
     {
@@ -224,7 +271,18 @@ pub fn denoise(device: &wgpu::Device, queue: &wgpu::Queue,
                 oidn_check(device_raw);
             }
         }
-        DenoiseDevice::OidnDevice(oidn_device) => { panic!("unsupported"); }
+        DenoiseDevice::OidnDevice(oidn_device) =>
+        {
+            /*unsafe
+            {
+                use oidn::sys::*;
+
+                let oidn_albedo = resources.albedo.oidn_buffer();
+            }
+            */
+
+            panic!("unsupported");
+        }
     };
 
     // Copy output shared buffer to output texture
