@@ -5,8 +5,6 @@ UI
 pathtracer
     add RAY_EPSILON and MAX_RADIANCE to override constants (or push constants?)
 
-    ray queries
-    denoising (oidn)
 loader
     improve json parser
 
@@ -17,9 +15,6 @@ loader
 misc
     figure out the purpose of the emission direction check in yocto (yocto_cutrace.cu, line 380)
     fix warnings
-    just use eframe instead of winit, which has breaking changes on every version
-
-    maybe use software rendering for the UI and put it in another thread (maybe...).
 
 tester
     MAKE TESTER AND PROFILER

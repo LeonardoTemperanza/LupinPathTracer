@@ -770,7 +770,7 @@ pub enum PathtraceType
     /// Does not exhibit any form of firefly artifacts, but it may take a
     /// very long time to converge to the reference. Generally very slow.
     Naive = 2,
-    /// Like standard, but casts an extra ray at each bounce for light sampling.
+    /// BSDF-sampling coupled with a light ray to check for light occlusion.
     Direct = 3,
 }
 
