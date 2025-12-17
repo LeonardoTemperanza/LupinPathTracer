@@ -45,16 +45,17 @@ pub fn build_denoise_resources(device: &wgpu::Device, denoise_device: &DenoiseDe
 
     let filter: oidn::sys::OIDNFilter;
 
-    let texture_size = 4 * 2 * width * height;
+    let row_size = align_up(4 * 2 * width, wgpu::COPY_BYTES_PER_ROW_ALIGNMENT);
+    let buffer_size = row_size * height;
 
     match denoise_device
     {
         // Supports shared device.
         DenoiseDevice::InteropDevice(interop_device) =>
         {
-            beauty  = interop_device.allocate_shared_buffers(texture_size as u64).unwrap();
-            albedo  = interop_device.allocate_shared_buffers(texture_size as u64).unwrap();
-            normals = interop_device.allocate_shared_buffers(texture_size as u64).unwrap();
+            beauty  = interop_device.allocate_shared_buffers(buffer_size as u64).unwrap();
+            albedo  = interop_device.allocate_shared_buffers(buffer_size as u64).unwrap();
+            normals = interop_device.allocate_shared_buffers(buffer_size as u64).unwrap();
 
             unsafe
             {
@@ -69,9 +70,9 @@ pub fn build_denoise_resources(device: &wgpu::Device, denoise_device: &DenoiseDe
                 oidnSetFilterBool(filter, c"srgb".as_ptr(), false);
                 oidnSetFilterBool(filter, c"clean_aux".as_ptr(), false);
                 oidnSetFilterImage(filter, c"color".as_ptr(), shared_beauty_raw,
-                                   OIDNFormat_OIDN_FORMAT_HALF3, width as usize, height as usize, 0, 4 * 2, 0);
+                                   OIDNFormat_OIDN_FORMAT_HALF3, width as usize, height as usize, 0, 4 * 2, row_size as usize);
                 oidnSetFilterImage(filter, c"output".as_ptr(), shared_beauty_raw,
-                                   OIDNFormat_OIDN_FORMAT_HALF3, width as usize, height as usize, 0, 4 * 2, 0);
+                                   OIDNFormat_OIDN_FORMAT_HALF3, width as usize, height as usize, 0, 4 * 2, row_size as usize);
                 oidnCommitFilter(filter);
                 oidn_check(device_raw);
             }
@@ -162,7 +163,7 @@ pub fn denoise(device: &wgpu::Device, queue: &wgpu::Queue,
                 buffer: resources.beauty.wgpu_buffer(),
                 layout: wgpu::TexelCopyBufferLayout {
                     offset: 0,
-                    bytes_per_row: Some(8 * width),
+                    bytes_per_row: Some(align_up(8 * width, wgpu::COPY_BYTES_PER_ROW_ALIGNMENT)),
                     rows_per_image: Some(height)
                 }
             },
@@ -182,7 +183,7 @@ pub fn denoise(device: &wgpu::Device, queue: &wgpu::Queue,
                     buffer: resources.albedo.wgpu_buffer(),
                     layout: wgpu::TexelCopyBufferLayout {
                         offset: 0,
-                        bytes_per_row: Some(8 * width),
+                        bytes_per_row: Some(align_up(8 * width, wgpu::COPY_BYTES_PER_ROW_ALIGNMENT)),
                         rows_per_image: Some(height)
                     }
                 },
@@ -203,7 +204,7 @@ pub fn denoise(device: &wgpu::Device, queue: &wgpu::Queue,
                     buffer: resources.normals.wgpu_buffer(),
                     layout: wgpu::TexelCopyBufferLayout {
                         offset: 0,
-                        bytes_per_row: Some(8 * width),
+                        bytes_per_row: Some(align_up(8 * width, wgpu::COPY_BYTES_PER_ROW_ALIGNMENT)),
                         rows_per_image: Some(height)
                     }
                 },
@@ -241,11 +242,13 @@ pub fn denoise(device: &wgpu::Device, queue: &wgpu::Queue,
                 let filter = resources.filter;
                 oidnSetFilterInt(filter, c"quality".as_ptr(), filter_quality as i32);
 
+                let row_size = align_up(8 * width, wgpu::COPY_BYTES_PER_ROW_ALIGNMENT);
+
                 // Update aux images if necessary
                 if !resources.cur_has_albedo && desc.albedo.is_some()
                 {
                     oidnSetFilterImage(filter, c"albedo".as_ptr(), shared_albedo_raw,
-                                       OIDNFormat_OIDN_FORMAT_HALF3, width as usize, height as usize, 0, 4 * 2, 0);
+                                       OIDNFormat_OIDN_FORMAT_HALF3, width as usize, height as usize, 0, 4 * 2, row_size as usize);
                     resources.cur_has_albedo = true;
                 }
                 else if resources.cur_has_albedo && !desc.albedo.is_some()
@@ -256,7 +259,7 @@ pub fn denoise(device: &wgpu::Device, queue: &wgpu::Queue,
                 if !resources.cur_has_normals && desc.normals.is_some()
                 {
                     oidnSetFilterImage(filter, c"normals".as_ptr(), shared_normals_raw,
-                                       OIDNFormat_OIDN_FORMAT_HALF3, width as usize, height as usize, 0, 4 * 2, 0);
+                                       OIDNFormat_OIDN_FORMAT_HALF3, width as usize, height as usize, 0, 4 * 2, row_size as usize);
                     resources.cur_has_normals = true;
                 }
                 else if resources.cur_has_normals && !desc.normals.is_some()
@@ -292,7 +295,7 @@ pub fn denoise(device: &wgpu::Device, queue: &wgpu::Queue,
             buffer: resources.beauty.wgpu_buffer(),
             layout: wgpu::TexelCopyBufferLayout {
                 offset: 0,
-                bytes_per_row: Some(8 * width),
+                bytes_per_row: Some(align_up(8 * width, wgpu::COPY_BYTES_PER_ROW_ALIGNMENT)),
                 rows_per_image: Some(height)
             }
         },
@@ -325,4 +328,10 @@ unsafe fn oidn_check(oidn_device: oidn::sys::OIDNDevice)
             panic!("OIDN Error: {}", msg);
         }
     }
+}
+
+fn align_up(value: u32, align: u32) -> u32
+{
+    assert!(0 == (align & (align - 1)), "Must align to a power of two");
+    return (value + (align - 1)) & !(align - 1);
 }
