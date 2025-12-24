@@ -180,6 +180,7 @@ fn compute_instance_lights_pdf(ray: Ray) -> f32
     return pdf;
 }
 
+// Will return the closest hit, while skipping hits based on alpha.
 fn ray_skip_alpha_stochastically(start_ray: Ray) -> HitInfo
 {
     var hit = HitInfo();

@@ -330,6 +330,17 @@ pub enum DenoiseDevice
     OidnDevice(oidn::Device),
 }
 
+impl DenoiseDevice
+{
+    pub fn oidn_device(&self) -> &oidn::Device
+    {
+        return match self {
+            DenoiseDevice::InteropDevice(interop) => interop.oidn_device(),
+            DenoiseDevice::OidnDevice(device) => &device,
+        }
+    }
+}
+
 /// Requests the wgpu device with the required features for Lupin and for denoising.
 #[cfg(feature = "denoising")]
 pub fn request_device_for_lupin_with_denoising_capabilities(adapter: &wgpu::Adapter) -> (wgpu::Device, wgpu::Queue, DenoiseDevice)

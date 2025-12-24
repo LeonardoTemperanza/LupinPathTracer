@@ -1,7 +1,12 @@
 
+Implement CPU copy fallback for denoiser
+Clean up math functions
+Fix the samplers thing
+Stop using the deprecated method on winit, fix all warnings
+clean up loader
+
 UI
-    fix switching from free-roam to non-free-roam
-    make RAY_EPSILON and MAX_RADIANCE adjustable
+    make MAX_RADIANCE adjustable
 pathtracer
     add RAY_EPSILON and MAX_RADIANCE to override constants (or push constants?)
 
