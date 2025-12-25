@@ -100,8 +100,35 @@ pub fn build_denoise_resources(device: &wgpu::Device, denoise_device: &DenoiseDe
         // Doesn't support shared device.
         DenoiseDevice::OidnDevice(oidn_device) =>
         {
-            panic!("Not implemented!")
-            //buffers = DenoiseBuffers::Shared(DenoiseSharedBuffers { beauty, albedo, normals });
+            unsafe
+            {
+                use oidn::sys::*;
+                let device_raw = oidn_device.raw();
+
+                let beauty_private_raw = oidnNewBuffer(device_raw, buffer_size as usize);
+                let albedo_private_raw = oidnNewBuffer(device_raw, buffer_size as usize);
+                let normals_private_raw = oidnNewBuffer(device_raw, buffer_size as usize);
+                assert!(!beauty_private_raw.is_null());
+                assert!(!albedo_private_raw.is_null());
+                assert!(!normals_private_raw.is_null());
+
+                filter = oidnNewFilter(device_raw, c"RT".as_ptr());
+                if filter.is_null() { panic!("Failed to create OIDN filter"); }
+
+                oidnSetFilterBool(filter, c"hdr".as_ptr(), true);
+                oidnSetFilterBool(filter, c"srgb".as_ptr(), false);
+                oidnSetFilterBool(filter, c"clean_aux".as_ptr(), false);
+                oidnSetFilterImage(filter, c"color".as_ptr(), beauty_private_raw,
+                                   OIDNFormat_OIDN_FORMAT_HALF3, width as usize, height as usize, 0, 4 * 2, row_size as usize);
+                oidnSetFilterImage(filter, c"output".as_ptr(), beauty_private_raw,
+                                   OIDNFormat_OIDN_FORMAT_HALF3, width as usize, height as usize, 0, 4 * 2, row_size as usize);
+                oidnCommitFilter(filter);
+                oidn_check(device_raw);
+
+                beauty = DenoiseBuffer::Private(oidn_device.create_buffer_from_raw(beauty_private_raw));
+                albedo = DenoiseBuffer::Private(oidn_device.create_buffer_from_raw(albedo_private_raw));
+                normals = DenoiseBuffer::Private(oidn_device.create_buffer_from_raw(normals_private_raw));
+            }
         }
     }
 
@@ -147,6 +174,7 @@ pub enum DenoiseQuality
 }
 
 /// Keep in mind this will trigger a CPU stall waiting for currently scheduled GPU commands to finish.
+/// It will also copy to the CPU and back if the device doesn't support WGPU-OIDN compatibility.
 pub fn denoise(device: &wgpu::Device, queue: &wgpu::Queue,
                denoise_device: &DenoiseDevice, resources: &mut DenoiseResources,
                desc: &DenoiseDesc)
@@ -167,75 +195,7 @@ pub fn denoise(device: &wgpu::Device, queue: &wgpu::Queue,
     let width = resources.width;
     let height = resources.height;
 
-    // Copy local buffers to shared buffers
-    /*
-    {
-        let mut encoder = device.create_command_encoder(&Default::default());
-
-        encoder.copy_texture_to_buffer(
-            wgpu::TexelCopyTextureInfo {
-                texture: desc.pathtrace_output,
-                mip_level: 0,
-                origin: Default::default(),
-                aspect: Default::default()
-            },
-            wgpu::TexelCopyBufferInfo {
-                buffer: resources.beauty.wgpu_buffer(),
-                layout: wgpu::TexelCopyBufferLayout {
-                    offset: 0,
-                    bytes_per_row: Some(align_up(8 * width, wgpu::COPY_BYTES_PER_ROW_ALIGNMENT)),
-                    rows_per_image: Some(height)
-                }
-            },
-            desc.pathtrace_output.size()
-        );
-
-        if let Some(albedo) = desc.albedo
-        {
-            encoder.copy_texture_to_buffer(
-                wgpu::TexelCopyTextureInfo {
-                    texture: albedo,
-                    mip_level: 0,
-                    origin: Default::default(),
-                    aspect: Default::default()
-                },
-                wgpu::TexelCopyBufferInfo {
-                    buffer: resources.albedo.wgpu_buffer(),
-                    layout: wgpu::TexelCopyBufferLayout {
-                        offset: 0,
-                        bytes_per_row: Some(align_up(8 * width, wgpu::COPY_BYTES_PER_ROW_ALIGNMENT)),
-                        rows_per_image: Some(height)
-                    }
-                },
-                desc.pathtrace_output.size()
-            );
-        }
-
-        if let Some(normals) = desc.normals
-        {
-            encoder.copy_texture_to_buffer(
-                wgpu::TexelCopyTextureInfo {
-                    texture: normals,
-                    mip_level: 0,
-                    origin: Default::default(),
-                    aspect: Default::default()
-                },
-                wgpu::TexelCopyBufferInfo {
-                    buffer: resources.normals.wgpu_buffer(),
-                    layout: wgpu::TexelCopyBufferLayout {
-                        offset: 0,
-                        bytes_per_row: Some(align_up(8 * width, wgpu::COPY_BYTES_PER_ROW_ALIGNMENT)),
-                        rows_per_image: Some(height)
-                    }
-                },
-                desc.pathtrace_output.size()
-            );
-        }
-
-        queue.submit(Some(encoder.finish()));
-    }
-    */
-
+    // Copy input buffers
     copy_texture_to_oidn_buf(device, queue, desc.pathtrace_output, &resources.beauty);
     if let Some(albedo) = desc.albedo {
         copy_texture_to_oidn_buf(device, queue, albedo, &resources.albedo);
@@ -255,7 +215,7 @@ pub fn denoise(device: &wgpu::Device, queue: &wgpu::Queue,
     let normals_oidn = resources.normals.oidn_buffer();
     let device_oidn = denoise_device.oidn_device();
 
-    // Must wait for wgpu to finish before we can start the OIDN workload.
+    // Must wait for WGPU to finish before we can start the OIDN workload.
     // Unfortunately WGPU-OIDN synchronization is currently not possible.
     device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
 
@@ -265,8 +225,8 @@ pub fn denoise(device: &wgpu::Device, queue: &wgpu::Queue,
         use oidn::sys::*;
         let device_raw = device_oidn.raw();
 
-        let shared_albedo_raw  = resources.albedo.oidn_buffer().raw();
-        let shared_normals_raw = resources.normals.oidn_buffer().raw();
+        let albedo_raw  = resources.albedo.oidn_buffer().raw();
+        let normals_raw = resources.normals.oidn_buffer().raw();
 
         let filter = resources.filter;
         oidnSetFilterInt(filter, c"quality".as_ptr(), filter_quality as i32);
@@ -276,7 +236,7 @@ pub fn denoise(device: &wgpu::Device, queue: &wgpu::Queue,
         // Update aux images if necessary
         if !resources.cur_has_albedo && desc.albedo.is_some()
         {
-            oidnSetFilterImage(filter, c"albedo".as_ptr(), shared_albedo_raw,
+            oidnSetFilterImage(filter, c"albedo".as_ptr(), albedo_raw,
                                OIDNFormat_OIDN_FORMAT_HALF3, width as usize, height as usize, 0, 4 * 2, row_size as usize);
             resources.cur_has_albedo = true;
         }
@@ -287,7 +247,7 @@ pub fn denoise(device: &wgpu::Device, queue: &wgpu::Queue,
         }
         if !resources.cur_has_normals && desc.normals.is_some()
         {
-            oidnSetFilterImage(filter, c"normals".as_ptr(), shared_normals_raw,
+            oidnSetFilterImage(filter, c"normals".as_ptr(), normals_raw,
                                OIDNFormat_OIDN_FORMAT_HALF3, width as usize, height as usize, 0, 4 * 2, row_size as usize);
             resources.cur_has_normals = true;
         }
@@ -303,6 +263,7 @@ pub fn denoise(device: &wgpu::Device, queue: &wgpu::Queue,
         oidn_check(device_raw);
     }
 
+    // Copy to output texture.
     copy_oidn_buf_to_texture(device, queue, &resources.beauty, desc.denoise_output);
 }
 
@@ -337,6 +298,8 @@ fn copy_texture_to_oidn_buf(device: &wgpu::Device, queue: &wgpu::Queue,
 {
     let width = input.width();
     let height = input.height();
+    let row_size = align_up(4 * 2 * width, wgpu::COPY_BYTES_PER_ROW_ALIGNMENT);
+    let buffer_size = row_size * height;
 
     match output
     {
@@ -355,7 +318,7 @@ fn copy_texture_to_oidn_buf(device: &wgpu::Device, queue: &wgpu::Queue,
                     buffer: shared.wgpu_buffer(),
                     layout: wgpu::TexelCopyBufferLayout {
                         offset: 0,
-                        bytes_per_row: Some(align_up(8 * width, wgpu::COPY_BYTES_PER_ROW_ALIGNMENT)),
+                        bytes_per_row: Some(row_size),
                         rows_per_image: Some(height)
                     }
                 },
@@ -365,7 +328,48 @@ fn copy_texture_to_oidn_buf(device: &wgpu::Device, queue: &wgpu::Queue,
         }
         DenoiseBuffer::Private(private) =>
         {
-            panic!("Not implemented!")
+            // Copy texture to CPU buffer first, then back to OIDN buffer (CPU/GPU)
+
+            let readback_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+                label: None,
+                size: buffer_size as u64,
+                usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            });
+
+            let mut encoder = device.create_command_encoder(&Default::default());
+
+            encoder.copy_texture_to_buffer(
+                wgpu::TexelCopyTextureInfo {
+                    texture: input,
+                    mip_level: 0,
+                    origin: wgpu::Origin3d::ZERO,
+                    aspect: wgpu::TextureAspect::All,
+                },
+                wgpu::TexelCopyBufferInfo {
+                    buffer: &readback_buffer,
+                    layout: wgpu::TexelCopyBufferLayout {
+                        offset: 0,
+                        bytes_per_row: Some(row_size),
+                        rows_per_image: Some(height as u32),
+                    },
+                },
+                input.size(),
+            );
+            queue.submit(Some(encoder.finish()));
+
+            let slice = readback_buffer.slice(..);
+            let mapping = slice.map_async(wgpu::MapMode::Read, | result | {} );
+            device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
+
+            let data = slice.get_mapped_range();
+
+            unsafe
+            {
+                use oidn::sys::*;
+                let private_raw = private.raw();
+                oidnWriteBuffer(private_raw, 0, data.len(), data.as_ptr() as *const std::ffi::c_void);
+            }
         }
     }
 }
@@ -375,6 +379,8 @@ fn copy_oidn_buf_to_texture(device: &wgpu::Device, queue: &wgpu::Queue,
 {
     let width = output.width();
     let height = output.height();
+    let row_size = align_up(4 * 2 * width, wgpu::COPY_BYTES_PER_ROW_ALIGNMENT);
+    let buffer_size = row_size * height;
 
     match input
     {
@@ -386,7 +392,7 @@ fn copy_oidn_buf_to_texture(device: &wgpu::Device, queue: &wgpu::Queue,
                     buffer: shared.wgpu_buffer(),
                     layout: wgpu::TexelCopyBufferLayout {
                         offset: 0,
-                        bytes_per_row: Some(align_up(8 * width, wgpu::COPY_BYTES_PER_ROW_ALIGNMENT)),
+                        bytes_per_row: Some(row_size),
                         rows_per_image: Some(height)
                     }
                 },
@@ -402,7 +408,54 @@ fn copy_oidn_buf_to_texture(device: &wgpu::Device, queue: &wgpu::Queue,
         }
         DenoiseBuffer::Private(private) =>
         {
-            panic!("Not implemented!")
+            // Copy OIDN buffer to CPU buffer first, then back to GPU texture
+
+            let readback_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+                label: None,
+                size: buffer_size as u64,
+                usage: wgpu::BufferUsages::MAP_WRITE | wgpu::BufferUsages::COPY_SRC,
+                mapped_at_creation: false,
+            });
+
+            {
+                let slice = readback_buffer.slice(..);
+                let mapping = slice.map_async(wgpu::MapMode::Write, | result | {} );
+                device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
+
+                let data = slice.get_mapped_range();
+
+                unsafe
+                {
+                    use oidn::sys::*;
+                    let private_raw = private.raw();
+                    oidnReadBuffer(private_raw, 0, data.len(), data.as_ptr() as *mut std::ffi::c_void);
+                }
+
+            }
+
+            readback_buffer.unmap();
+
+            let mut encoder = device.create_command_encoder(&Default::default());
+            encoder.copy_buffer_to_texture(
+                wgpu::TexelCopyBufferInfo {
+                    buffer: &readback_buffer,
+                    layout: wgpu::TexelCopyBufferLayout {
+                        offset: 0,
+                        bytes_per_row: Some(row_size),
+                        rows_per_image: Some(height)
+                    }
+                },
+                wgpu::TexelCopyTextureInfo {
+                    texture: output,
+                    mip_level: 0,
+                    origin: Default::default(),
+                    aspect: Default::default()
+                },
+                output.size()
+            );
+            queue.submit(Some(encoder.finish()));
+
+            device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
         }
     }
 }

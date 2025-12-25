@@ -20,3 +20,5 @@ oidn-wgpu-interop = { git = "https://github.com/Vecvec/oidn-wgpu-interop", optio
 
 [features]
 denoising = ["dep:oidn", "dep:oidn-wgpu-interop"]
+denoise-force-disable-shared-device = []
+force-swrt = []

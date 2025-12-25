@@ -294,7 +294,7 @@ impl<'a> AppState<'a>
             tiled_rendering: false,
             tile_params: Default::default(),
             denoising: false,
-            use_gbuffers_for_denoise: false,
+            use_gbuffers_for_denoise: true,
             max_radiance: 100.0,
 
             // Camera

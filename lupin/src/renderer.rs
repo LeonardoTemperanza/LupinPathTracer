@@ -284,7 +284,8 @@ pub fn request_device_for_lupin(adapter: &wgpu::Adapter) -> (wgpu::Device, wgpu:
     let optional_features = wgpu::Features::EXPERIMENTAL_RAY_QUERY;
     let supported_optional_features = optional_features.intersection(adapter.features());
 
-    let supports_rt = supported_optional_features.contains(wgpu::Features::EXPERIMENTAL_RAY_QUERY);
+    let force_swrt = cfg!(feature = "force-swrt");
+    let supports_rt = !force_swrt && supported_optional_features.contains(wgpu::Features::EXPERIMENTAL_RAY_QUERY);
     let allowed_accel_structures = if supports_rt { RT_MAX_ACCEL_STRUCTURES } else { 0 };
     let max_rt_instances = if supports_rt { 1000000 } else { 0 };
     let max_blas_geometry_count = if supports_rt { 1 } else { 0 };
@@ -348,7 +349,8 @@ pub fn request_device_for_lupin_with_denoising_capabilities(adapter: &wgpu::Adap
     let optional_features = wgpu::Features::EXPERIMENTAL_RAY_QUERY;
     let supported_optional_features = optional_features.intersection(adapter.features());
 
-    let supports_rt = supported_optional_features.contains(wgpu::Features::EXPERIMENTAL_RAY_QUERY);
+    let force_swrt = cfg!(feature = "force-swrt");
+    let supports_rt = !force_swrt && supported_optional_features.contains(wgpu::Features::EXPERIMENTAL_RAY_QUERY);
     let allowed_accel_structures = if supports_rt { RT_MAX_ACCEL_STRUCTURES } else { 0 };
     let max_rt_instances = if supports_rt { 1000000 } else { 0 };
     let max_blas_geometry_count = if supports_rt { 1 } else { 0 };
@@ -383,9 +385,11 @@ pub fn request_device_for_lupin_with_denoising_capabilities(adapter: &wgpu::Adap
         trace: Default::default(),
     };
 
+    let disable_shared_device = cfg!(feature = "denoise-force-disable-shared-device");
     let res = wait_for(oidn_wgpu_interop::Device::new(adapter, &desc));
-    if let Ok(res) = res
+    if matches!(res, Ok(_)) && !disable_shared_device
     {
+        let res = res.unwrap();
         let (device, queue) = res;
         return (device.wgpu_device().clone(), queue, DenoiseDevice::InteropDevice(device));
     }
