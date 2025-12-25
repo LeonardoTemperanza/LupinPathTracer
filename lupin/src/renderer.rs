@@ -282,10 +282,11 @@ const RT_MAX_ACCEL_STRUCTURES: u32 = 2;
 pub fn request_device_for_lupin(adapter: &wgpu::Adapter) -> (wgpu::Device, wgpu::Queue)
 {
     let optional_features = wgpu::Features::EXPERIMENTAL_RAY_QUERY;
-    let supported_optional_features = optional_features.intersection(adapter.features());
-
+    let mut supported_optional_features = optional_features.intersection(adapter.features());
     let force_swrt = cfg!(feature = "force-swrt");
-    let supports_rt = !force_swrt && supported_optional_features.contains(wgpu::Features::EXPERIMENTAL_RAY_QUERY);
+    if force_swrt { supported_optional_features.remove(wgpu::Features::EXPERIMENTAL_RAY_QUERY); }
+
+    let supports_rt = supported_optional_features.contains(wgpu::Features::EXPERIMENTAL_RAY_QUERY);
     let allowed_accel_structures = if supports_rt { RT_MAX_ACCEL_STRUCTURES } else { 0 };
     let max_rt_instances = if supports_rt { 1000000 } else { 0 };
     let max_blas_geometry_count = if supports_rt { 1 } else { 0 };
@@ -347,10 +348,11 @@ impl DenoiseDevice
 pub fn request_device_for_lupin_with_denoising_capabilities(adapter: &wgpu::Adapter) -> (wgpu::Device, wgpu::Queue, DenoiseDevice)
 {
     let optional_features = wgpu::Features::EXPERIMENTAL_RAY_QUERY;
-    let supported_optional_features = optional_features.intersection(adapter.features());
-
+    let mut supported_optional_features = optional_features.intersection(adapter.features());
     let force_swrt = cfg!(feature = "force-swrt");
-    let supports_rt = !force_swrt && supported_optional_features.contains(wgpu::Features::EXPERIMENTAL_RAY_QUERY);
+    if force_swrt { supported_optional_features.remove(wgpu::Features::EXPERIMENTAL_RAY_QUERY); }
+
+    let supports_rt = supported_optional_features.contains(wgpu::Features::EXPERIMENTAL_RAY_QUERY);
     let allowed_accel_structures = if supports_rt { RT_MAX_ACCEL_STRUCTURES } else { 0 };
     let max_rt_instances = if supports_rt { 1000000 } else { 0 };
     let max_blas_geometry_count = if supports_rt { 1 } else { 0 };
