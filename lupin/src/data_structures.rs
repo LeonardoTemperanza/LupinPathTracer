@@ -101,7 +101,7 @@ pub fn build_lights(scene: &SceneCPU, envs_info: &[EnvMapInfo]) -> LightsCPU
         let p0_v3 = Vec3 { x: p0.x, y: p0.y, z: p0.z };
         let p1_v3 = Vec3 { x: p1.x, y: p1.y, z: p1.z };
         let p2_v3 = Vec3 { x: p2.x, y: p2.y, z: p2.z };
-        return length_vec3(cross_vec3(p1_v3 - p0_v3, p2_v3 - p0_v3)) / 2.0;
+        return (p1_v3 - p0_v3).cross(p2_v3 - p0_v3).magnitude() / 2.0;
     }
 }
 

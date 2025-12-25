@@ -7,8 +7,6 @@
 // Don't spawn a terminal window on windows
 //#![windows_subsystem = "windows"]
 
-const FORCE_SW_RT: bool = false;
-
 use std::time::Instant;
 
 pub use winit::
@@ -211,7 +209,7 @@ impl<'a> AppState<'a>
 
         let denoise_resources = lp::build_denoise_resources(&device, &denoise_device, width, height);
 
-        let (scene, scene_cameras) = lpl::build_scene_cornell_box(&device, &queue, FORCE_SW_RT);
+        let (scene, scene_cameras) = lpl::build_scene_cornell_box(&device, &queue, false);
 
         let output = DoubleBufferedTexture::create(device, &wgpu::TextureDescriptor {
             label: None,
@@ -452,7 +450,7 @@ impl<'a> AppState<'a>
             tile_params: Some(&self.tile_params),
             camera_params: self.camera_params,
             camera_transform: self.cam_transform,
-            force_software_bvh: FORCE_SW_RT,
+            force_software_bvh: false,
             advanced: lp::AdvancedParams {
                 max_radiance: self.max_radiance,
             }
@@ -465,7 +463,7 @@ impl<'a> AppState<'a>
             tile_params: Some(&self.tile_params),
             camera_params: self.camera_params,
             camera_transform: self.cam_transform,
-            force_software_bvh: FORCE_SW_RT,
+            force_software_bvh: false,
             advanced: lp::AdvancedParams {
                 max_radiance: self.max_radiance,
             }
@@ -478,7 +476,7 @@ impl<'a> AppState<'a>
             tile_params: Some(&self.tile_params),
             camera_params: self.camera_params,
             camera_transform: self.cam_transform,
-            force_software_bvh: FORCE_SW_RT,
+            force_software_bvh: false,
             advanced: lp::AdvancedParams {
                 max_radiance: self.max_radiance,
             }
@@ -662,8 +660,8 @@ impl<'a> AppState<'a>
 
             // It's a "direction" input so its length
             // should be no more than 1
-            if lp::dot_vec3(keyboard_dir_xz, keyboard_dir_xz) > 1.0 {
-                keyboard_dir_xz = lp::normalize_vec3(keyboard_dir_xz)
+            if keyboard_dir_xz.dot(keyboard_dir_xz) > 1.0 {
+                keyboard_dir_xz = keyboard_dir_xz.normalized();
             }
 
             if keyboard_dir_y.abs() > 1.0 {
@@ -681,7 +679,7 @@ impl<'a> AppState<'a>
         fn approach_linear(cur: lp::Vec3, target: lp::Vec3, delta: f32) -> lp::Vec3
         {
             let diff = target - cur;
-            let dist = lp::magnitude_vec3(diff);
+            let dist = diff.magnitude();
 
             if dist <= delta { return target; }
             return cur + diff / dist * delta;
@@ -883,7 +881,7 @@ impl<'a> AppState<'a>
                             .add_filter("json", &["json"])
                             .pick_file()
                         {
-                            if let Ok(res) = lpl::load_scene_yoctogl_v24(&path, self.device, self.queue, FORCE_SW_RT)
+                            if let Ok(res) = lpl::load_scene_yoctogl_v24(&path, self.device, self.queue, false)
                             {
                                 (self.scene, self.scene_cameras) = res;
                                 self.reset_accumulation();
@@ -1127,7 +1125,7 @@ pub fn is_transform_flipped(mat: lp::Mat4) -> bool
     let z_axis = lp::Vec3 { x: mat.m[2][0], y: mat.m[2][1], z: mat.m[2][2] };
 
     // Determinant of the 3x3 matrix
-    let det = lp::dot_vec3(x_axis, lp::cross_vec3(y_axis, z_axis));
+    let det = x_axis.dot(y_axis.cross(z_axis));
     return det < 0.0;
 }
 

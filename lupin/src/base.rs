@@ -66,6 +66,28 @@ pub struct Vec2
     pub y: f32
 }
 
+impl Vec2
+{
+    #[inline]
+    pub fn new(x: f32, y: f32) -> Self
+    {
+        return Self { x, y };
+    }
+
+    #[inline]
+    pub fn is_zero(&self) -> bool
+    {
+        return self.x == 0.0 && self.y == 0.0;
+    }
+
+    #[inline]
+    pub fn normalized(&self) -> Self
+    {
+        let magnitude = (self.x * self.x + self.y * self.y).sqrt();
+        return Self { x: self.x / magnitude, y: self.y / magnitude };
+    }
+}
+
 #[derive(Default, Clone, Copy, Debug)]
 #[repr(C)]
 pub struct Vec3
@@ -92,14 +114,70 @@ impl Vec3
     pub const FORWARD:  Vec3 = Vec3 { x: 0.0,  y: 0.0,  z: 1.0  };
     pub const BACKWARD: Vec3 = Vec3 { x: 0.0,  y: 0.0,  z: -1.0 };
 
+    #[inline]
     pub fn new(x: f32, y: f32, z: f32) -> Self
     {
         return Self { x, y, z };
     }
 
-    pub fn is_zero(&self) -> bool
+    #[inline]
+    pub fn ones() -> Self
+    {
+        return Self { x: 1.0, y: 1.0, z: 1.0 };
+    }
+
+    #[inline]
+    pub fn min(self, other: Self) -> Self
+    {
+        return Self {
+            x: self.x.min(other.x),
+            y: self.y.min(other.y),
+            z: self.z.min(other.z),
+        };
+    }
+
+    #[inline]
+    pub fn max(self, other: Self) -> Self
+    {
+        return Self {
+            x: self.x.max(other.x),
+            y: self.y.max(other.y),
+            z: self.z.max(other.z),
+        };
+    }
+
+    #[inline]
+    pub fn is_zero(self) -> bool
     {
         return self.x == 0.0 && self.y == 0.0 && self.z == 0.0;
+    }
+
+    #[inline]
+    pub fn normalized(self) -> Self
+    {
+        let magnitude = self.magnitude();
+        return Self { x: self.x / magnitude, y: self.y / magnitude, z: self.z / magnitude };
+    }
+
+    #[inline]
+    pub fn dot(self, rhs: Vec3) -> f32
+    {
+        return self.x*rhs.x + self.y*rhs.y + self.z*rhs.z;
+    }
+
+    #[inline]
+    pub fn magnitude(self) -> f32
+    {
+        return self.dot(self).sqrt();
+    }
+
+    pub fn cross(self, rhs: Vec3) -> Vec3
+    {
+        return Vec3 {
+            x: self.y*rhs.z - rhs.y*self.z,
+            y: self.z*rhs.x - rhs.z*self.x,
+            z: self.x*rhs.y - rhs.x*self.y,
+        };
     }
 }
 
@@ -130,7 +208,7 @@ impl Vec4
     #[inline]
     pub fn normalized(&self) -> Vec4
     {
-        let magnitude = self.x * self.x + self.y * self.y + self.z * self.z + self.w * self.w;
+        let magnitude = (self.x * self.x + self.y * self.y + self.z * self.z + self.w * self.w).sqrt();
         return Vec4 { x: self.x / magnitude, y: self.y / magnitude, z: self.z / magnitude, w: self.w / magnitude };
     }
 }
@@ -151,13 +229,13 @@ impl Aabb
 }
 
 #[inline]
-pub fn lerp_f32(a: f32, b: f32, t: f32)->f32
+pub fn lerp(a: f32, b: f32, t: f32)->f32
 {
     return a + (b - a) * t;
 }
 
 #[inline]
-pub fn square_f32(n: f32)->f32
+pub fn square(n: f32)->f32
 {
     return n*n;
 }
@@ -172,38 +250,12 @@ impl std::ops::AddAssign<Vec2> for Vec2
     }
 }
 
-impl Vec3
-{
-    pub fn min(self, other: Self) -> Self
-    {
-        return Self {
-            x: self.x.min(other.x),
-            y: self.y.min(other.y),
-            z: self.z.min(other.z),
-        };
-    }
-
-    pub fn max(self, other: Self) -> Self
-    {
-        return Self {
-            x: self.x.max(other.x),
-            y: self.y.max(other.y),
-            z: self.z.max(other.z),
-        };
-    }
-
-    pub fn ones() -> Self
-    {
-        return Self { x: 1.0, y: 1.0, z: 1.0 };
-    }
-}
-
 impl std::ops::Add for Vec3
 {
     type Output = Self;
 
     #[inline]
-    fn add(self, other: Self)->Self::Output
+    fn add(self, other: Self) -> Self::Output
     {
         return Self
         {
@@ -307,20 +359,6 @@ impl std::ops::IndexMut<isize> for Vec3
     }
 }
 
-#[inline]
-pub fn normalize_vec3(v: Vec3)->Vec3
-{
-    let magnitude = v.x * v.x + v.y * v.y + v.z * v.z;
-    return Vec3 { x: v.x / magnitude, y: v.y / magnitude, z: v.z / magnitude };
-}
-
-#[inline]
-pub fn normalize_vec2(v: Vec2)->Vec2
-{
-    let magnitude = v.x * v.x + v.y * v.y;
-    return Vec2 { x: v.x / magnitude, y: v.y / magnitude };
-}
-
 impl std::fmt::Display for Vec2
 {
     fn fmt(&self, _: &mut std::fmt::Formatter<'_>)->std::result::Result<(), std::fmt::Error>
@@ -350,6 +388,7 @@ pub struct Mat4
 
 impl Default for Mat4
 {
+    #[inline]
     fn default() -> Self
     {
         return Self::IDENTITY;
@@ -368,6 +407,7 @@ impl Mat4
         ]
     };
 
+    #[inline]
     pub fn zeros() -> Self
     {
         return Mat4{ m: [
@@ -376,6 +416,44 @@ impl Mat4
             [ 0.0, 0.0, 0.0, 0.0 ],
             [ 0.0, 0.0, 0.0, 0.0 ]
         ]};
+    }
+
+    pub fn inverse(&self) -> Self
+    {
+        let s0 = self.m[0][0] * self.m[1][1] - self.m[1][0] * self.m[0][1];
+        let s1 = self.m[0][0] * self.m[1][2] - self.m[1][0] * self.m[0][2];
+        let s2 = self.m[0][0] * self.m[1][3] - self.m[1][0] * self.m[0][3];
+        let s3 = self.m[0][1] * self.m[1][2] - self.m[1][1] * self.m[0][2];
+        let s4 = self.m[0][1] * self.m[1][3] - self.m[1][1] * self.m[0][3];
+        let s5 = self.m[0][2] * self.m[1][3] - self.m[1][2] * self.m[0][3];
+        let c5 = self.m[2][2] * self.m[3][3] - self.m[3][2] * self.m[2][3];
+        let c4 = self.m[2][1] * self.m[3][3] - self.m[3][1] * self.m[2][3];
+        let c3 = self.m[2][1] * self.m[3][2] - self.m[3][1] * self.m[2][2];
+        let c2 = self.m[2][0] * self.m[3][3] - self.m[3][0] * self.m[2][3];
+        let c1 = self.m[2][0] * self.m[3][2] - self.m[3][0] * self.m[2][2];
+        let c0 = self.m[2][0] * self.m[3][1] - self.m[3][0] * self.m[2][1];
+
+        // Should check for 0 determinant
+        let invdet = 1.0 / (s0 * c5 - s1 * c4 + s2 * c3 + s3 * c2 - s4 * c1 + s5 * c0);
+
+        let mut b = Mat4::zeros();
+        b.m[0][0] = ( self.m[1][1] * c5 - self.m[1][2] * c4 + self.m[1][3] * c3) * invdet;
+        b.m[0][1] = (-self.m[0][1] * c5 + self.m[0][2] * c4 - self.m[0][3] * c3) * invdet;
+        b.m[0][2] = ( self.m[3][1] * s5 - self.m[3][2] * s4 + self.m[3][3] * s3) * invdet;
+        b.m[0][3] = (-self.m[2][1] * s5 + self.m[2][2] * s4 - self.m[2][3] * s3) * invdet;
+        b.m[1][0] = (-self.m[1][0] * c5 + self.m[1][2] * c2 - self.m[1][3] * c1) * invdet;
+        b.m[1][1] = ( self.m[0][0] * c5 - self.m[0][2] * c2 + self.m[0][3] * c1) * invdet;
+        b.m[1][2] = (-self.m[3][0] * s5 + self.m[3][2] * s2 - self.m[3][3] * s1) * invdet;
+        b.m[1][3] = ( self.m[2][0] * s5 - self.m[2][2] * s2 + self.m[2][3] * s1) * invdet;
+        b.m[2][0] = ( self.m[1][0] * c4 - self.m[1][1] * c2 + self.m[1][3] * c0) * invdet;
+        b.m[2][1] = (-self.m[0][0] * c4 + self.m[0][1] * c2 - self.m[0][3] * c0) * invdet;
+        b.m[2][2] = ( self.m[3][0] * s4 - self.m[3][1] * s2 + self.m[3][3] * s0) * invdet;
+        b.m[2][3] = (-self.m[2][0] * s4 + self.m[2][1] * s2 - self.m[2][3] * s0) * invdet;
+        b.m[3][0] = (-self.m[1][0] * c3 + self.m[1][1] * c1 - self.m[1][2] * c0) * invdet;
+        b.m[3][1] = ( self.m[0][0] * c3 - self.m[0][1] * c1 + self.m[0][2] * c0) * invdet;
+        b.m[3][2] = (-self.m[3][0] * s3 + self.m[3][1] * s1 - self.m[3][2] * s0) * invdet;
+        b.m[3][3] = ( self.m[2][0] * s3 - self.m[2][1] * s1 + self.m[2][2] * s0) * invdet;
+        return b;
     }
 }
 
@@ -432,7 +510,7 @@ impl std::ops::Mul<Vec3> for Mat4
     }
 }
 
-/// The naming follows this convention: MatRxC, where R
+/// The naming follows this convention: MatCxR, where R
 /// is the number of rows, and C is the number of columns.
 #[derive(Debug, Clone, Copy)]
 #[repr(C)]
@@ -443,6 +521,7 @@ pub struct Mat3x4
 
 impl Default for Mat3x4
 {
+    #[inline]
     fn default() -> Self
     {
         return Self {
@@ -509,7 +588,7 @@ impl Mat3x4
     pub fn inverse(&self) -> Mat3x4
     {
         let mat4 = self.to_mat4();
-        let inv = mat4_inverse(mat4);
+        let inv = mat4.inverse();
         return Mat3x4 {
             m: [
                 [ inv.m[0][0], inv.m[0][1], inv.m[0][2] ],
@@ -597,44 +676,6 @@ impl Default for Mat4x3
     }
 }
 
-pub fn mat4_inverse(m: Mat4) -> Mat4
-{
-    let s0 = m.m[0][0] * m.m[1][1] - m.m[1][0] * m.m[0][1];
-    let s1 = m.m[0][0] * m.m[1][2] - m.m[1][0] * m.m[0][2];
-    let s2 = m.m[0][0] * m.m[1][3] - m.m[1][0] * m.m[0][3];
-    let s3 = m.m[0][1] * m.m[1][2] - m.m[1][1] * m.m[0][2];
-    let s4 = m.m[0][1] * m.m[1][3] - m.m[1][1] * m.m[0][3];
-    let s5 = m.m[0][2] * m.m[1][3] - m.m[1][2] * m.m[0][3];
-    let c5 = m.m[2][2] * m.m[3][3] - m.m[3][2] * m.m[2][3];
-    let c4 = m.m[2][1] * m.m[3][3] - m.m[3][1] * m.m[2][3];
-    let c3 = m.m[2][1] * m.m[3][2] - m.m[3][1] * m.m[2][2];
-    let c2 = m.m[2][0] * m.m[3][3] - m.m[3][0] * m.m[2][3];
-    let c1 = m.m[2][0] * m.m[3][2] - m.m[3][0] * m.m[2][2];
-    let c0 = m.m[2][0] * m.m[3][1] - m.m[3][0] * m.m[2][1];
-
-    // Should check for 0 determinant
-    let invdet = 1.0 / (s0 * c5 - s1 * c4 + s2 * c3 + s3 * c2 - s4 * c1 + s5 * c0);
-
-    let mut b = Mat4::zeros();
-    b.m[0][0] = ( m.m[1][1] * c5 - m.m[1][2] * c4 + m.m[1][3] * c3) * invdet;
-    b.m[0][1] = (-m.m[0][1] * c5 + m.m[0][2] * c4 - m.m[0][3] * c3) * invdet;
-    b.m[0][2] = ( m.m[3][1] * s5 - m.m[3][2] * s4 + m.m[3][3] * s3) * invdet;
-    b.m[0][3] = (-m.m[2][1] * s5 + m.m[2][2] * s4 - m.m[2][3] * s3) * invdet;
-    b.m[1][0] = (-m.m[1][0] * c5 + m.m[1][2] * c2 - m.m[1][3] * c1) * invdet;
-    b.m[1][1] = ( m.m[0][0] * c5 - m.m[0][2] * c2 + m.m[0][3] * c1) * invdet;
-    b.m[1][2] = (-m.m[3][0] * s5 + m.m[3][2] * s2 - m.m[3][3] * s1) * invdet;
-    b.m[1][3] = ( m.m[2][0] * s5 - m.m[2][2] * s2 + m.m[2][3] * s1) * invdet;
-    b.m[2][0] = ( m.m[1][0] * c4 - m.m[1][1] * c2 + m.m[1][3] * c0) * invdet;
-    b.m[2][1] = (-m.m[0][0] * c4 + m.m[0][1] * c2 - m.m[0][3] * c0) * invdet;
-    b.m[2][2] = ( m.m[3][0] * s4 - m.m[3][1] * s2 + m.m[3][3] * s0) * invdet;
-    b.m[2][3] = (-m.m[2][0] * s4 + m.m[2][1] * s2 - m.m[2][3] * s0) * invdet;
-    b.m[3][0] = (-m.m[1][0] * c3 + m.m[1][1] * c1 - m.m[1][2] * c0) * invdet;
-    b.m[3][1] = ( m.m[0][0] * c3 - m.m[0][1] * c1 + m.m[0][2] * c0) * invdet;
-    b.m[3][2] = (-m.m[3][0] * s3 + m.m[3][1] * s1 - m.m[3][2] * s0) * invdet;
-    b.m[3][3] = ( m.m[2][0] * s3 - m.m[2][1] * s1 + m.m[2][2] * s0) * invdet;
-    return b;
-}
-
 #[derive(Debug, Clone, Copy)]
 #[repr(C)]
 pub struct Quat
@@ -654,6 +695,7 @@ impl Default for Quat
     }
 }
 
+// Applied B first, A second
 impl std::ops::Mul<Quat> for Quat
 {
     type Output = Quat;
@@ -709,7 +751,30 @@ impl Quat
     pub const IDENTITY: Quat = Quat { w: 1.0, x: 0.0, y: 0.0, z: 0.0 };
 
     #[inline(always)]
-    pub fn xyz(&self)->Vec3 { return Vec3 { x: self.x, y: self.y, z: self.z }; }
+    pub fn xyz(&self) -> Vec3 { return Vec3 { x: self.x, y: self.y, z: self.z }; }
+
+    #[inline]
+    pub fn normalized(self) -> Quat
+    {
+        let mag = self.magnitude();
+        return Quat { w: self.w / mag, x: self.x / mag, y: self.y / mag, z: self.z / mag };
+    }
+
+    #[inline]
+    pub fn magnitude(self) -> f32
+    {
+        return (self.x*self.x + self.y*self.y + self.z*self.z + self.w*self.w).sqrt();
+    }
+
+    #[inline]
+    pub fn inverse(self) -> Quat
+    {
+        let length_sqr: f32 = self.x*self.x + self.y*self.y + self.z*self.z + self.w*self.w;
+        if length_sqr == 0.0 { return self; }
+
+        let i: f32 = 1.0 / length_sqr;
+        return Quat { w: self.w*i, x: self.x*-i, y: self.y*-i, z: self.z*-i };
+    }
 }
 
 impl std::fmt::Display for Quat
@@ -742,154 +807,9 @@ pub fn rotate_vec3_with_quat(q: Quat, v: Vec3)->Vec3
     };
 }
 
-// Applies b first, a second
-#[inline]
-pub fn quat_mul(a: Quat, b: Quat)->Quat
-{
-    return Quat {
-        w: a.w * b.w - a.x * b.x - a.y * b.y - a.z * b.z,
-        x: a.w * b.x + a.x * b.w + a.y * b.z - a.z * b.y,
-        y: a.w * b.y + a.y * b.w + a.z * b.x - a.x * b.z,
-        z: a.w * b.z + a.z * b.w + a.x * b.y - a.y * b.x
-    };
-}
-
-#[inline]
-pub fn dot_vec3(v1: Vec3, v2: Vec3)->f32
-{
-    return v1.x*v2.x + v1.y*v2.y + v1.z*v2.z;
-}
-
-#[inline]
-pub fn length_vec3(v: Vec3)->f32
-{
-    return f32::sqrt(dot_vec3(v, v));
-}
-
-#[inline]
-pub fn cross_vec3(v1: Vec3, v2: Vec3)->Vec3
-{
-    return Vec3 {
-        x: v1.y*v2.z - v2.y*v1.z,
-        y: v1.z*v2.x - v2.z*v1.x,
-        z: v1.x*v2.y - v2.x*v1.y,
-    };
-}
-
-#[inline]
-pub fn magnitude_vec3(v: Vec3)->f32
-{
-    return (v.x*v.x + v.y*v.y + v.z*v.z).sqrt();
-}
-
-#[inline]
-pub fn normalize_quat(q: Quat)->Quat
-{
-    let mag = magnitude_quat(q);
-    return Quat { w: q.w / mag, x: q.x / mag, y: q.y / mag, z: q.z / mag };
-}
-
-#[inline]
-pub fn magnitude_quat(q: Quat)->f32
-{
-    return (q.x*q.x + q.y*q.y + q.z*q.z + q.w*q.w).sqrt();
-}
-
-#[inline]
-pub fn inverse(q: Quat)->Quat
-{
-    let length_sqr: f32 = q.x*q.x + q.y*q.y + q.z*q.z + q.w*q.w;
-    if length_sqr == 0.0 { return q; }
-
-    let i: f32 = 1.0 / length_sqr;
-    return Quat { w: q.w*i, x: q.x*-i, y: q.y*-i, z: q.z*-i };
-}
-
-pub fn slerp(q1: Quat, q2: Quat, t: f32)->Quat
-{
-    let length_sqr1: f32 = q1.x*q1.x + q1.y*q1.y + q1.z*q1.z + q1.w*q1.w;
-    let length_sqr2: f32 = q2.x*q2.x + q2.y*q2.y + q2.z*q2.z + q2.w*q2.w;
-    let mut q2 = q2;
-
-    if length_sqr1 == 0.0
-    {
-        if length_sqr2 == 0.0
-        {
-            return Quat::IDENTITY;
-        }
-        return q2;
-    }
-    else if length_sqr2 == 0.0
-    {
-        return q1;
-    }
-
-    let mut cos_half_angle: f32 = q1.w * q2.w + dot_vec3(q1.xyz(), q2.xyz());
-    if cos_half_angle >= 1.0 || cos_half_angle <= -1.0
-    {
-        return q1;
-    }
-
-    if cos_half_angle < 0.0
-    {
-        q2 = Quat { w: -q2.w, x: -q2.x, y: -q2.y, z: -q2.w };
-        cos_half_angle = -cos_half_angle;
-    }
-
-    let blend_a;
-    let blend_b;
-    if cos_half_angle < 0.99
-    {
-        // Do proper slerp for big angles
-        let half_angle = cos_half_angle.acos();
-        let sin_half_angle = half_angle.sin();
-        let one_over_sin_half_angle = 1.0 / sin_half_angle;
-        blend_a = (half_angle * (1.0 - t)).sin() * one_over_sin_half_angle;
-        blend_b = (half_angle * t).sin() * one_over_sin_half_angle;
-    }
-    else
-    {
-        // Do lerp if angle is really small
-        blend_a = 1.0 - t;
-        blend_b = t;
-    }
-
-    let result = Quat { w: blend_a*q1.w + blend_b*q2.w,
-                        x: blend_a*q1.x + blend_b*q2.x,
-                        y: blend_a*q1.y + blend_b*q2.y,
-                        z: blend_a*q1.z + blend_b*q2.z };
-    let length_sqr: f32 = q1.x*q1.x + q1.y*q1.y + q1.z*q1.z + q1.w*q1.w;
-    if length_sqr > 0.0 { return normalize_quat(result); }
-
-    return Quat::IDENTITY;
-}
-
-// https://stackoverflow.com/questions/46156903/how-to-lerp-between-two-quaternions
-pub fn lerp_quat(q1: Quat, q2: Quat, t: f32)->Quat
-{
-    let dot_q: f32 = q1.x * q2.x + q1.y * q2.y + q1.z * q2.z + q1.w * q2.w;
-    let mut q2 = q2;
-
-    if dot_q < 0.0
-    {
-        // Negate q2
-        q2.x = -q2.x;
-        q2.y = -q2.y;
-        q2.z = -q2.z;
-        q2.w = -q2.w;
-    }
-
-    let mut res = Quat::IDENTITY;
-    res.x = q1.x - t*(q1.x - q2.x);
-    res.y = q1.y - t*(q1.y - q2.y);
-    res.z = q1.z - t*(q1.z - q2.z);
-    res.w = q1.w - t*(q1.w - q2.w);
-    return normalize_quat(res);
-}
-
 pub fn angle_axis(axis: Vec3, angle: f32)->Quat
 {
-    if dot_vec3(axis, axis) == 0.0
+    if axis.dot(axis) == 0.0
     {
         return Quat::IDENTITY;
     }
@@ -898,25 +818,16 @@ pub fn angle_axis(axis: Vec3, angle: f32)->Quat
     let mut angle = angle;
 
     angle *= 0.5;
-    axis = normalize_vec3(axis);
+    axis = axis.normalized();
     axis *= angle.sin();
 
     return Quat { w: angle.cos(), x: axis.x, y: axis.y, z: axis.z };
 }
 
-pub fn angle_diff_quat(a: Quat, b: Quat)->f32
+pub fn angle_diff_quat(a: Quat, b: Quat) -> f32
 {
-    let f: f32 = dot_vec3(Vec3 { x: a.x, y: a.y, z: a.z }, Vec3 { x: b.x, y: b.y, z: b.z }) + a.w*b.w;
+    let f: f32 = (Vec3 { x: a.x, y: a.y, z: a.z }).dot(Vec3 { x: b.x, y: b.y, z: b.z }) + a.w*b.w;
     return f.abs().min(1.0).acos() * 2.0;
-}
-
-pub fn rotate_torwards_quat(current: Quat, target: Quat, delta: f32)->Quat
-{
-    let angle: f32 = angle_diff_quat(current, target);
-    if angle == 0.0 { return target; }
-
-    let t: f32 = (delta / angle).min(1.0);
-    return slerp(current, target, t);
 }
 
 pub fn rotation_matrix(q: Quat)->Mat3x4
@@ -1144,12 +1055,4 @@ pub fn is_point_in_aabb(v: Vec3, aabb_min: Vec3, aabb_max: Vec3)->bool
     return v.x >= aabb_min.x && v.x <= aabb_max.x &&
            v.y >= aabb_min.y && v.y <= aabb_max.y &&
            v.z >= aabb_min.z && v.z <= aabb_max.z;
-}
-
-////////
-// Printing utils
-
-pub fn print_type<T>(_: &T)
-{
-    println!("{}", std::any::type_name::<T>());
 }

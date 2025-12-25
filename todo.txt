@@ -4,6 +4,11 @@ Clean up math functions
 Fix the samplers thing
 Stop using the deprecated method on winit, fix all warnings
 clean up loader
+clean up rng thing
+clean up scene builder
+
+Speed up CPU fallback
+Fix bug which causes cornellbox to bug out on SWRT
 
 UI
     make MAX_RADIANCE adjustable
