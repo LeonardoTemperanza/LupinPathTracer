@@ -5,7 +5,6 @@ members = [
     "lupin_loader",
     "lupin_viewer",
     "lupin_tests",
-    "lupin_benchmarks",
 ]
 resolver = "2"
 
