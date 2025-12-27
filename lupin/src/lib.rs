@@ -14,6 +14,7 @@
 //! Here's a simple example of loading a scene and producing a path traced image:
 //! ```no_run
 //! use lupin as lp;
+//! use lupin_loader as lpl;  // Optional
 //! use lupin::wgpu as wgpu;
 //!
 //! fn main()
@@ -29,8 +30,7 @@
 //!         samples_per_pixel: 5,
 //!     });
 //!
-//!     // Load/create the scene. Alternatively, lupin_loader could be used or a custom loader using
-//!     // lupin's scene building API.
+//!     // Load/create the scene.
 //!     let (scene, cameras) = lp::build_scene_cornell_box(&device, &queue, false);
 //!     // let (scene, cameras) = lpl::load_scene_yoctogl_v24("scene_path", &device, &queue, false).unwrap();
 //!
