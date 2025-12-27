@@ -1,8 +1,7 @@
 
-Implement CPU copy fallback for denoiser
-Clean up math functions
-Fix the samplers thing
 Stop using the deprecated method on winit, fix all warnings
+Enable more warnings and fix those.
+Fix the samplers thing
 clean up loader
 clean up rng thing
 clean up scene builder
@@ -10,10 +9,8 @@ clean up scene builder
 Speed up CPU fallback
 Fix bug which causes cornellbox to bug out on SWRT
 
-UI
-    make MAX_RADIANCE adjustable
 pathtracer
-    add RAY_EPSILON and MAX_RADIANCE to override constants (or push constants?)
+    add RAY_EPSILON to override constants (or push constants?)
 
 loader
     improve json parser
@@ -24,7 +21,6 @@ loader
 
 misc
     figure out the purpose of the emission direction check in yocto (yocto_cutrace.cu, line 380)
-    fix warnings
 
 tester
     MAKE TESTER AND PROFILER

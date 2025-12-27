@@ -5,4 +5,5 @@ edition = "2021"
 
 [dependencies]
 lupin = { path = "../lupin" }
+winit = "0.30.7"
 lupin_loader = { path = "../lupin_loader" }

@@ -275,3 +275,80 @@ pub fn supports_rt(device: &wgpu::Device) -> bool
 {
     return device.features().contains(wgpu::Features::EXPERIMENTAL_RAY_QUERY);
 }
+
+/// When accumulating frames, a double buffered texture is usually needed,
+/// so it is provided as part of the library for brevity.
+pub struct DoubleBufferedTexture
+{
+    pub textures: [wgpu::Texture; 2],
+    pub front_idx: usize,
+    pub back_idx: usize
+}
+
+impl<'a> DoubleBufferedTexture
+{
+    pub fn create(device: &wgpu::Device, desc: &wgpu::TextureDescriptor) -> DoubleBufferedTexture
+    {
+        return Self {
+            textures: [
+                device.create_texture(desc),
+                device.create_texture(desc),
+            ],
+            front_idx: 0,
+            back_idx: 1,
+        }
+    }
+
+    pub fn front(&'a self) -> &'a wgpu::Texture
+    {
+        return &self.textures[self.front_idx];
+    }
+
+    pub fn back(&'a self) -> &'a wgpu::Texture
+    {
+        return &self.textures[self.back_idx];
+    }
+
+    pub fn copy_front_to_back(&self, device: &wgpu::Device, queue: &wgpu::Queue)
+    {
+        assert!(self.textures[0].format() == self.textures[1].format());
+
+        let format = self.textures[0].format();
+        let blitter = wgpu::util::TextureBlitter::new(device, format);
+        let mut encoder = device.create_command_encoder(&Default::default());
+        let src = self.textures[self.front_idx].create_view(&Default::default());
+        let dst = self.textures[self.back_idx].create_view(&Default::default());
+        blitter.copy(device, &mut encoder, &src, &dst);
+        queue.submit(Some(encoder.finish()));
+    }
+
+    pub fn flip(&mut self)
+    {
+        let tmp = self.front_idx;
+        self.front_idx = self.back_idx;
+        self.back_idx = tmp;
+    }
+
+    pub fn resize(&mut self, device: &wgpu::Device, width: u32, height: u32)
+    {
+        resize_texture(device, &mut self.textures[0], width, height);
+        resize_texture(device, &mut self.textures[1], width, height);
+    }
+}
+
+fn resize_texture(device: &wgpu::Device, texture: &mut wgpu::Texture, new_width: u32, new_height: u32)
+{
+    let desc = wgpu::TextureDescriptor {
+        label: None,
+        size: wgpu::Extent3d { width: new_width, height: new_height, depth_or_array_layers: 1 },
+        mip_level_count: texture.mip_level_count(),
+        sample_count: texture.sample_count(),
+        dimension: texture.dimension(),
+        format: texture.format(),
+        usage: texture.usage(),
+        view_formats: &[]
+    };
+
+    texture.destroy();
+    *texture = device.create_texture(&desc);
+}

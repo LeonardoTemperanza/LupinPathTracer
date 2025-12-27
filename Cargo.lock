@@ -1952,6 +1952,7 @@ version = "0.1.0"
 dependencies = [
  "lupin",
  "lupin_loader",
+ "winit 0.30.12",
 ]
 
 [[package]]
