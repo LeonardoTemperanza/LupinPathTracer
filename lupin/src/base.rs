@@ -97,14 +97,6 @@ pub struct Vec3
     pub z: f32
 }
 
-#[derive(Debug, Default, Clone, Copy)]
-#[repr(C)]
-pub struct Aabb
-{
-    pub min: Vec3,
-    pub max: Vec3
-}
-
 impl Vec3
 {
     pub const LEFT:     Vec3 = Vec3 { x: -1.0, y: 0.0,  z: 0.0  };
@@ -197,6 +189,12 @@ impl Vec4
     pub fn new(x: f32, y: f32, z: f32, w: f32) -> Self
     {
         return Self { x, y, z, w };
+    }
+
+    #[inline]
+    pub fn new3(x: f32, y: f32, z: f32) -> Self
+    {
+        return Self { x, y, z, w: 0.0 };
     }
 
     #[inline]
@@ -937,24 +935,12 @@ pub fn matrix_to_xform(mat: Mat4) -> (Vec3, Quat, Vec3)
     return (translation, quat, scale);
 }
 
-////////
-// Miscellaneous
-
-// Useful for passing buffers to the GPU
-pub fn to_u8_slice<T>(slice: &[T])->&[u8]
+#[derive(Debug, Default, Clone, Copy)]
+#[repr(C)]
+pub struct Aabb
 {
-    let buf_size = slice.len() * std::mem::size_of::<T>();
-    return unsafe {
-        std::slice::from_raw_parts(slice.as_ptr() as *const _ as *const u8, buf_size)
-    };
-}
-
-pub fn to_u64_slice<T>(slice: &[T])->&[u64]
-{
-    let buf_size = slice.len() * std::mem::size_of::<T>();
-    return unsafe {
-        std::slice::from_raw_parts(slice.as_ptr() as *const _ as *const u64, buf_size / 8)
-    };
+    pub min: Vec3,
+    pub max: Vec3
 }
 
 pub fn grow_aabb_to_include_tri(aabb: &mut Aabb, t0: Vec3, t1: Vec3, t2: Vec3)
@@ -1055,4 +1041,24 @@ pub fn is_point_in_aabb(v: Vec3, aabb_min: Vec3, aabb_max: Vec3)->bool
     return v.x >= aabb_min.x && v.x <= aabb_max.x &&
            v.y >= aabb_min.y && v.y <= aabb_max.y &&
            v.z >= aabb_min.z && v.z <= aabb_max.z;
+}
+
+////////
+// Miscellaneous
+
+// Useful for passing buffers to the GPU
+pub fn to_u8_slice<T>(slice: &[T])->&[u8]
+{
+    let buf_size = slice.len() * std::mem::size_of::<T>();
+    return unsafe {
+        std::slice::from_raw_parts(slice.as_ptr() as *const _ as *const u8, buf_size)
+    };
+}
+
+pub fn to_u64_slice<T>(slice: &[T])->&[u64]
+{
+    let buf_size = slice.len() * std::mem::size_of::<T>();
+    return unsafe {
+        std::slice::from_raw_parts(slice.as_ptr() as *const _ as *const u64, buf_size / 8)
+    };
 }

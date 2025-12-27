@@ -684,33 +684,73 @@ pub fn tlas_find_best_match(tlas: &[TlasNode], idx_array: &[u32], node_a: u32) -
     return best_b;
 }
 
-/// Also builds RT acceleration structures, if requested and supported.
-pub fn upload_scene_to_gpu(device: &wgpu::Device, queue: &wgpu::Queue, scene: &SceneCPU, textures: Vec<wgpu::Texture>, samplers: Vec<wgpu::Sampler>, envs_info: &[EnvMapInfo], build_rt_structures: bool) -> Scene
+/// * `input` - The input value.
+/// * `build_sw_and_hw` - If true, and hardware raytracing is supported on the current device, then it will build both types of acceleration structures.
+///                       Otherwise it will only attempt to build the supported one.
+pub fn build_accel_structures_and_upload(device: &wgpu::Device, queue: &wgpu::Queue, scene: &SceneCPU, textures: Vec<wgpu::Texture>, samplers: Vec<wgpu::Sampler>, envs_info: &[EnvMapInfo], build_sw_and_hw: bool) -> Scene
 {
     let verts_normal_array: Vec::<wgpu::Buffer> = scene.verts_normal_array.iter().map(|x| upload_storage_buffer(device, queue, to_u8_slice(x))).collect();
     let verts_texcoord_array: Vec::<wgpu::Buffer> = scene.verts_texcoord_array.iter().map(|x| upload_storage_buffer(device, queue, to_u8_slice(x))).collect();
     let verts_color_array: Vec::<wgpu::Buffer> = scene.verts_color_array.iter().map(|x| upload_storage_buffer(device, queue, to_u8_slice(x))).collect();
     let verts_pos_array: Vec::<wgpu::Buffer> = scene.verts_pos_array.iter().map(|x| upload_vertex_pos_buffer(device, queue, to_u8_slice(x))).collect();
-    let indices_array: Vec::<wgpu::Buffer> = scene.indices_array.iter().map(|x| upload_indices_buffer(device, queue, to_u8_slice(x))).collect();
-    let bvh_nodes_array: Vec::<wgpu::Buffer> = scene.bvh_nodes_array.iter().map(|x| upload_storage_buffer(device, queue, to_u8_slice(x))).collect();
+    // let indices_array: Vec::<wgpu::Buffer> = scene.indices_array.iter().map(|x| upload_indices_buffer(device, queue, to_u8_slice(x))).collect();
+    // let bvh_nodes_array: Vec::<wgpu::Buffer> = scene.bvh_nodes_array.iter().map(|x| upload_storage_buffer(device, queue, to_u8_slice(x))).collect();
 
     let mesh_infos = upload_storage_buffer_with_name(device, queue, to_u8_slice(&scene.mesh_infos), "mesh_infos");
-    let tlas_nodes = upload_storage_buffer_with_name(device, queue, to_u8_slice(&scene.tlas_nodes), "tlas_nodes");
+    // let tlas_nodes = upload_storage_buffer_with_name(device, queue, to_u8_slice(&scene.tlas_nodes), "tlas_nodes");
     let instances = upload_storage_buffer_with_name(device, queue, to_u8_slice(&scene.instances), "instances");
     let materials = upload_storage_buffer_with_name(device, queue, to_u8_slice(&scene.materials), "materials");
     let environments = upload_storage_buffer_with_name(device, queue, to_u8_slice(&scene.environments), "environments");
 
-    let (rt_tlas, rt_blases) = if build_rt_structures {
-        build_rt_accel_structures(device, queue, scene, &verts_pos_array, &indices_array)
+    // Build lights
+    let lights = build_lights(scene, envs_info);
+
+    // Build BVH
+    let mut bvh_nodes_array = Vec::<wgpu::Buffer>::new();
+    let mut indices_array = Vec::<wgpu::Buffer>::new();
+    if !supports_rt(device) || build_sw_and_hw
+    {
+        for (i, verts) in scene.verts_pos_array.iter().enumerate()
+        {
+            let mut indices = scene.indices_array[i].clone();
+            let bvh = build_bvh(&verts, &mut indices);
+            bvh_nodes_array.push(upload_storage_buffer(device, queue, to_u8_slice(&scene.environments)));
+            indices_array.push(upload_vertex_pos_buffer(device, queue, to_u8_slice(&indices)));
+        }
+    }
+
+    let (rt_tlas, rt_blases) = if supports_rt(device) {
+        build_rt_accel_structures(device, queue, scene, &lights, &verts_pos_array, &indices_array)
     } else {
         (None, vec![])
     };
 
-    let alias_tables_gpu: Vec::<wgpu::Buffer> = scene.lights.alias_tables.iter().map(|x| upload_storage_buffer(device, queue, to_u8_slice(x))).collect();
-    let env_alias_tables_gpu: Vec::<wgpu::Buffer> = scene.lights.env_alias_tables.iter().map(|x| upload_storage_buffer(device, queue, to_u8_slice(x))).collect();
+    let mut model_aabbs = Vec::<Aabb>::new();
+    for verts_pos in &scene.verts_pos_array
+    {
+        let mut aabb = Aabb::neutral();
+        for pos in verts_pos {
+            grow_aabb_to_include_vert(&mut aabb, Vec3::new(pos.x, pos.y, pos.z));
+        }
+        model_aabbs.push(aabb);
+    }
+
+    let model_aabbs = Vec::<Aabb>::new();
+
+    let tlas_nodes_cpu = if !supports_rt(device) || build_sw_and_hw {
+        build_tlas(&scene.instances, &model_aabbs)
+    } else {
+        vec![]
+    };
+
+    let tlas_nodes = upload_storage_buffer_with_name(device, queue, to_u8_slice(&tlas_nodes_cpu), "tlas_nodes");
+
+    // Build alias tables
+    let alias_tables_gpu: Vec::<wgpu::Buffer> = lights.alias_tables.iter().map(|x| upload_storage_buffer(device, queue, to_u8_slice(x))).collect();
+    let env_alias_tables_gpu: Vec::<wgpu::Buffer> = lights.env_alias_tables.iter().map(|x| upload_storage_buffer(device, queue, to_u8_slice(x))).collect();
 
     let lights = Lights {
-        lights: upload_storage_buffer_with_name(device, queue, to_u8_slice(&scene.lights.lights), "lights"),
+        lights: upload_storage_buffer_with_name(device, queue, to_u8_slice(&lights.lights), "lights"),
         alias_tables: alias_tables_gpu,
         env_alias_tables: env_alias_tables_gpu
     };
@@ -736,13 +776,13 @@ pub fn upload_scene_to_gpu(device: &wgpu::Device, queue: &wgpu::Queue, scene: &S
 }
 
 /// Used to verify if a scene has been built correctly. It's best to call it
-/// right before upload_scene_to_gpu.
+/// right before [`upload_scene_to_gpu_and_build_accel_structures`].
 pub fn validate_scene(scene: &SceneCPU, num_textures: u32, num_samplers: u32)
 {
     // TODO: Put readable messages on all of them.
     //assert_eq!(scene.verts_pos_array.len(), scene.bvh_nodes_array.len());
     assert_eq!(scene.verts_pos_array.len(), scene.mesh_infos.len());
-    assert_eq!(scene.verts_pos_array.len(), scene.mesh_aabbs.len(), "verts_pos_array.len() doesn't match mesh_aabbs.len()");
+    // assert_eq!(scene.verts_pos_array.len(), scene.mesh_aabbs.len(), "verts_pos_array.len() doesn't match mesh_aabbs.len()");
 
     for (i, info) in scene.mesh_infos.iter().enumerate()
     {
@@ -771,9 +811,11 @@ pub fn validate_scene(scene: &SceneCPU, num_textures: u32, num_samplers: u32)
         }
     }
 
+    /*
     for tlas_node in &scene.tlas_nodes {
         assert!((tlas_node.instance_idx as usize) < scene.instances.len());
     }
+    */
     for instance in &scene.instances
     {
         assert!((instance.mesh_idx as usize) < scene.mesh_infos.len());
@@ -911,7 +953,7 @@ mod tests
     }
 }
 
-fn build_rt_accel_structures(device: &wgpu::Device, queue: &wgpu::Queue, scene: &SceneCPU,
+fn build_rt_accel_structures(device: &wgpu::Device, queue: &wgpu::Queue, scene: &SceneCPU, lights: &LightsCPU,
                              verts_pos_array: &Vec<wgpu::Buffer>, indices_array: &Vec<wgpu::Buffer>) -> (Option<wgpu::Tlas>, Vec<wgpu::Blas>)
 {
     if !supports_rt(device) { return (None, vec![]) }
@@ -997,7 +1039,7 @@ fn build_rt_accel_structures(device: &wgpu::Device, queue: &wgpu::Queue, scene: 
         // TODO: This is "O(n^2)", kinda. Not really a problem right now but fix later
         let mut is_light = false;
         let mut light_idx: u32 = 0;
-        for (j, light) in scene.lights.lights.iter().enumerate()
+        for (j, light) in lights.lights.iter().enumerate()
         {
             if light.instance_idx == i as u32
             {

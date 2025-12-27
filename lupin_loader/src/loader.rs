@@ -8,7 +8,7 @@ pub fn build_scene_empty(device: &wgpu::Device, queue: &wgpu::Queue) -> lp::Scen
 {
     let scene_cpu = lp::SceneCPU::default();
     lp::validate_scene(&scene_cpu, 0, 0);
-    return lp::upload_scene_to_gpu(device, queue, &scene_cpu, vec![], vec![], &[], true);
+    return lp::build_accel_structures_and_upload(device, queue, &scene_cpu, vec![], vec![], &[], true);
 }
 
 pub fn build_scene_cornell_box(device: &wgpu::Device, queue: &wgpu::Queue, build_sw_bvh: bool) -> (lp::Scene, Vec<SceneCamera>)
@@ -42,14 +42,10 @@ pub fn build_scene_cornell_box(device: &wgpu::Device, queue: &wgpu::Queue, build
     {
         let floor_mesh = push_asset(&mut scene.mesh_infos, lp::MeshInfo::default());
         scene.verts_pos_array.push(vec![
-            lp::Vec4::new(-1.0, 0.0,  1.0, 0.0), lp::Vec4::new( 1.0, 0.0,  1.0, 0.0),
-            lp::Vec4::new( 1.0, 0.0, -1.0, 0.0), lp::Vec4::new(-1.0, 0.0, -1.0, 0.0),
+            lp::Vec4::new3(-1.0, 0.0,  1.0), lp::Vec4::new3( 1.0, 0.0,  1.0),
+            lp::Vec4::new3( 1.0, 0.0, -1.0), lp::Vec4::new3(-1.0, 0.0, -1.0),
         ]);
         scene.indices_array.push(vec![0, 1, 2, 2, 3, 0]);
-        scene.mesh_aabbs.push(lp::compute_mesh_aabb(&scene.verts_pos_array[floor_mesh as usize]));
-        if build_sw_bvh {
-            scene.bvh_nodes_array.push(lp::build_bvh(&scene.verts_pos_array[floor_mesh as usize], &mut scene.indices_array[floor_mesh as usize]));
-        }
 
         let floor_instance = push_asset(&mut scene.instances, {
             let mut instance = lp::Instance::default();
@@ -63,14 +59,10 @@ pub fn build_scene_cornell_box(device: &wgpu::Device, queue: &wgpu::Queue, build
     {
         let ceiling_mesh = push_asset(&mut scene.mesh_infos, lp::MeshInfo::default());
         scene.verts_pos_array.push(vec![
-            lp::Vec4::new(-1.0, 2.0,  1.0, 0.0), lp::Vec4::new(-1.0, 2.0, -1.0, 0.0),
-            lp::Vec4::new( 1.0, 2.0, -1.0, 0.0), lp::Vec4::new( 1.0, 2.0,  1.0, 0.0),
+            lp::Vec4::new3(-1.0, 2.0,  1.0), lp::Vec4::new3(-1.0, 2.0, -1.0),
+            lp::Vec4::new3( 1.0, 2.0, -1.0), lp::Vec4::new3( 1.0, 2.0,  1.0),
         ]);
         scene.indices_array.push(vec![0, 1, 2, 2, 3, 0]);
-        scene.mesh_aabbs.push(lp::compute_mesh_aabb(&scene.verts_pos_array[ceiling_mesh as usize]));
-        if build_sw_bvh {
-            scene.bvh_nodes_array.push(lp::build_bvh(&scene.verts_pos_array[ceiling_mesh as usize], &mut scene.indices_array[ceiling_mesh as usize]));
-        }
 
         let ceiling_instance = push_asset(&mut scene.instances, {
             let mut instance = lp::Instance::default();
@@ -84,14 +76,10 @@ pub fn build_scene_cornell_box(device: &wgpu::Device, queue: &wgpu::Queue, build
     {
         let backwall_mesh = push_asset(&mut scene.mesh_infos, lp::MeshInfo::default());
         scene.verts_pos_array.push(vec![
-            lp::Vec4::new(-1.0, 0.0, 1.0, 0.0), lp::Vec4::new( 1.0, 0.0, 1.0, 0.0),
-            lp::Vec4::new( 1.0, 2.0, 1.0, 0.0), lp::Vec4::new(-1.0, 2.0, 1.0, 0.0),
+            lp::Vec4::new3(-1.0, 0.0, 1.0), lp::Vec4::new3( 1.0, 0.0, 1.0),
+            lp::Vec4::new3( 1.0, 2.0, 1.0), lp::Vec4::new3(-1.0, 2.0, 1.0),
         ]);
         scene.indices_array.push(vec![0, 2, 1, 2, 0, 3]);
-        scene.mesh_aabbs.push(lp::compute_mesh_aabb(&scene.verts_pos_array[backwall_mesh as usize]));
-        if build_sw_bvh {
-            scene.bvh_nodes_array.push(lp::build_bvh(&scene.verts_pos_array[backwall_mesh as usize], &mut scene.indices_array[backwall_mesh as usize]));
-        }
 
         let backwall_instance = push_asset(&mut scene.instances, {
             let mut instance = lp::Instance::default();
@@ -105,14 +93,10 @@ pub fn build_scene_cornell_box(device: &wgpu::Device, queue: &wgpu::Queue, build
     {
         let rightwall_mesh = push_asset(&mut scene.mesh_infos, lp::MeshInfo::default());
         scene.verts_pos_array.push(vec![
-            lp::Vec4::new(1.0, 0.0, -1.0, 0.0), lp::Vec4::new(1.0, 0.0,  1.0, 0.0),
-            lp::Vec4::new(1.0, 2.0,  1.0, 0.0), lp::Vec4::new(1.0, 2.0, -1.0, 0.0),
+            lp::Vec4::new3(1.0, 0.0, -1.0), lp::Vec4::new3(1.0, 0.0,  1.0),
+            lp::Vec4::new3(1.0, 2.0,  1.0), lp::Vec4::new3(1.0, 2.0, -1.0),
         ]);
         scene.indices_array.push(vec![0, 1, 2, 2, 3, 0]);
-        scene.mesh_aabbs.push(lp::compute_mesh_aabb(&scene.verts_pos_array[rightwall_mesh as usize]));
-        if build_sw_bvh {
-            scene.bvh_nodes_array.push(lp::build_bvh(&scene.verts_pos_array[rightwall_mesh as usize], &mut scene.indices_array[rightwall_mesh as usize]));
-        }
 
         let rightwall_instance = push_asset(&mut scene.instances, {
             let mut instance = lp::Instance::default();
@@ -126,14 +110,10 @@ pub fn build_scene_cornell_box(device: &wgpu::Device, queue: &wgpu::Queue, build
     {
         let leftwall_mesh = push_asset(&mut scene.mesh_infos, lp::MeshInfo::default());
         scene.verts_pos_array.push(vec![
-            lp::Vec4::new(-1.0, 0.0,  1.0, 0.0), lp::Vec4::new(-1.0, 0.0, -1.0, 0.0),
-            lp::Vec4::new(-1.0, 2.0, -1.0, 0.0), lp::Vec4::new(-1.0, 2.0,  1.0, 0.0),
+            lp::Vec4::new3(-1.0, 0.0,  1.0), lp::Vec4::new3(-1.0, 0.0, -1.0),
+            lp::Vec4::new3(-1.0, 2.0, -1.0), lp::Vec4::new3(-1.0, 2.0,  1.0),
         ]);
         scene.indices_array.push(vec![0, 1, 2, 2, 3, 0]);
-        scene.mesh_aabbs.push(lp::compute_mesh_aabb(&scene.verts_pos_array[leftwall_mesh as usize]));
-        if build_sw_bvh {
-            scene.bvh_nodes_array.push(lp::build_bvh(&scene.verts_pos_array[leftwall_mesh as usize], &mut scene.indices_array[leftwall_mesh as usize]));
-        }
 
         let leftwall_instance = push_asset(&mut scene.instances, {
             let mut instance = lp::Instance::default();
@@ -147,22 +127,18 @@ pub fn build_scene_cornell_box(device: &wgpu::Device, queue: &wgpu::Queue, build
     {
         let shortbox_mesh = push_asset(&mut scene.mesh_infos, lp::MeshInfo::default());
         scene.verts_pos_array.push(vec![
-            lp::Vec4::new(0.53, 0.6, -0.75, 0.0), lp::Vec4::new(0.7, 0.6, -0.17, 0.0), lp::Vec4::new(0.13, 0.6, -0.0, 0.0),
-            lp::Vec4::new(-0.05, 0.6, -0.57, 0.0), lp::Vec4::new(-0.05, 0.0, -0.57, 0.0), lp::Vec4::new(-0.05, 0.6, -0.57, 0.0),
-            lp::Vec4::new(0.13, 0.6, -0.0, 0.0), lp::Vec4::new(0.13, 0.0, -0.0, 0.0), lp::Vec4::new(0.53, 0.0, -0.75, 0.0),
-            lp::Vec4::new(0.53, 0.6, -0.75, 0.0), lp::Vec4::new(-0.05, 0.6, -0.57, 0.0), lp::Vec4::new(-0.05, 0.0, -0.57, 0.0),
-            lp::Vec4::new(0.7, 0.0, -0.17, 0.0), lp::Vec4::new(0.7, 0.6, -0.17, 0.0), lp::Vec4::new(0.53, 0.6, -0.75, 0.0),
-            lp::Vec4::new(0.53, 0.0, -0.75, 0.0), lp::Vec4::new(0.13, 0.0, -0.0, 0.0), lp::Vec4::new(0.13, 0.6, -0.0, 0.0),
-            lp::Vec4::new(0.7, 0.6, -0.17, 0.0), lp::Vec4::new(0.7, 0.0, -0.17, 0.0), lp::Vec4::new(0.53, 0.0, -0.75, 0.0),
-            lp::Vec4::new(0.7, 0.0, -0.17, 0.0), lp::Vec4::new(0.13, 0.0, -0.0, 0.0), lp::Vec4::new(-0.05, 0.0, -0.57, 0.0),
+            lp::Vec4::new3(0.53, 0.6, -0.75), lp::Vec4::new3(0.7, 0.6, -0.17), lp::Vec4::new3(0.13, 0.6, -0.0),
+            lp::Vec4::new3(-0.05, 0.6, -0.57), lp::Vec4::new3(-0.05, 0.0, -0.57), lp::Vec4::new3(-0.05, 0.6, -0.57),
+            lp::Vec4::new3(0.13, 0.6, -0.0), lp::Vec4::new3(0.13, 0.0, -0.0), lp::Vec4::new3(0.53, 0.0, -0.75),
+            lp::Vec4::new3(0.53, 0.6, -0.75), lp::Vec4::new3(-0.05, 0.6, -0.57), lp::Vec4::new3(-0.05, 0.0, -0.57),
+            lp::Vec4::new3(0.7, 0.0, -0.17), lp::Vec4::new3(0.7, 0.6, -0.17), lp::Vec4::new3(0.53, 0.6, -0.75),
+            lp::Vec4::new3(0.53, 0.0, -0.75), lp::Vec4::new3(0.13, 0.0, -0.0), lp::Vec4::new3(0.13, 0.6, -0.0),
+            lp::Vec4::new3(0.7, 0.6, -0.17), lp::Vec4::new3(0.7, 0.0, -0.17), lp::Vec4::new3(0.53, 0.0, -0.75),
+            lp::Vec4::new3(0.7, 0.0, -0.17), lp::Vec4::new3(0.13, 0.0, -0.0), lp::Vec4::new3(-0.05, 0.0, -0.57),
         ]);
         scene.indices_array.push(vec![0, 2, 1, 2, 0, 3, 4, 6, 5, 6, 4, 7,
                                       8, 10, 9, 10, 8, 11, 12, 14, 13, 14, 12, 15,
                                       16, 18, 17, 18, 16, 19, 20, 22, 21, 22, 20, 23]);
-        scene.mesh_aabbs.push(lp::compute_mesh_aabb(&scene.verts_pos_array[shortbox_mesh as usize]));
-        if build_sw_bvh {
-            scene.bvh_nodes_array.push(lp::build_bvh(&scene.verts_pos_array[shortbox_mesh as usize], &mut scene.indices_array[shortbox_mesh as usize]));
-        }
 
         let shortbox_instance = push_asset(&mut scene.instances, {
             let mut instance = lp::Instance::default();
@@ -176,20 +152,18 @@ pub fn build_scene_cornell_box(device: &wgpu::Device, queue: &wgpu::Queue, build
     {
         let tallbox_mesh = push_asset(&mut scene.mesh_infos, lp::MeshInfo::default());
         scene.verts_pos_array.push(vec![
-            lp::Vec4::new(-0.53, 1.2, -0.09, 0.0), lp::Vec4::new(0.04, 1.2, 0.09, 0.0), lp::Vec4::new(-0.14, 1.2, 0.67, 0.0),
-            lp::Vec4::new(-0.71, 1.2, 0.49, 0.0), lp::Vec4::new(-0.53, 0.0, -0.09, 0.0), lp::Vec4::new(-0.53, 1.2, -0.09, 0.0),
-            lp::Vec4::new(-0.71, 1.2, 0.49, 0.0), lp::Vec4::new(-0.71, 0.0, 0.49, 0.0), lp::Vec4::new(-0.71, 0.0, 0.49, 0.0),
-            lp::Vec4::new(-0.71, 1.2, 0.49, 0.0), lp::Vec4::new(-0.14, 1.2, 0.67, 0.0), lp::Vec4::new(-0.14, 0.0, 0.67, 0.0),
-            lp::Vec4::new(-0.14, 0.0, 0.67, 0.0), lp::Vec4::new(-0.14, 1.2, 0.67, 0.0), lp::Vec4::new(0.04, 1.2, 0.09, 0.0),
-            lp::Vec4::new(0.04, 0.0, 0.09, 0.0), lp::Vec4::new(0.04, 0.0, 0.09, 0.0), lp::Vec4::new(0.04, 1.2, 0.09, 0.0),
-            lp::Vec4::new(-0.53, 1.2, -0.09, 0.0), lp::Vec4::new(-0.53, 0.0, -0.09, 0.0), lp::Vec4::new(-0.53, 0.0, -0.09, 0.0),
-            lp::Vec4::new(0.04, 0.0, 0.09, 0.0), lp::Vec4::new(-0.14, 0.0, 0.67, 0.0), lp::Vec4::new(-0.71, 0.0, 0.49, 0.0),
+            lp::Vec4::new3(-0.53, 1.2, -0.09), lp::Vec4::new3(0.04, 1.2, 0.09), lp::Vec4::new3(-0.14, 1.2, 0.67),
+            lp::Vec4::new3(-0.71, 1.2, 0.49), lp::Vec4::new3(-0.53, 0.0, -0.09), lp::Vec4::new3(-0.53, 1.2, -0.09),
+            lp::Vec4::new3(-0.71, 1.2, 0.49), lp::Vec4::new3(-0.71, 0.0, 0.49), lp::Vec4::new3(-0.71, 0.0, 0.49),
+            lp::Vec4::new3(-0.71, 1.2, 0.49), lp::Vec4::new3(-0.14, 1.2, 0.67), lp::Vec4::new3(-0.14, 0.0, 0.67),
+            lp::Vec4::new3(-0.14, 0.0, 0.67), lp::Vec4::new3(-0.14, 1.2, 0.67), lp::Vec4::new3(0.04, 1.2, 0.09),
+            lp::Vec4::new3(0.04, 0.0, 0.09), lp::Vec4::new3(0.04, 0.0, 0.09), lp::Vec4::new3(0.04, 1.2, 0.09),
+            lp::Vec4::new3(-0.53, 1.2, -0.09), lp::Vec4::new3(-0.53, 0.0, -0.09), lp::Vec4::new3(-0.53, 0.0, -0.09),
+            lp::Vec4::new3(0.04, 0.0, 0.09), lp::Vec4::new3(-0.14, 0.0, 0.67), lp::Vec4::new3(-0.71, 0.0, 0.49),
         ]);
         scene.indices_array.push(vec![0, 2, 1, 2, 0, 3, 4, 6, 5, 6, 4, 7,
                                       8, 10, 9, 10, 8, 11, 12, 14, 13, 14, 12, 15,
                                       16, 18, 17, 18, 16, 19, 20, 22, 21, 22, 20, 23]);
-        scene.mesh_aabbs.push(lp::compute_mesh_aabb(&scene.verts_pos_array[tallbox_mesh as usize]));
-        scene.bvh_nodes_array.push(lp::build_bvh(&scene.verts_pos_array[tallbox_mesh as usize], &mut scene.indices_array[tallbox_mesh as usize]));
 
         let tallbox_instance = push_asset(&mut scene.instances, {
             let mut instance = lp::Instance::default();
@@ -203,12 +177,10 @@ pub fn build_scene_cornell_box(device: &wgpu::Device, queue: &wgpu::Queue, build
     {
         let light_mesh = push_asset(&mut scene.mesh_infos, lp::MeshInfo::default());
         scene.verts_pos_array.push(vec![
-            lp::Vec4::new(-0.25, 1.99, -0.25,  0.0), lp::Vec4::new(-0.25, 1.99, 0.25, 0.0),
-            lp::Vec4::new(0.25,  1.99, 0.25, 0.0), lp::Vec4::new(0.25,  1.99, -0.25,  0.0),
+            lp::Vec4::new3(-0.25, 1.99, -0.25), lp::Vec4::new3(-0.25, 1.99,  0.25),
+            lp::Vec4::new3(0.25,  1.99, 0.25),  lp::Vec4::new3(0.25,  1.99, -0.25),
         ]);
         scene.indices_array.push(vec![0, 2, 1, 2, 0, 3]);
-        scene.mesh_aabbs.push(lp::compute_mesh_aabb(&scene.verts_pos_array[light_mesh as usize]));
-        scene.bvh_nodes_array.push(lp::build_bvh(&scene.verts_pos_array[light_mesh as usize], &mut scene.indices_array[light_mesh as usize]));
 
         let light_instance = push_asset(&mut scene.instances, {
             let mut instance = lp::Instance::default();
@@ -217,11 +189,6 @@ pub fn build_scene_cornell_box(device: &wgpu::Device, queue: &wgpu::Queue, build
             instance
         });
     }
-
-    if build_sw_bvh {
-        scene.tlas_nodes = lp::build_tlas(&scene.instances, &scene.mesh_aabbs);
-    }
-    scene.lights = lp::build_lights(&scene, &[]);
 
     lp::validate_scene(&scene, 0, 0);
 
@@ -236,7 +203,7 @@ pub fn build_scene_cornell_box(device: &wgpu::Device, queue: &wgpu::Queue, build
             aspect: 1.0,
         },
     }];
-    return (lp::upload_scene_to_gpu(device, queue, &scene, vec![], vec![], &[], true), cameras);
+    return (lp::build_accel_structures_and_upload(device, queue, &scene, vec![], vec![], &[], true), cameras);
 }
 
 pub fn load_texture(device: &wgpu::Device, queue: &wgpu::Queue, path: &str, hdr: bool) -> Result<wgpu::Texture, image::ImageError>
@@ -391,8 +358,6 @@ fn load_mesh_obj<P: AsRef<std::path::Path>>(path: P, scene: &mut lp::SceneCPU) -
 {
     assert_eq!(scene.verts_pos_array.len(), scene.mesh_infos.len());
     assert_eq!(scene.mesh_infos.len(), scene.indices_array.len());
-    assert_eq!(scene.indices_array.len(), scene.mesh_aabbs.len());
-    assert_eq!(scene.mesh_aabbs.len(), scene.bvh_nodes_array.len());
 
     let tobj_scene = tobj::load_obj(path.as_ref().to_str().unwrap(), &tobj::GPU_LOAD_OPTIONS);
     assert!(tobj_scene.is_ok());
@@ -457,8 +422,6 @@ fn load_mesh_obj<P: AsRef<std::path::Path>>(path: P, scene: &mut lp::SceneCPU) -
     scene.mesh_infos.push(mesh_info);
     scene.verts_pos_array.push(mesh_verts_pos);
     scene.indices_array.push(mesh.indices.clone());
-    scene.mesh_aabbs.push(aabb);
-    scene.bvh_nodes_array.push(bvh);
 
     return (scene.mesh_infos.len() - 1) as u32;
 }
@@ -852,12 +815,6 @@ pub fn load_scene_yoctogl_v24(path: &std::path::Path, device: &wgpu::Device, que
 
     if p.found_error { return Err(LoadError::InvalidJson); }
 
-    scene.tlas_nodes = if build_sw_bvh {
-        lp::build_tlas(scene.instances.as_slice(), &scene.mesh_aabbs)
-    } else {
-        vec![]
-    };
-
     // Load textures.
     for info in &tex_load_infos
     {
@@ -907,11 +864,9 @@ pub fn load_scene_yoctogl_v24(path: &std::path::Path, device: &wgpu::Device, que
         }
     }
 
-    scene.lights = lp::build_lights(&scene, &environment_infos);
-
     lp::validate_scene(&scene, textures.len() as u32, samplers.len() as u32);
 
-    let scene_gpu = lp::upload_scene_to_gpu(device, queue, &scene, textures, samplers, &environment_infos, true);
+    let scene_gpu = lp::build_accel_structures_and_upload(device, queue, &scene, textures, samplers, &environment_infos, true);
     return Ok((scene_gpu, scene_cams));
 }
 
@@ -1435,8 +1390,6 @@ fn load_mesh_ply(path: &std::path::Path, scene: &mut lp::SceneCPU, build_sw_bvh:
 {
     assert_eq!(scene.verts_pos_array.len(), scene.mesh_infos.len());
     assert_eq!(scene.mesh_infos.len(), scene.indices_array.len());
-    assert_eq!(scene.indices_array.len(), scene.mesh_aabbs.len());
-    assert_eq!(scene.mesh_aabbs.len(), scene.bvh_nodes_array.len());
 
     // Parse header
     let ply = std::fs::read(path)?;
@@ -1615,7 +1568,7 @@ fn load_mesh_ply(path: &std::path::Path, scene: &mut lp::SceneCPU, build_sw_bvh:
         mesh_info.colors_buf_idx = colors_idx as u32;
     }
 
-    let mut indices = ply_extract_indices(&p.buf[(num_verts * vert_size as u32) as usize..], num_faces);
+    let indices = ply_extract_indices(&p.buf[(num_verts * vert_size as u32) as usize..], num_faces);
 
     // Check indices
     for idx in &indices
@@ -1625,22 +1578,9 @@ fn load_mesh_ply(path: &std::path::Path, scene: &mut lp::SceneCPU, build_sw_bvh:
         }
     }
 
-    let mut aabb = lp::Aabb::neutral();
-    for pos in &verts_pos {
-        lp::grow_aabb_to_include_vert(&mut aabb, lp::Vec3::new(pos.x, pos.y, pos.z));
-    }
-
-    let bvh = if build_sw_bvh {
-        lp::build_bvh(verts_pos.as_slice(), &mut indices)
-    } else {
-        vec![]
-    };
-
     scene.mesh_infos.push(mesh_info);
     scene.verts_pos_array.push(verts_pos);
     scene.indices_array.push(indices.clone());
-    scene.mesh_aabbs.push(aabb);
-    scene.bvh_nodes_array.push(bvh);
 
     return Ok((scene.mesh_infos.len() - 1) as u32);
 }

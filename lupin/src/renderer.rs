@@ -20,15 +20,17 @@ pub struct Scene
 {
     // Meshes
     pub mesh_infos: wgpu::Buffer,
-    /// This is mandatory for all meshes.
+    /// Mandatory for all meshes.
     pub verts_pos_array: Vec<wgpu::Buffer>,
-    pub verts_normal_array: Vec<wgpu::Buffer>,
-    pub verts_texcoord_array: Vec<wgpu::Buffer>,
-    pub verts_color_array: Vec<wgpu::Buffer>,
+    /// Mandatory for all meshes.
     pub indices_array: Vec<wgpu::Buffer>,
-    pub bvh_nodes_array: Vec<wgpu::Buffer>,
+    /// Optional.
+    pub verts_normal_array: Vec<wgpu::Buffer>,
+    /// Optional.
+    pub verts_texcoord_array: Vec<wgpu::Buffer>,
+    /// Optional.
+    pub verts_color_array: Vec<wgpu::Buffer>,
 
-    pub tlas_nodes: wgpu::Buffer,
     pub instances: wgpu::Buffer,
     pub materials: wgpu::Buffer,
 
@@ -37,6 +39,8 @@ pub struct Scene
     pub environments: wgpu::Buffer,
 
     // Auxiliary data structures.
+    pub tlas_nodes: wgpu::Buffer,
+    pub bvh_nodes_array: Vec<wgpu::Buffer>,
     pub lights: Lights,
     pub rt_tlas: Option<wgpu::Tlas>,
     pub rt_blases: Vec<wgpu::Blas>,
@@ -51,16 +55,16 @@ pub struct SceneCPU
     pub verts_texcoord_array: Vec<Vec<Vec2>>,
     pub verts_color_array: Vec<Vec<Vec4>>,
     pub indices_array: Vec<Vec<u32>>,
-    pub bvh_nodes_array: Vec<Vec<BvhNode>>,
-    pub mesh_aabbs: Vec<Aabb>,
+    //pub bvh_nodes_array: Vec<Vec<BvhNode>>,
+    //pub mesh_aabbs: Vec<Aabb>,
 
-    pub tlas_nodes: Vec<TlasNode>,
+    //pub tlas_nodes: Vec<TlasNode>,
     pub instances: Vec<Instance>,
     pub materials: Vec<Material>,
 
     pub environments: Vec<Environment>,
 
-    pub lights: LightsCPU,
+    //pub lights: LightsCPU,
 }
 
 #[derive(Default, Debug)]
