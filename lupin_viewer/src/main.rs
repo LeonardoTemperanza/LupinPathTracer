@@ -953,13 +953,13 @@ impl<'a> AppState<'a>
                     {
                         if output_res_y != old_output_res_y {
                             output_res_x = u32::max(1, (output_res_y as f32 * self.camera_params.aspect) as u32);
-                            if output_res_x > 5000 {
+                            if output_res_x > 5000 {  // Guard for oversized texture dimensions
                                 output_res_x = 5000;
                                 output_res_y = u32::max(1, (output_res_x as f32 / self.camera_params.aspect) as u32);
                             }
                         } else {
                             output_res_y = u32::max(1, (output_res_x as f32 / self.camera_params.aspect) as u32);
-                            if output_res_y > 5000 {
+                            if output_res_y > 5000 {  // Guard for oversized texture dimensions
                                 output_res_y = 5000;
                                 output_res_x = u32::max(1, (output_res_y as f32 * self.camera_params.aspect) as u32);
                             }
