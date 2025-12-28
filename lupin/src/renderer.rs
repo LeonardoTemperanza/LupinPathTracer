@@ -617,7 +617,6 @@ pub fn build_pathtrace_resources(device: &wgpu::Device, baked_pathtrace_params: 
         depth_or_array_layers: 1,
     };
 
-    // TODO: Make this a 1x1 white texture instead of garbage data.
     let dummy_prev_frame_texture = device.create_texture(&wgpu::TextureDescriptor {
         label: Some("Dummy Sample Texture"),
         size,
@@ -626,42 +625,6 @@ pub fn build_pathtrace_resources(device: &wgpu::Device, baked_pathtrace_params: 
         dimension: wgpu::TextureDimension::D2,
         format: wgpu::TextureFormat::Rgba16Float,
         usage: wgpu::TextureUsages::TEXTURE_BINDING,
-        view_formats: &[],
-    });
-
-    // TODO: Make this a 1x1 white texture instead of garbage data.
-    let dummy_output_texture = device.create_texture(&wgpu::TextureDescriptor {
-        label: Some("Dummy Storage Texture"),
-        size,
-        mip_level_count: 1,
-        sample_count: 1,
-        dimension: wgpu::TextureDimension::D2,
-        format: wgpu::TextureFormat::Rgba16Float,
-        usage: wgpu::TextureUsages::STORAGE_BINDING,
-        view_formats: &[],
-    });
-
-    // TODO: Make this a 1x1 white texture instead of garbage data.
-    let dummy_albedo_texture = device.create_texture(&wgpu::TextureDescriptor {
-        label: Some("Dummy Storage Texture"),
-        size,
-        mip_level_count: 1,
-        sample_count: 1,
-        dimension: wgpu::TextureDimension::D2,
-        format: wgpu::TextureFormat::Rgba8Unorm,
-        usage: wgpu::TextureUsages::STORAGE_BINDING,
-        view_formats: &[],
-    });
-
-    // TODO: Make this a 1x1 white texture instead of garbage data.
-    let dummy_normals_texture = device.create_texture(&wgpu::TextureDescriptor {
-        label: Some("Dummy Storage Texture"),
-        size,
-        mip_level_count: 1,
-        sample_count: 1,
-        dimension: wgpu::TextureDimension::D2,
-        format: wgpu::TextureFormat::Rgba8Snorm,
-        usage: wgpu::TextureUsages::STORAGE_BINDING,
         view_formats: &[],
     });
 
@@ -837,8 +800,6 @@ pub fn pathtrace_scene(device: &wgpu::Device, queue: &wgpu::Queue, resources: &P
     let target_width = render_target.width();
     let target_height = render_target.height();
     let accum_params = desc.accum_params;
-    let camera_params = desc.camera_params;
-    let camera_transform = desc.camera_transform;
 
     let pipeline = if use_sw_rt {
         &resources.pipeline.custom
@@ -846,9 +807,9 @@ pub fn pathtrace_scene(device: &wgpu::Device, queue: &wgpu::Queue, resources: &P
         resources.pipeline.rt.as_ref().unwrap()
     };
 
-    let scene_bindgroup = create_pathtracer_scene_bindgroup(device, queue, resources, scene);
-    let settings_bindgroup = create_pathtracer_settings_bindgroup(device, queue, resources, accum_params.map(|params| params.prev_frame));
-    let output_bindgroup = create_pathtracer_output_bindgroup(device, queue, resources, render_target);
+    let scene_bindgroup = create_pathtracer_scene_bindgroup(device, resources, scene);
+    let settings_bindgroup = create_pathtracer_settings_bindgroup(device, resources, accum_params.map(|params| params.prev_frame));
+    let output_bindgroup = create_pathtracer_output_bindgroup(device, resources, render_target);
     let bvh_bindgroup = create_pathtracer_bvh_bindgroup(device, scene, resources, use_sw_rt);
 
     let mut encoder = device.create_command_encoder(&Default::default());
@@ -945,8 +906,6 @@ pub fn pathtrace_scene_falsecolor(device: &wgpu::Device, queue: &wgpu::Queue, re
     let target_width = render_target.width();
     let target_height = render_target.height();
     let accum_params = desc.accum_params;
-    let camera_params = desc.camera_params;
-    let camera_transform = desc.camera_transform;
 
     let pipeline = if use_sw_rt {
         &resources.falsecolor_pipeline.custom
@@ -954,9 +913,9 @@ pub fn pathtrace_scene_falsecolor(device: &wgpu::Device, queue: &wgpu::Queue, re
         resources.falsecolor_pipeline.rt.as_ref().unwrap()
     };
 
-    let scene_bindgroup = create_pathtracer_scene_bindgroup(device, queue, resources, scene);
-    let settings_bindgroup = create_pathtracer_settings_bindgroup(device, queue, resources, accum_params.map(|params| params.prev_frame));
-    let output_bindgroup = create_pathtracer_output_bindgroup(device, queue, resources, render_target);
+    let scene_bindgroup = create_pathtracer_scene_bindgroup(device, resources, scene);
+    let settings_bindgroup = create_pathtracer_settings_bindgroup(device, resources, accum_params.map(|params| params.prev_frame));
+    let output_bindgroup = create_pathtracer_output_bindgroup(device, resources, render_target);
     let bvh_bindgroup = create_pathtracer_bvh_bindgroup(device, scene, resources, use_sw_rt);
 
     let mut encoder = device.create_command_encoder(&Default::default());
@@ -1039,8 +998,6 @@ pub fn pathtrace_scene_debug(device: &wgpu::Device, queue: &wgpu::Queue, resourc
     let target_width = render_target.width();
     let target_height = render_target.height();
     let accum_params = desc.accum_params;
-    let camera_params = desc.camera_params;
-    let camera_transform = desc.camera_transform;
 
     let pipeline = if use_sw_rt {
         &resources.debug_pipeline.custom
@@ -1048,9 +1005,9 @@ pub fn pathtrace_scene_debug(device: &wgpu::Device, queue: &wgpu::Queue, resourc
         resources.debug_pipeline.rt.as_ref().unwrap()
     };
 
-    let scene_bindgroup = create_pathtracer_scene_bindgroup(device, queue, resources, scene);
-    let settings_bindgroup = create_pathtracer_settings_bindgroup(device, queue, resources, accum_params.map(|params| params.prev_frame));
-    let output_bindgroup = create_pathtracer_output_bindgroup(device, queue, resources, render_target);
+    let scene_bindgroup = create_pathtracer_scene_bindgroup(device, resources, scene);
+    let settings_bindgroup = create_pathtracer_settings_bindgroup(device, resources, accum_params.map(|params| params.prev_frame));
+    let output_bindgroup = create_pathtracer_output_bindgroup(device, resources, render_target);
     let bvh_bindgroup = create_pathtracer_bvh_bindgroup(device, scene, resources, use_sw_rt);
 
     let mut encoder = device.create_command_encoder(&Default::default());
@@ -1189,7 +1146,7 @@ fn array_of_sampler_bindings_resource<'a>(samplers: &'a Vec<wgpu::Sampler>, dumm
     return bindings;
 }
 
-fn create_pathtracer_scene_bindgroup(device: &wgpu::Device, queue: &wgpu::Queue, resources: &PathtraceResources, scene: &Scene) -> wgpu::BindGroup
+fn create_pathtracer_scene_bindgroup(device: &wgpu::Device, resources: &PathtraceResources, scene: &Scene) -> wgpu::BindGroup
 {
     let verts_pos = &scene.verts_pos_array;
     let verts_normal = &scene.verts_normal_array;
@@ -1392,7 +1349,7 @@ fn create_pathtracer_scene_bindgroup_layout(device: &wgpu::Device) -> wgpu::Bind
     });
 }
 
-fn create_pathtracer_settings_bindgroup(device: &wgpu::Device, queue: &wgpu::Queue, resources: &PathtraceResources, prev_frame: Option<&wgpu::Texture>) -> wgpu::BindGroup
+fn create_pathtracer_settings_bindgroup(device: &wgpu::Device, resources: &PathtraceResources, prev_frame: Option<&wgpu::Texture>) -> wgpu::BindGroup
 {
     let prev_frame_view;
     if let Some(prev_frame) = prev_frame {
@@ -1431,7 +1388,7 @@ fn create_pathtracer_settings_bindgroup_layout(device: &wgpu::Device) -> wgpu::B
     });
 }
 
-fn create_pathtracer_output_bindgroup(device: &wgpu::Device, queue: &wgpu::Queue, resources: &PathtraceResources, output: &wgpu::Texture) -> wgpu::BindGroup
+fn create_pathtracer_output_bindgroup(device: &wgpu::Device, resources: &PathtraceResources, output: &wgpu::Texture) -> wgpu::BindGroup
 {
     let view = output.create_view(&Default::default());
 

@@ -52,7 +52,7 @@ impl Drop for DenoiseResources
     }
 }
 
-pub fn build_denoise_resources(device: &wgpu::Device, denoise_device: &DenoiseDevice,
+pub fn build_denoise_resources(_device: &wgpu::Device, denoise_device: &DenoiseDevice,
                                width: u32, height: u32) -> DenoiseResources
 {
     let beauty: DenoiseBuffer;
@@ -225,8 +225,8 @@ pub fn denoise(device: &wgpu::Device, queue: &wgpu::Queue,
         use oidn::sys::*;
         let device_raw = device_oidn.raw();
 
-        let albedo_raw  = resources.albedo.oidn_buffer().raw();
-        let normals_raw = resources.normals.oidn_buffer().raw();
+        let albedo_raw  = albedo_oidn.raw();
+        let normals_raw = normals_oidn.raw();
 
         let filter = resources.filter;
         oidnSetFilterInt(filter, c"quality".as_ptr(), filter_quality as i32);
@@ -359,7 +359,7 @@ fn copy_texture_to_oidn_buf(device: &wgpu::Device, queue: &wgpu::Queue,
             queue.submit(Some(encoder.finish()));
 
             let slice = readback_buffer.slice(..);
-            let mapping = slice.map_async(wgpu::MapMode::Read, | result | {} );
+            let _mapping = slice.map_async(wgpu::MapMode::Read, | _ | {} );
             device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
 
             let data = slice.get_mapped_range();
@@ -419,7 +419,7 @@ fn copy_oidn_buf_to_texture(device: &wgpu::Device, queue: &wgpu::Queue,
 
             {
                 let slice = readback_buffer.slice(..);
-                let mapping = slice.map_async(wgpu::MapMode::Write, | result | {} );
+                let _mapping = slice.map_async(wgpu::MapMode::Write, | _ | {} );
                 device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
 
                 let data = slice.get_mapped_range();

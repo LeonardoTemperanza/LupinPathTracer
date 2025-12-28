@@ -776,12 +776,10 @@ pub fn build_accel_structures_and_upload(device: &wgpu::Device, queue: &wgpu::Qu
 
 /// Used to verify if a scene has been built correctly. It's best to call it
 /// right before [`upload_scene_to_gpu_and_build_accel_structures`].
-pub fn validate_scene(scene: &SceneCPU, num_textures: u32, num_samplers: u32)
+pub fn validate_scene(scene: &SceneCPU, num_textures: u32, _num_samplers: u32)
 {
     // TODO: Put readable messages on all of them.
-    //assert_eq!(scene.verts_pos_array.len(), scene.bvh_nodes_array.len());
-    assert_eq!(scene.verts_pos_array.len(), scene.mesh_infos.len());
-    // assert_eq!(scene.verts_pos_array.len(), scene.mesh_aabbs.len(), "verts_pos_array.len() doesn't match mesh_aabbs.len()");
+    assert!(scene.verts_pos_array.len() == scene.mesh_infos.len());
 
     for (i, info) in scene.mesh_infos.iter().enumerate()
     {

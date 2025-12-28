@@ -4,8 +4,7 @@ use crate::renderer::*;
 
 /// Initializes a WGPU context for you.
 pub fn init_default_wgpu_context<'a>(surface_config: &wgpu::SurfaceConfiguration,
-                                     window: impl Into<wgpu::SurfaceTarget<'a>>,
-                                     window_width: i32, window_height: i32) -> (wgpu::Device, wgpu::Queue, wgpu::Surface<'a>, wgpu::Adapter)
+                                     window: impl Into<wgpu::SurfaceTarget<'a>>) -> (wgpu::Device, wgpu::Queue, wgpu::Surface<'a>, wgpu::Adapter)
 {
     let instance_desc = wgpu::InstanceDescriptor {
         #[cfg(target_os = "windows")]
@@ -69,8 +68,7 @@ pub fn init_default_wgpu_context_no_window()->(wgpu::Device, wgpu::Queue, wgpu::
 /// Initializes a WGPU context for you, with denoising capabilities.
 #[cfg(feature = "denoising")]
 pub fn init_default_wgpu_context_with_denoising_capabilities<'a>(surface_config: &wgpu::SurfaceConfiguration,
-                                     window: impl Into<wgpu::SurfaceTarget<'a>>,
-                                     window_width: i32, window_height: i32) -> (wgpu::Device, wgpu::Queue, wgpu::Surface<'a>, wgpu::Adapter, DenoiseDevice)
+                                                                 window: impl Into<wgpu::SurfaceTarget<'a>>) -> (wgpu::Device, wgpu::Queue, wgpu::Surface<'a>, wgpu::Adapter, DenoiseDevice)
 {
     let instance_desc = wgpu::InstanceDescriptor {
         #[cfg(target_os = "windows")]

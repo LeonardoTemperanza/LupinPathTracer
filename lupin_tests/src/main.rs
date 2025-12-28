@@ -159,7 +159,7 @@ impl ApplicationHandler for App
                 alpha_mode: wgpu::CompositeAlphaMode::Auto,
                 view_formats: vec![],
             };
-            let (device, queue, surface, adapter) = lp::init_default_wgpu_context(&surface_config, window, width, height);
+            let (device, queue, surface, adapter) = lp::init_default_wgpu_context(&surface_config, window);
 
             let tonemap_res = lp::build_tonemap_resources(&device);
             let pathtrace_res = lp::build_pathtrace_resources(&device, &lp::BakedPathtraceParams {
