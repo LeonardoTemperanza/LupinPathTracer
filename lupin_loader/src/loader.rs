@@ -455,7 +455,7 @@ struct TextureLoadInfo
     used_for_data: bool,
 }
 
-/// Load a scene in the format used by the yoctogl library, version 2.4.
+/// Load a scene in the format used by the Yocto/GL library, version 2.4.
 pub fn load_scene_yoctogl_v24(path: &std::path::Path, device: &wgpu::Device, queue: &wgpu::Queue, build_both_bvhs: bool) -> Result<(lp::Scene, Vec<SceneCamera>), LoadError>
 {
     let parent_dir = path.parent().unwrap_or(std::path::Path::new(""));
@@ -466,8 +466,6 @@ pub fn load_scene_yoctogl_v24(path: &std::path::Path, device: &wgpu::Device, que
 
     let mut tex_load_infos = Vec::<TextureLoadInfo>::new();
     let mut num_parsed_textures = 0;
-
-    let linear_sampler = push_asset(&mut samplers, lp::create_linear_sampler(device));
 
     let mut scene_cams = Vec::<SceneCamera>::new();
 
@@ -830,6 +828,7 @@ pub fn load_scene_yoctogl_v24(path: &std::path::Path, device: &wgpu::Device, que
         }
 
         textures.push(res.unwrap());
+        push_asset(&mut samplers, lp::create_linear_sampler(device));
     }
 
     // Fill in environment data.

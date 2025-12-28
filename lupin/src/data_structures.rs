@@ -776,27 +776,27 @@ pub fn build_accel_structures_and_upload(device: &wgpu::Device, queue: &wgpu::Qu
 
 /// Used to verify if a scene has been built correctly. It's best to call it
 /// right before [`upload_scene_to_gpu_and_build_accel_structures`].
-pub fn validate_scene(scene: &SceneCPU, num_textures: u32, _num_samplers: u32)
+pub fn validate_scene(scene: &SceneCPU, num_textures: u32, num_samplers: u32)
 {
-    // TODO: Put readable messages on all of them.
     assert!(scene.verts_pos_array.len() == scene.mesh_infos.len());
+    assert!(num_textures == num_samplers);
 
     for (i, info) in scene.mesh_infos.iter().enumerate()
     {
         if info.normals_buf_idx != SENTINEL_IDX
         {
             assert!((info.normals_buf_idx as usize) < scene.verts_normal_array.len());
-            assert_eq!(scene.verts_normal_array[info.normals_buf_idx as usize].len(), scene.verts_pos_array[i].len());
+            assert!(scene.verts_normal_array[info.normals_buf_idx as usize].len() == scene.verts_pos_array[i].len());
         }
         if info.texcoords_buf_idx != SENTINEL_IDX
         {
             assert!((info.texcoords_buf_idx as usize) < scene.verts_texcoord_array.len());
-            assert_eq!(scene.verts_texcoord_array[info.texcoords_buf_idx as usize].len(), scene.verts_pos_array[i].len());
+            assert!(scene.verts_texcoord_array[info.texcoords_buf_idx as usize].len() == scene.verts_pos_array[i].len());
         }
         if info.colors_buf_idx != SENTINEL_IDX
         {
             assert!((info.colors_buf_idx as usize) < scene.verts_color_array.len());
-            assert_eq!(scene.verts_color_array[info.colors_buf_idx as usize].len(), scene.verts_pos_array[i].len());
+            assert!(scene.verts_color_array[info.colors_buf_idx as usize].len() == scene.verts_pos_array[i].len());
         }
     }
 
@@ -808,18 +808,12 @@ pub fn validate_scene(scene: &SceneCPU, num_textures: u32, _num_samplers: u32)
         }
     }
 
-    /*
-    for tlas_node in &scene.tlas_nodes {
-        assert!((tlas_node.instance_idx as usize) < scene.instances.len());
-    }
-    */
     for instance in &scene.instances
     {
         assert!((instance.mesh_idx as usize) < scene.mesh_infos.len());
         assert!((instance.mat_idx  as usize) < scene.materials.len());
     }
 
-    // TODO: Fill in other stuff in material
     for mat in &scene.materials
     {
         assert!(mat.color_tex_idx < num_textures      || mat.color_tex_idx == SENTINEL_IDX);
@@ -868,86 +862,6 @@ pub fn compute_mesh_aabb(verts_pos: &[Vec4]) -> Aabb
         grow_aabb_to_include_vert(&mut aabb, Vec3 { x: pos.x, y: pos.y, z: pos.z });
     }
     return aabb;
-}
-
-#[cfg(test)]
-mod tests
-{
-    use rand::Rng;
-    use super::*;
-
-    #[test]
-    fn test_alias_table()
-    {
-        let weights = [
-            0.2, 0.1, 0.05, 0.8, 1.2, 5.0, 0.1, 0.2, 0.3, 1.0, 1.0, 0.3, 0.35, 0.0,
-        ];
-        test_alias_table_any(&weights);
-    }
-
-    #[test]
-    fn test_alias_table_white()
-    {
-        let weights = [ 1.0, 1.0, 1.0, 1.0, 1.0, 1.0 ];
-        test_alias_table_any(&weights);
-    }
-
-    #[test]
-    fn test_alias_table_single()
-    {
-        let weights = [ 1.0 ];
-        test_alias_table_any(&weights);
-    }
-
-    fn test_alias_table_any(weights: &[f32])
-    {
-        let mut weights_sum = 0.0;
-        for weight in weights {
-            weights_sum += weight;
-        }
-
-        let alias_table = build_alias_table(&weights);
-        assert!(alias_table.len() == weights.len());
-
-        for (i, bin) in alias_table.iter().enumerate() {
-            assert!(f32::abs(bin.prob - weights[i] / weights_sum) < 0.01);
-        }
-
-        // Check that the alias probabilities are
-        // correct with a lot of random samples.
-
-        #[derive(Default, Clone, Copy)]
-        struct Record
-        {
-            pub idx: u32,
-            pub hits: u32,
-        }
-
-        let mut hits_per_idx = vec![Record::default(); weights.len()];
-        for (i, v) in hits_per_idx.iter_mut().enumerate() {
-            v.idx = i as u32;
-        }
-
-        let mut rng = rand::thread_rng();
-        const NUM_SAMPLES: u32 = 100000;
-        for i in 0..NUM_SAMPLES
-        {
-            let slot_idx: usize = rng.gen_range(0..alias_table.len()); // inclusive range
-            let rnd: f32 = rng.gen();
-            if rnd >= alias_table[slot_idx].alias_threshold {
-                hits_per_idx[alias_table[slot_idx].alias as usize].hits += 1;
-            } else {
-                hits_per_idx[slot_idx as usize].hits += 1;
-            }
-        }
-
-        for (i, v) in hits_per_idx.iter().enumerate()
-        {
-            let ratio = v.hits as f32 / NUM_SAMPLES as f32;
-            let prob = weights[i] / weights_sum;
-            assert!(f32::abs(ratio - prob) < 0.01);
-        }
-    }
 }
 
 fn build_rt_accel_structures(device: &wgpu::Device, queue: &wgpu::Queue, scene: &SceneCPU, lights: &LightsCPU,
@@ -1064,4 +978,84 @@ fn build_rt_accel_structures(device: &wgpu::Device, queue: &wgpu::Queue, scene: 
     queue.submit(Some(encoder.finish()));
 
     return (Some(tlas), blases);
+}
+
+#[cfg(test)]
+mod tests
+{
+    use rand::Rng;
+    use super::*;
+
+    #[test]
+    fn test_alias_table()
+    {
+        let weights = [
+            0.2, 0.1, 0.05, 0.8, 1.2, 5.0, 0.1, 0.2, 0.3, 1.0, 1.0, 0.3, 0.35, 0.0,
+        ];
+        test_alias_table_any(&weights);
+    }
+
+    #[test]
+    fn test_alias_table_white()
+    {
+        let weights = [ 1.0, 1.0, 1.0, 1.0, 1.0, 1.0 ];
+        test_alias_table_any(&weights);
+    }
+
+    #[test]
+    fn test_alias_table_single()
+    {
+        let weights = [ 1.0 ];
+        test_alias_table_any(&weights);
+    }
+
+    fn test_alias_table_any(weights: &[f32])
+    {
+        let mut weights_sum = 0.0;
+        for weight in weights {
+            weights_sum += weight;
+        }
+
+        let alias_table = build_alias_table(&weights);
+        assert!(alias_table.len() == weights.len());
+
+        for (i, bin) in alias_table.iter().enumerate() {
+            assert!(f32::abs(bin.prob - weights[i] / weights_sum) < 0.01);
+        }
+
+        // Check that the alias probabilities are
+        // correct with a lot of random samples.
+
+        #[derive(Default, Clone, Copy)]
+        struct Record
+        {
+            pub idx: u32,
+            pub hits: u32,
+        }
+
+        let mut hits_per_idx = vec![Record::default(); weights.len()];
+        for (i, v) in hits_per_idx.iter_mut().enumerate() {
+            v.idx = i as u32;
+        }
+
+        let mut rng = rand::thread_rng();
+        const NUM_SAMPLES: u32 = 100000;
+        for i in 0..NUM_SAMPLES
+        {
+            let slot_idx: usize = rng.gen_range(0..alias_table.len()); // inclusive range
+            let rnd: f32 = rng.gen();
+            if rnd >= alias_table[slot_idx].alias_threshold {
+                hits_per_idx[alias_table[slot_idx].alias as usize].hits += 1;
+            } else {
+                hits_per_idx[slot_idx as usize].hits += 1;
+            }
+        }
+
+        for (i, v) in hits_per_idx.iter().enumerate()
+        {
+            let ratio = v.hits as f32 / NUM_SAMPLES as f32;
+            let prob = weights[i] / weights_sum;
+            assert!(f32::abs(ratio - prob) < 0.01);
+        }
+    }
 }

@@ -260,8 +260,6 @@ fn _get_alpha(uv: vec2f, tri_idx: u32, instance_idx: u32) -> f32
     let mat = materials[instance.mat_idx];
     let mesh_info = mesh_infos[mesh_idx];
 
-    const mat_sampler_idx: u32 = 0;  // TODO!
-
     // Sample textures.
     var tex_alpha = 1.0f;
     if mesh_info.texcoords_buf_idx != SENTINEL_IDX
@@ -273,7 +271,7 @@ fn _get_alpha(uv: vec2f, tri_idx: u32, instance_idx: u32) -> f32
         let texcoords = uv0*w + uv1*uv.x + uv2*uv.y;
 
         if mat.color_tex_idx != SENTINEL_IDX {
-            tex_alpha = textureSampleLevel(textures[mat.color_tex_idx], samplers[mat_sampler_idx], texcoords, 0.0f).a;
+            tex_alpha = sample_texture(mat.color_tex_idx, texcoords).a;
         }
     }
 

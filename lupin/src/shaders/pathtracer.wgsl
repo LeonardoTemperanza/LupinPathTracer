@@ -101,7 +101,6 @@ struct Instance
     // 8 bytes padding
 }
 
-// WGSL doesn't have enums...
 const MAT_TYPE_MATTE: u32       = 0;
 const MAT_TYPE_GLOSSY: u32      = 1;
 const MAT_TYPE_REFLECTIVE: u32  = 2;
@@ -213,7 +212,7 @@ const PATHTRACE_TYPE_DIRECT: u32 = 3;
 // All entrypoints support tiling and progressive rendering.
 // They all perform montecarlo integration over the surface of a pixel.
 
-// Performs montecarlo pathtracing. (TODO: Add ability to change pathtrace function)
+// Performs montecarlo pathtracing.
 @compute
 @workgroup_size(WORKGROUP_SIZE_X, WORKGROUP_SIZE_Y, 1)
 fn pathtrace_main(@builtin(local_invocation_id) local_id: vec3u, @builtin(global_invocation_id) global_id_: vec3u)
@@ -1027,8 +1026,6 @@ fn get_material_point(hit: HitInfo) -> MaterialPoint
     var res = MaterialPoint();
     res.mat_type = mat.mat_type;
 
-    const mat_sampler_idx: u32 = 0;  // TODO!
-
     // Sample textures.
     var color_sample = vec4f(1.0f);
     var emission_sample = vec3f(1.0f);
@@ -1044,22 +1041,21 @@ fn get_material_point(hit: HitInfo) -> MaterialPoint
         let texcoords = uv0*w + uv1*hit.uv.x + uv2*hit.uv.y;
 
         if mat.color_tex_idx != SENTINEL_IDX {
-            color_sample = textureSampleLevel(textures[mat.color_tex_idx], samplers[mat_sampler_idx], texcoords, 0.0f);
+            color_sample = sample_texture(mat.color_tex_idx, texcoords);
             color_sample = vec4f(vec3f_srgb_to_linear(color_sample.rgb), color_sample.a);
         }
         if mat.emission_tex_idx != SENTINEL_IDX {
-            emission_sample = textureSampleLevel(textures[mat.emission_tex_idx], samplers[mat_sampler_idx], texcoords, 0.0f).rgb;
-            emission_sample = vec3f_srgb_to_linear(emission_sample);
+            emission_sample = sample_texture(mat.emission_tex_idx, texcoords).rgb;
+            // emission_sample = vec3f_srgb_to_linear(emission_sample);
         }
         if mat.roughness_tex_idx != SENTINEL_IDX {
-            let tex_sample = textureSampleLevel(textures[mat.roughness_tex_idx], samplers[mat_sampler_idx], texcoords, 0.0f).rgb;
-            // TODO: Is this a thing???
-            let sample_linear = vec3f_srgb_to_linear(tex_sample);
-            roughness_sample = sample_linear.g;
-            metallic_sample = sample_linear.b;
+            let tex_sample = sample_texture(mat.roughness_tex_idx, texcoords).rgb;
+            // tex_sample = vec3f_srgb_to_linear(tex_sample);
+            roughness_sample = tex_sample.g;
+            metallic_sample = tex_sample.b;
         }
         if mat.scattering_tex_idx != SENTINEL_IDX {
-            scattering_sample = textureSampleLevel(textures[mat.scattering_tex_idx], samplers[mat_sampler_idx], texcoords, 0.0f).rgb;
+            scattering_sample = sample_texture(mat.scattering_tex_idx, texcoords).rgb;
         }
     }
 
@@ -1114,8 +1110,6 @@ fn compute_shading_normal(hit: HitInfo) -> vec3f
         // Sample normalmap.
         if mat.normal_tex_idx != SENTINEL_IDX
         {
-            const mat_sampler_idx: u32 = 0;  // TODO!
-
             let uv0 = verts_texcoord_array[mesh_info.texcoords_buf_idx].data[indices_array[mesh_idx].data[tri_idx*3 + 0]];
             let uv1 = verts_texcoord_array[mesh_info.texcoords_buf_idx].data[indices_array[mesh_idx].data[tri_idx*3 + 1]];
             let uv2 = verts_texcoord_array[mesh_info.texcoords_buf_idx].data[indices_array[mesh_idx].data[tri_idx*3 + 2]];
@@ -1125,7 +1119,7 @@ fn compute_shading_normal(hit: HitInfo) -> vec3f
             let p2  = verts_pos_array[mesh_idx].data[indices_array[mesh_idx].data[tri_idx*3 + 2]];
             let tangents = compute_tangents_from_uv(hit.instance_idx, p0, p1, p2, uv0, uv1, uv2);
 
-            let normalmap_sample = textureSampleLevel(textures[mat.normal_tex_idx], samplers[mat_sampler_idx], texcoords, 0.0f).xyz;
+            let normalmap_sample = sample_texture(mat.normal_tex_idx, texcoords).xyz;
             var normal_local = -1.0 + 2.0 * normalmap_sample;
             var frame = mat3x3f(tangents.tangent, tangents.bitangent, res);
             frame[0] = orthonormalize(frame[0], frame[2]);
@@ -1162,9 +1156,15 @@ fn sample_environment(dir: vec3f, env_idx: u32) -> vec3f
 
     var res = env.emission.rgb;
     if env.emission_tex_idx != SENTINEL_IDX {
-        res *= textureSampleLevel(textures[env.emission_tex_idx], samplers[sampler_idx], uv, 0.0f).rgb;
+        res *= sample_texture(env.emission_tex_idx, uv).rgb;
     }
     return res;
+}
+
+// NOTE: Does not check for SENTINEL_IDX.
+fn sample_texture(tex_idx: u32, uv: vec2f) -> vec4f
+{
+    return textureSampleLevel(textures[tex_idx], samplers[tex_idx], uv, 0.0f);
 }
 
 fn is_mat_delta(mat: MaterialPoint) -> bool

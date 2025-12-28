@@ -2,10 +2,10 @@
 Fix the samplers thing
 Stop using the deprecated method on winit
 Improve the json parser
+clean up rng thing
 
 Enable more warnings and fix those.
 clean up loader
-clean up rng thing
 
 Speed up CPU fallback
 Speed up recreation of pipelines?

@@ -271,7 +271,6 @@ pub const TLAS_MAX_DEPTH: i32 = 50;
 pub const MAX_MESHES:    u32 = 15000;
 pub const MAX_ENVS:      u32 = 10;
 pub const MAX_TEXTURES:  u32 = 15000;
-pub const MAX_SAMPLERS:  u32 = 32;
 pub const NUM_STORAGE_BUFFERS_PER_MESH: u32 = 7;
 // NOTE: Coupled to shader.
 pub const WORKGROUP_SIZE: u32 = 4;
@@ -305,9 +304,9 @@ pub fn request_device_for_lupin(adapter: &wgpu::Adapter) -> (wgpu::Device, wgpu:
         required_limits: wgpu::Limits {
             max_storage_buffers_per_shader_stage: MAX_MESHES * NUM_STORAGE_BUFFERS_PER_MESH + MAX_ENVS + 64,
             max_binding_array_elements_per_shader_stage: MAX_MESHES * NUM_STORAGE_BUFFERS_PER_MESH + MAX_ENVS + MAX_TEXTURES + 64,
-            max_binding_array_sampler_elements_per_shader_stage: MAX_SAMPLERS,
+            max_binding_array_sampler_elements_per_shader_stage: MAX_TEXTURES,
             max_sampled_textures_per_shader_stage: MAX_TEXTURES + 64,
-            max_samplers_per_shader_stage: MAX_SAMPLERS + 8,
+            max_samplers_per_shader_stage: MAX_TEXTURES + 8,
             max_push_constant_size: MAX_PUSH_CONSTANTS_SIZE,
             max_acceleration_structures_per_shader_stage: allowed_accel_structures,
             max_tlas_instance_count: max_rt_instances,
@@ -371,9 +370,9 @@ pub fn request_device_for_lupin_with_denoising_capabilities(adapter: &wgpu::Adap
         required_limits: wgpu::Limits {
             max_storage_buffers_per_shader_stage: MAX_MESHES * NUM_STORAGE_BUFFERS_PER_MESH + MAX_ENVS + 64,
             max_binding_array_elements_per_shader_stage: MAX_MESHES * NUM_STORAGE_BUFFERS_PER_MESH + MAX_ENVS + MAX_TEXTURES + 64,
-            max_binding_array_sampler_elements_per_shader_stage: MAX_SAMPLERS,
+            max_binding_array_sampler_elements_per_shader_stage: MAX_TEXTURES,
             max_sampled_textures_per_shader_stage: MAX_TEXTURES + 64,
-            max_samplers_per_shader_stage: MAX_SAMPLERS + 8,
+            max_samplers_per_shader_stage: MAX_TEXTURES + 8,
             max_push_constant_size: MAX_PUSH_CONSTANTS_SIZE,
             max_acceleration_structures_per_shader_stage: allowed_accel_structures,
             max_tlas_instance_count: max_rt_instances,
@@ -1303,7 +1302,7 @@ fn create_pathtracer_scene_bindgroup_layout(device: &wgpu::Device) -> wgpu::Bind
                 binding: 9,
                 visibility: wgpu::ShaderStages::COMPUTE,
                 ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-                count: std::num::NonZero::new(MAX_SAMPLERS)
+                count: std::num::NonZero::new(MAX_TEXTURES)
             },
             wgpu::BindGroupLayoutEntry {  // environments
                 binding: 10,
