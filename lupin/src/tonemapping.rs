@@ -154,7 +154,7 @@ pub struct Viewport
     pub h: f32
 }
 
-/// src and dst are required to be different textures, because of underlying limitations of graphics APIs.
+/// `src` and `dst` are required to be different textures, because of underlying limitations of graphics APIs.
 pub fn tonemap_and_fit_aspect(device: &wgpu::Device, queue: &wgpu::Queue, resources: &TonemapResources,
                               src: &wgpu::Texture, dst: &wgpu::Texture, desc: &TonemapDesc)
 {

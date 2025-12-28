@@ -684,7 +684,6 @@ pub fn tlas_find_best_match(tlas: &[TlasNode], idx_array: &[u32], node_a: u32) -
     return best_b;
 }
 
-/// * `input` - The input value.
 /// * `build_sw_and_hw` - If true, and hardware raytracing is supported on the current device, then it will build both types of acceleration structures.
 ///                       Otherwise it will only attempt to build the supported one.
 pub fn build_accel_structures_and_upload(device: &wgpu::Device, queue: &wgpu::Queue, scene: &SceneCPU, textures: Vec<wgpu::Texture>, samplers: Vec<wgpu::Sampler>, envs_info: &[EnvMapInfo], build_sw_and_hw: bool) -> Scene
@@ -775,7 +774,7 @@ pub fn build_accel_structures_and_upload(device: &wgpu::Device, queue: &wgpu::Qu
 }
 
 /// Used to verify if a scene has been built correctly. It's best to call it
-/// right before [`upload_scene_to_gpu_and_build_accel_structures`].
+/// right before [`build_accel_structures_and_upload`].
 pub fn validate_scene(scene: &SceneCPU, num_textures: u32, num_samplers: u32)
 {
     assert!(scene.verts_pos_array.len() == scene.mesh_infos.len());
@@ -864,8 +863,8 @@ pub fn compute_mesh_aabb(verts_pos: &[Vec4]) -> Aabb
     return aabb;
 }
 
-fn build_rt_accel_structures(device: &wgpu::Device, queue: &wgpu::Queue, scene: &SceneCPU, lights: &LightsCPU,
-                             verts_pos_array: &Vec<wgpu::Buffer>, indices_array: &Vec<wgpu::Buffer>) -> (Option<wgpu::Tlas>, Vec<wgpu::Blas>)
+pub fn build_rt_accel_structures(device: &wgpu::Device, queue: &wgpu::Queue, scene: &SceneCPU, lights: &LightsCPU,
+                                 verts_pos_array: &Vec<wgpu::Buffer>, indices_array: &Vec<wgpu::Buffer>) -> (Option<wgpu::Tlas>, Vec<wgpu::Blas>)
 {
     if !supports_rt(device) { return (None, vec![]) }
 

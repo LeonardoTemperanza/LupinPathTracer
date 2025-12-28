@@ -5,8 +5,8 @@
 #![allow(unexpected_cfgs)]
 
 //! # Lupin
-//! lupin is a cross-platform, data-oriented library for fast photorealistic
-//! rendering on the GPU. It's meant to be simple and C-like.
+//! Lupin is a cross-platform, data-oriented library for fast photorealistic
+//! rendering on the GPU with WGPU. It's meant to be simple and C-like, and supports hardware raytracing.
 //! For scene serialization, lupin_loader could be used, or a custom loader which uses lupin's scene-building API.
 
 //! # Library Usage
@@ -71,6 +71,93 @@
 //!
 //!     output.flip();
 //!     lpl::save_texture(&device, &queue, "output.hdr", output.front());
+//! }
+//!
+//! ```
+//!
+//! # Scene building API
+//! The typical workflow is as follows:
+//! ```no_run
+//! use lupin as lp;
+//!
+//! fn main()
+//! {
+//!     let mut textures = Vec::<wgpu::Texture>::new();
+//!     let mut samplers = Vec::<wgpu::Sampler>::new();
+//!     let mut environment_infos = Vec::<lp::EnvMapInfo>::with_capacity(scene.environments.len());
+//!     let scene_cpu = lp::SceneCPU {
+//!         mesh_infos: /* ... */,
+//!         verts_pos_array: /* ... */,
+//!         verts_normal_array: /* ... */,
+//!         verts_texcoord_array: /* ... */,
+//!         verts_color_array: /* ... */,
+//!         indices_array: /* ... */,
+//!         instances: /* ... */,
+//!         materials: /* ... */,
+//!         environments: /* ... */,
+//!     }
+//!
+//!     // Load textures and samplers (no CPU copy for those, except for environments).
+//!     // Each texture needs to have a corresponding sampler.
+//!     // textures.push(...);
+//!     // samplers.push(...);
+//!
+//!     // Load environments (with CPU copy)
+//!     // environment_infos.push(...);
+//!
+//!     lp::validate_scene(&scene_cpu, textures.len() as u32, samplers.len() as u32);
+//!     let scene_gpu = lp::build_accel_structures_and_upload(device, queue, &scene, textures, samplers, &environment_infos, true);
+//!
+//!     // Some stats can be obtained:
+//!     let scene_stats = get_scene_stats(&scene_gpu);
+//! }
+//!
+//! ```
+//!
+//! But, if your project has specific requirements - e.g. big scenes and/or strict memory constraints -
+//! you can build the acceleration structures directly, through functions like [`build_bvh`], [`build_tlas`], [`build_rt_accel_structures`], [`build_lights`].
+//!
+//! # Materials
+//! The material system is the same as the one used in the [Yocto/GL](https://github.com/xelatihy/yocto-gl/) library.
+//!
+//! The material type is a 'megastruct' where its fields can be used in different ways depending on the material type:
+//! - Matte: Diffuse BSDF,
+//! - Glossy: Diffuse + Microfacet BSDF
+//! - Reflective: Metallic appearance achieved using a delta/microfacet BSDF
+//! - Transparent: Thin glass-like appearance achieved using a delta/microfacet BSDF
+//! - Refractive: Glass-like appearance achieved using a delta/microfacet BSDF
+//! - GLTF-PBR: Implements compatibility with Khronos' glTF format
+//!
+//! # Denoising
+//! This library supports machine-learned denoising with the use of [Intel Open Image Denoise (OIDN)](https://www.openimagedenoise.org/).
+//! Since this costs two extra dependencies, it is an optional feature which can be enabled like this:
+//! ```toml
+//! lupin = { features = [ "denoising" ] }
+//! ```
+//! Denoising is straightforward:
+//! ```no_run
+//! use lupin as lp;
+//!
+//! fn main()
+//! {
+//!     // Initialize WGPU
+//!     let (device, queue, adapter, denoise_device) = lp::init_default_wgpu_context_with_denoising_capabilities();
+//!
+//!     let denoise_res = lp::build_denoise_resources(&device, &denoise_device, /* width */, /* height */);
+//!
+//!     // Render a scene. Optionally, for better denoising quality,
+//!     // albedo and normals gbuffers can be provided.
+//!     let output = /* ... */;
+//!     let albedo = /* ... */;
+//!     let normals = /* ... */;
+//!
+//!     lp::denoise(&device, &queue, &denoise_device, &denoise_res, &lp::DenoiseDesc {
+//!         pathtrace_output: &output,
+//!         albedo: Some(&albedo),
+//!         normals: Some(&normals),
+//!         denoise_output: Some(&output),  // Can be the same as pathtrace_output!
+//!         quality: Default::default(),
+//!     });
 //! }
 //!
 //! ```

@@ -145,7 +145,6 @@ pub fn build_denoise_resources(_device: &wgpu::Device, denoise_device: &DenoiseD
     };
 }
 
-/// Denoising params.
 pub struct DenoiseDesc<'a>
 {
     /// Assumed to be rgbaf16 linear.

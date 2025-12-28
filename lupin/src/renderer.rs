@@ -120,8 +120,8 @@ pub enum MaterialType
     Reflective  = 2,
     Transparent = 3,
     Refractive  = 4,
-    Subsurface  = 5,
-    Volumetric  = 6,
+    //Subsurface  = 5,
+    //Volumetric  = 6,
     GltfPbr     = 7,
 }
 
@@ -276,7 +276,7 @@ pub const NUM_STORAGE_BUFFERS_PER_MESH: u32 = 7;
 pub const WORKGROUP_SIZE: u32 = 4;
 const RT_MAX_ACCEL_STRUCTURES: u32 = 2;
 
-/// Requests the wgpu device with the required features for Lupin.
+/// Requests a WGPU device with the required features for Lupin.
 pub fn request_device_for_lupin(adapter: &wgpu::Adapter) -> (wgpu::Device, wgpu::Queue)
 {
     let optional_features = wgpu::Features::EXPERIMENTAL_RAY_QUERY;
@@ -341,7 +341,7 @@ impl DenoiseDevice
     }
 }
 
-/// Requests the wgpu device with the required features for Lupin and for denoising.
+/// Requests a WGPU device with the required features for Lupin and for denoising.
 #[cfg(feature = "denoising")]
 pub fn request_device_for_lupin_with_denoising_capabilities(adapter: &wgpu::Adapter) -> (wgpu::Device, wgpu::Queue, DenoiseDevice)
 {
