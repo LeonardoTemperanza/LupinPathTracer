@@ -272,7 +272,7 @@ impl<'a> AppState<'a>
             window: window,
 
             // UI
-            render_type: RenderType::Falsecolor(lp::FalsecolorType::Albedo),
+            render_type: RenderType::Pathtrace,
             pathtrace_type: Default::default(),
             samples_per_pixel: DEFAULT_SAMPLES_PER_PIXEL,
             max_bounces: DEFAULT_MAX_BOUNCES,

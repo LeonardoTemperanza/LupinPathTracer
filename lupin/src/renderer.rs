@@ -2,8 +2,6 @@
 use crate::base::*;
 use crate::wgpu_utils::*;
 
-use wgpu::util::DeviceExt;  // For some extra device traits.
-
 #[allow(unused_macros)]
 macro_rules! static_assert {
     ($($tt:tt)*) => {
@@ -1061,11 +1059,6 @@ pub fn pathtrace_scene_debug(device: &wgpu::Device, queue: &wgpu::Queue, resourc
 
 // Wrappers
 
-fn buffer_resource_nocheck(buffer: &wgpu::Buffer) -> wgpu::BindingResource
-{
-    return wgpu::BindingResource::Buffer(wgpu::BufferBinding { buffer: buffer, offset: 0, size: None });
-}
-
 fn buffer_resource<'a>(buffer: &'a wgpu::Buffer, dummy: &'a wgpu::Buffer) -> wgpu::BindingResource<'a>
 {
     // NOTE: Arrays of bindings can't be empty.
@@ -1160,7 +1153,6 @@ fn create_pathtracer_scene_bindgroup(device: &wgpu::Device, resources: &Pathtrac
     let texture_views = array_of_texture_views(&scene.textures);
     let dummy_tex_view = resources.dummy_scene_tex.create_view(&Default::default());
 
-    use crate::wgpu_utils::*;
     let verts_pos_array = array_of_buffer_bindings_resource(&verts_pos, &resources.dummy_buf_vertpos);
     let verts_normal_array   = array_of_buffer_bindings_resource(&verts_normal, &resources.dummy_buf_vertnormal);
     let verts_texcoord_array = array_of_buffer_bindings_resource(&verts_texcoord, &resources.dummy_buf_vertuv);

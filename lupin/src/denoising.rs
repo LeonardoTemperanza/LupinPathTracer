@@ -1,6 +1,4 @@
 
-use crate::base::*;
-use crate::wgpu_utils::*;
 use crate::renderer::*;
 
 pub enum DenoiseBuffer

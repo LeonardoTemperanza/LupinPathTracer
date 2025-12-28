@@ -1,8 +1,5 @@
 
 use crate::base::*;
-use crate::wgpu_utils::*;
-
-use wgpu::util::DeviceExt;  // For some extra device traits.
 
 pub static TONEMAPPING_SRC: &str = include_str!("shaders/tonemapping.wgsl");
 

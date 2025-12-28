@@ -1,8 +1,8 @@
 
-Fix the samplers thing
+clean up rng thing
+also add rng seed
 Stop using the deprecated method on winit
 Improve the json parser
-clean up rng thing
 
 Enable more warnings and fix those.
 clean up loader
