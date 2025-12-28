@@ -693,11 +693,8 @@ pub fn build_accel_structures_and_upload(device: &wgpu::Device, queue: &wgpu::Qu
     let verts_texcoord_array: Vec::<wgpu::Buffer> = scene.verts_texcoord_array.iter().map(|x| upload_storage_buffer(device, queue, to_u8_slice(x))).collect();
     let verts_color_array: Vec::<wgpu::Buffer> = scene.verts_color_array.iter().map(|x| upload_storage_buffer(device, queue, to_u8_slice(x))).collect();
     let verts_pos_array: Vec::<wgpu::Buffer> = scene.verts_pos_array.iter().map(|x| upload_vertex_pos_buffer(device, queue, to_u8_slice(x))).collect();
-    // let indices_array: Vec::<wgpu::Buffer> = scene.indices_array.iter().map(|x| upload_indices_buffer(device, queue, to_u8_slice(x))).collect();
-    // let bvh_nodes_array: Vec::<wgpu::Buffer> = scene.bvh_nodes_array.iter().map(|x| upload_storage_buffer(device, queue, to_u8_slice(x))).collect();
 
     let mesh_infos = upload_storage_buffer_with_name(device, queue, to_u8_slice(&scene.mesh_infos), "mesh_infos");
-    // let tlas_nodes = upload_storage_buffer_with_name(device, queue, to_u8_slice(&scene.tlas_nodes), "tlas_nodes");
     let instances = upload_storage_buffer_with_name(device, queue, to_u8_slice(&scene.instances), "instances");
     let materials = upload_storage_buffer_with_name(device, queue, to_u8_slice(&scene.materials), "materials");
     let environments = upload_storage_buffer_with_name(device, queue, to_u8_slice(&scene.environments), "environments");
@@ -714,9 +711,13 @@ pub fn build_accel_structures_and_upload(device: &wgpu::Device, queue: &wgpu::Qu
         {
             let mut indices = scene.indices_array[i].clone();
             let bvh = build_bvh(&verts, &mut indices);
-            bvh_nodes_array.push(upload_storage_buffer(device, queue, to_u8_slice(&scene.environments)));
+            bvh_nodes_array.push(upload_storage_buffer(device, queue, to_u8_slice(&bvh)));
             indices_array.push(upload_vertex_pos_buffer(device, queue, to_u8_slice(&indices)));
         }
+    }
+    else
+    {
+        indices_array = scene.indices_array.iter().map(|x| upload_indices_buffer(device, queue, to_u8_slice(x))).collect();
     }
 
     let (rt_tlas, rt_blases) = if supports_rt(device) {
@@ -734,8 +735,6 @@ pub fn build_accel_structures_and_upload(device: &wgpu::Device, queue: &wgpu::Qu
         }
         model_aabbs.push(aabb);
     }
-
-    let model_aabbs = Vec::<Aabb>::new();
 
     let tlas_nodes_cpu = if !supports_rt(device) || build_sw_and_hw {
         build_tlas(&scene.instances, &model_aabbs)
@@ -1006,9 +1005,6 @@ fn build_rt_accel_structures(device: &wgpu::Device, queue: &wgpu::Queue, scene: 
 
     for i in 0..scene.verts_pos_array.len()
     {
-        let verts = &scene.verts_pos_array[i];
-        let indices = &scene.indices_array[i];
-
         let triangle_geometry = wgpu::BlasTriangleGeometry {
             size: &size_descs[i],
             vertex_buffer: &verts_pos_array[i],

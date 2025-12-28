@@ -55,16 +55,11 @@ pub struct SceneCPU
     pub verts_texcoord_array: Vec<Vec<Vec2>>,
     pub verts_color_array: Vec<Vec<Vec4>>,
     pub indices_array: Vec<Vec<u32>>,
-    //pub bvh_nodes_array: Vec<Vec<BvhNode>>,
-    //pub mesh_aabbs: Vec<Aabb>,
 
-    //pub tlas_nodes: Vec<TlasNode>,
     pub instances: Vec<Instance>,
     pub materials: Vec<Material>,
 
     pub environments: Vec<Environment>,
-
-    //pub lights: LightsCPU,
 }
 
 #[derive(Default, Debug)]
@@ -832,9 +827,11 @@ pub fn pathtrace_scene(device: &wgpu::Device, queue: &wgpu::Queue, resources: &P
 {
     assert!(render_target.format() == wgpu::TextureFormat::Rgba16Float);
 
+    let use_sw_rt = !supports_rt(device) || desc.force_software_bvh;
+
     let sw_bvh_absent = scene.tlas_nodes.size() <= 0 || scene.bvh_nodes_array.len() <= 0;
-    if desc.force_software_bvh && sw_bvh_absent {
-        panic!("force_software_bvh is set, but no software BVH was built for this scene.");
+    if use_sw_rt && sw_bvh_absent {
+        panic!("Software Raytracing is required or explicitly enabled, but no software BVH was built for this scene.");
     }
 
     let target_width = render_target.width();
@@ -843,16 +840,16 @@ pub fn pathtrace_scene(device: &wgpu::Device, queue: &wgpu::Queue, resources: &P
     let camera_params = desc.camera_params;
     let camera_transform = desc.camera_transform;
 
-    let (pipeline, use_software_bvh) = if !supports_rt(device) || desc.force_software_bvh {
-        (&resources.pipeline.custom, true)
+    let pipeline = if use_sw_rt {
+        &resources.pipeline.custom
     } else {
-        (resources.pipeline.rt.as_ref().unwrap(), false)
+        resources.pipeline.rt.as_ref().unwrap()
     };
 
     let scene_bindgroup = create_pathtracer_scene_bindgroup(device, queue, resources, scene);
     let settings_bindgroup = create_pathtracer_settings_bindgroup(device, queue, resources, accum_params.map(|params| params.prev_frame));
     let output_bindgroup = create_pathtracer_output_bindgroup(device, queue, resources, render_target);
-    let bvh_bindgroup = create_pathtracer_bvh_bindgroup(device, scene, resources, use_software_bvh);
+    let bvh_bindgroup = create_pathtracer_bvh_bindgroup(device, scene, resources, use_sw_rt);
 
     let mut encoder = device.create_command_encoder(&Default::default());
     {
@@ -938,9 +935,11 @@ pub fn pathtrace_scene_falsecolor(device: &wgpu::Device, queue: &wgpu::Queue, re
 {
     assert!(render_target.format() == wgpu::TextureFormat::Rgba16Float);
 
+    let use_sw_rt = !supports_rt(device) || desc.force_software_bvh;
+
     let sw_bvh_absent = scene.tlas_nodes.size() <= 0 || scene.bvh_nodes_array.len() <= 0;
-    if desc.force_software_bvh && sw_bvh_absent {
-        panic!("force_software_bvh is set, but no software BVH was built for this scene.");
+    if use_sw_rt && sw_bvh_absent {
+        panic!("Software Raytracing is required or explicitly enabled, but no software BVH was built for this scene.");
     }
 
     let target_width = render_target.width();
@@ -949,16 +948,16 @@ pub fn pathtrace_scene_falsecolor(device: &wgpu::Device, queue: &wgpu::Queue, re
     let camera_params = desc.camera_params;
     let camera_transform = desc.camera_transform;
 
-    let (pipeline, use_software_bvh) = if !supports_rt(device) || desc.force_software_bvh {
-        (&resources.falsecolor_pipeline.custom, true)
+    let pipeline = if use_sw_rt {
+        &resources.falsecolor_pipeline.custom
     } else {
-        (resources.falsecolor_pipeline.rt.as_ref().unwrap(), false)
+        resources.falsecolor_pipeline.rt.as_ref().unwrap()
     };
 
     let scene_bindgroup = create_pathtracer_scene_bindgroup(device, queue, resources, scene);
     let settings_bindgroup = create_pathtracer_settings_bindgroup(device, queue, resources, accum_params.map(|params| params.prev_frame));
     let output_bindgroup = create_pathtracer_output_bindgroup(device, queue, resources, render_target);
-    let bvh_bindgroup = create_pathtracer_bvh_bindgroup(device, scene, resources, use_software_bvh);
+    let bvh_bindgroup = create_pathtracer_bvh_bindgroup(device, scene, resources, use_sw_rt);
 
     let mut encoder = device.create_command_encoder(&Default::default());
     {
@@ -1030,9 +1029,11 @@ pub fn pathtrace_scene_debug(device: &wgpu::Device, queue: &wgpu::Queue, resourc
 {
     assert!(render_target.format() == wgpu::TextureFormat::Rgba16Float);
 
+    let use_sw_rt = !supports_rt(device) || desc.force_software_bvh;
+
     let sw_bvh_absent = scene.tlas_nodes.size() <= 0 || scene.bvh_nodes_array.len() <= 0;
-    if desc.force_software_bvh && sw_bvh_absent {
-        panic!("force_software_bvh is set, but no software BVH was built for this scene.");
+    if use_sw_rt && sw_bvh_absent {
+        panic!("Software Raytracing is required or explicitly enabled, but no software BVH was built for this scene.");
     }
 
     let target_width = render_target.width();
@@ -1041,16 +1042,16 @@ pub fn pathtrace_scene_debug(device: &wgpu::Device, queue: &wgpu::Queue, resourc
     let camera_params = desc.camera_params;
     let camera_transform = desc.camera_transform;
 
-    let (pipeline, use_software_bvh) = if !supports_rt(device) || desc.force_software_bvh {
-        (&resources.debug_pipeline.custom, true)
+    let pipeline = if use_sw_rt {
+        &resources.debug_pipeline.custom
     } else {
-        (resources.debug_pipeline.rt.as_ref().unwrap(), false)
+        resources.debug_pipeline.rt.as_ref().unwrap()
     };
 
     let scene_bindgroup = create_pathtracer_scene_bindgroup(device, queue, resources, scene);
     let settings_bindgroup = create_pathtracer_settings_bindgroup(device, queue, resources, accum_params.map(|params| params.prev_frame));
     let output_bindgroup = create_pathtracer_output_bindgroup(device, queue, resources, render_target);
-    let bvh_bindgroup = create_pathtracer_bvh_bindgroup(device, scene, resources, use_software_bvh);
+    let bvh_bindgroup = create_pathtracer_bvh_bindgroup(device, scene, resources, use_sw_rt);
 
     let mut encoder = device.create_command_encoder(&Default::default());
     {

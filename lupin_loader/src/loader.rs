@@ -11,7 +11,7 @@ pub fn build_scene_empty(device: &wgpu::Device, queue: &wgpu::Queue) -> lp::Scen
     return lp::build_accel_structures_and_upload(device, queue, &scene_cpu, vec![], vec![], &[], true);
 }
 
-pub fn build_scene_cornell_box(device: &wgpu::Device, queue: &wgpu::Queue, build_sw_bvh: bool) -> (lp::Scene, Vec<SceneCamera>)
+pub fn build_scene_cornell_box(device: &wgpu::Device, queue: &wgpu::Queue, build_sw_and_hw: bool) -> (lp::Scene, Vec<SceneCamera>)
 {
     // Values taken from YoctoGL.
 
@@ -203,7 +203,7 @@ pub fn build_scene_cornell_box(device: &wgpu::Device, queue: &wgpu::Queue, build
             aspect: 1.0,
         },
     }];
-    return (lp::build_accel_structures_and_upload(device, queue, &scene, vec![], vec![], &[], true), cameras);
+    return (lp::build_accel_structures_and_upload(device, queue, &scene, vec![], vec![], &[], build_sw_and_hw), cameras);
 }
 
 pub fn load_texture(device: &wgpu::Device, queue: &wgpu::Queue, path: &str, hdr: bool) -> Result<wgpu::Texture, image::ImageError>
@@ -460,8 +460,6 @@ pub fn load_scene_yoctogl_v24(path: &std::path::Path, device: &wgpu::Device, que
 {
     let parent_dir = path.parent().unwrap_or(std::path::Path::new(""));
 
-    let build_sw_bvh = !lp::supports_rt(device) || build_both_bvhs;
-
     let mut scene = lp::SceneCPU::default();
     let mut textures = Vec::<wgpu::Texture>::new();
     let mut samplers = Vec::<wgpu::Sampler>::new();
@@ -709,7 +707,7 @@ pub fn load_scene_yoctogl_v24(path: &std::path::Path, device: &wgpu::Device, que
                                     {
                                         "ply" =>
                                         {
-                                            let res = load_mesh_ply(&full_path, &mut scene, build_sw_bvh);
+                                            let res = load_mesh_ply(&full_path, &mut scene);
                                             if let Err(err) = res {
                                                 return Err(err);
                                             }
@@ -866,7 +864,7 @@ pub fn load_scene_yoctogl_v24(path: &std::path::Path, device: &wgpu::Device, que
 
     lp::validate_scene(&scene, textures.len() as u32, samplers.len() as u32);
 
-    let scene_gpu = lp::build_accel_structures_and_upload(device, queue, &scene, textures, samplers, &environment_infos, true);
+    let scene_gpu = lp::build_accel_structures_and_upload(device, queue, &scene, textures, samplers, &environment_infos, build_both_bvhs);
     return Ok((scene_gpu, scene_cams));
 }
 
@@ -1386,7 +1384,7 @@ impl From<image::ImageError> for LoadError
 
 // NOTE: Not a complete ply parser, it parses/uses only the features
 // that are expected to be used from the yoctogl 2.4 format.
-fn load_mesh_ply(path: &std::path::Path, scene: &mut lp::SceneCPU, build_sw_bvh: bool) -> Result<u32, LoadError>
+fn load_mesh_ply(path: &std::path::Path, scene: &mut lp::SceneCPU) -> Result<u32, LoadError>
 {
     assert_eq!(scene.verts_pos_array.len(), scene.mesh_infos.len());
     assert_eq!(scene.mesh_infos.len(), scene.indices_array.len());
@@ -1893,7 +1891,6 @@ pub fn load_texture_cpu(path: &std::path::Path) -> Result<TextureCPU, image::Ima
 
 /// Detects file format from its extension. Supports rgba8_unorm, rgba16f.
 /// NOTE: Currently drops alpha.
-// TODO: This breaks with some texture dimensions... Probably a wgpu thing.
 pub fn save_texture(device: &wgpu::Device, queue: &wgpu::Queue, path: &std::path::Path, texture: &wgpu::Texture) -> Result<(), image::ImageError>
 {
     let format = texture.format();
@@ -1997,6 +1994,6 @@ pub fn save_texture(device: &wgpu::Device, queue: &wgpu::Queue, path: &std::path
             let res = img.save(path);
             return res;
         },
-        _ => { panic!("unsupported texture type"); }
+        _ => { panic!("Unsupported texture type."); }
     }
 }

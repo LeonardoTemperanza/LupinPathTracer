@@ -1,6 +1,5 @@
 
 Fix the samplers thing
-Fix bug which causes cornellbox to bug out on SWRT
 Stop using the deprecated method on winit
 Improve the json parser
 
