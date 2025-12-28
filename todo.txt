@@ -1,8 +1,9 @@
 
 clean up rng thing
-also add rng seed
+add rng seed, epsilon
 Stop using the deprecated method on winit
 Improve the json parser
+volumetric rendering
 
 Enable more warnings and fix those.
 clean up loader

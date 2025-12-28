@@ -118,8 +118,8 @@ pub enum MaterialType
     Reflective  = 2,
     Transparent = 3,
     Refractive  = 4,
-    //Subsurface  = 5,
-    //Volumetric  = 6,
+    Subsurface  = 5,
+    Volumetric  = 6,
     GltfPbr     = 7,
 }
 

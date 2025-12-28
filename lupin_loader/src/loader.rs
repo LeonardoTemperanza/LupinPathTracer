@@ -945,8 +945,8 @@ fn parse_material_yocto_v24(p: &mut Parser, tex_load_infos: &mut Vec<TextureLoad
                     b"reflective" => mat.mat_type = lp::MaterialType::Reflective,
                     b"transparent" => mat.mat_type = lp::MaterialType::Transparent,
                     b"refractive" => mat.mat_type = lp::MaterialType::Refractive,
-                    //b"subsurface" => mat.mat_type = lp::MaterialType::Subsurface,
-                    //b"volumetric" => mat.mat_type = lp::MaterialType::Volumetric,
+                    b"subsurface" => mat.mat_type = lp::MaterialType::Subsurface,
+                    b"volume" => mat.mat_type = lp::MaterialType::Volumetric,
                     b"gltfpbr" => mat.mat_type = lp::MaterialType::GltfPbr,
                     _ => {}
                 }
