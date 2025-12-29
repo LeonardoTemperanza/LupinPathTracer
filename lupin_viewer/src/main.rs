@@ -162,6 +162,7 @@ pub struct AppState<'a>
     pub denoising: bool,
     pub use_gbuffers_for_denoise: bool,
     pub max_radiance: f32,
+    pub rng_seed: u32,
 
     // Camera
     pub cam_pos: lp::Vec3,
@@ -294,6 +295,7 @@ impl<'a> AppState<'a>
             denoising: false,
             use_gbuffers_for_denoise: true,
             max_radiance: 100.0,
+            rng_seed: 0,
 
             // Camera
             cam_pos: Default::default(),
@@ -453,6 +455,7 @@ impl<'a> AppState<'a>
             force_software_bvh: false,
             advanced: lp::AdvancedParams {
                 max_radiance: self.max_radiance,
+                rng_seed: self.rng_seed,
             }
         };
         let desc_albedo = lp::PathtraceDesc {
@@ -466,6 +469,7 @@ impl<'a> AppState<'a>
             force_software_bvh: false,
             advanced: lp::AdvancedParams {
                 max_radiance: self.max_radiance,
+                rng_seed: self.rng_seed,
             }
         };
         let desc_normals = lp::PathtraceDesc {
@@ -479,6 +483,7 @@ impl<'a> AppState<'a>
             force_software_bvh: false,
             advanced: lp::AdvancedParams {
                 max_radiance: self.max_radiance,
+                rng_seed: self.rng_seed,
             }
         };
 
@@ -769,6 +774,12 @@ impl<'a> AppState<'a>
                         ui.label("Camera speed multiplier");
                     });
                 }
+
+                ui.horizontal(|ui| {
+                    let response = ui.add(egui::DragValue::new(&mut self.rng_seed));
+                    if response.changed() { self.reset_accumulation(); }
+                    ui.label("RNG Seed");
+                });
 
                 ui.add_space(12.0);
                 ui.separator();

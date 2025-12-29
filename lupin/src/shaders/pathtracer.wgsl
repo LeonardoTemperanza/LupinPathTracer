@@ -49,6 +49,7 @@ struct PushConstants
     pathtrace_type: u32,
 
     max_radiance: f32,
+    rng_seed: u32,
 }
 
 var<push_constant> constants: PushConstants;
@@ -1319,7 +1320,7 @@ var<private> RNG_STATE: RngState = RngState(0, 0);
 
 fn init_rng(seq: u64)
 {
-    let seed: u64 = 0;
+    let seed: u64 = u64(constants.rng_seed);
 
     RNG_STATE.state = 0;
     RNG_STATE.inc = u64((seq << 1u) | 1);
