@@ -118,7 +118,7 @@ fn ray_scene_intersection(ray: Ray) -> HitInfo
     var rq: ray_query;
     let flags = RAY_FLAG_SKIP_AABBS;
     let mask = 0xFFu;
-    rayQueryInitialize(&rq, rt_tlas, RayDesc(flags, mask, RAY_EPSILON, F32_MAX, ray.ori, ray.dir));
+    rayQueryInitialize(&rq, rt_tlas, RayDesc(flags, mask, constants.ray_epsilon, F32_MAX, ray.ori, ray.dir));
     rayQueryProceed(&rq);
 
     let hit = rayQueryGetCommittedIntersection(&rq);
@@ -140,7 +140,7 @@ fn compute_instance_lights_pdf(ray: Ray) -> f32
     // Consider everything to be not opaque, a.k.a consider all hits.
     let flags = RAY_FLAG_SKIP_AABBS | RAY_FLAG_FORCE_NO_OPAQUE;
     let mask = RT_MASK_LIGHT;
-    rayQueryInitialize(&rq, rt_tlas, RayDesc(flags, mask, RAY_EPSILON, F32_MAX, ray.ori, ray.dir));
+    rayQueryInitialize(&rq, rt_tlas, RayDesc(flags, mask, constants.ray_epsilon, F32_MAX, ray.ori, ray.dir));
 
     var pdf = 0.0f;
     var count = 0.0f;
@@ -215,7 +215,7 @@ fn ray_skip_alpha_stochastically(ray: Ray) -> HitInfo
 
     let flags = RAY_FLAG_SKIP_AABBS | RAY_FLAG_FORCE_NO_OPAQUE;
     let mask = 0xFFu;
-    rayQueryInitialize(&rq, rt_tlas, RayDesc(flags, mask, RAY_EPSILON, F32_MAX, ray.ori, ray.dir));
+    rayQueryInitialize(&rq, rt_tlas, RayDesc(flags, mask, constants.ray_epsilon, F32_MAX, ray.ori, ray.dir));
 
     while rayQueryProceed(&rq)
     {

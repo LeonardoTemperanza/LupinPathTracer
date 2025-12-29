@@ -50,6 +50,7 @@ struct PushConstants
 
     max_radiance: f32,
     rng_seed: u32,
+    ray_epsilon: f32,
 }
 
 var<push_constant> constants: PushConstants;
@@ -2592,8 +2593,6 @@ struct Ray
     inv_dir: vec3f  // Precomputed inverse of the ray direction, for performance.
 }
 
-const RAY_EPSILON: f32 = 0.001;
-
 // From: https://tavianator.com/2011/ray_box.html
 // For misses, t = F32_MAX
 fn ray_aabb_dst(ray: Ray, aabb_min: vec3f, aabb_max: vec3f)->f32
@@ -2631,7 +2630,7 @@ fn ray_tri_dst(ray: Ray, v0: vec3f, v1: vec3f, v2: vec3f)->vec4f
     let v = d * dot(q, v1v0);
     var t = d * dot(-n, rov0);
 
-    if min(u, v) < 0.0 || (u+v) > 1.0 || t < RAY_EPSILON { t = F32_MAX; }
+    if min(u, v) < 0.0 || (u+v) > 1.0 || t < constants.ray_epsilon { t = F32_MAX; }
     return vec4f(t, u, v, det);
 }
 

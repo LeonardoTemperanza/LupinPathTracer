@@ -246,7 +246,8 @@ pub struct PushConstants
     pub pathtrace_type: u32,
 
     pub max_radiance: f32,
-    pub rng_seed: u32
+    pub rng_seed: u32,
+    pub ray_epsilon: f32,
 }
 
 static_assert!(std::mem::size_of::<PushConstants>() < MAX_PUSH_CONSTANTS_SIZE as usize);
@@ -262,7 +263,7 @@ pub const FLAG_DEBUG_NUM_BOUNCES: u32    = 1 << 5;
 pub const FLAG_DEBUG_FIRST_HIT_ONLY: u32 = 1 << 6;
 
 // Constants
-pub const MAX_PUSH_CONSTANTS_SIZE: u32 = 128;
+pub const MAX_PUSH_CONSTANTS_SIZE: u32 = 132;
 // NOTE: Coupled to shader.
 pub const BVH_MAX_DEPTH: i32 = 25;
 // NOTE: Coupled to shader.
@@ -758,6 +759,7 @@ pub struct AdvancedParams
 {
     pub max_radiance: f32,
     pub rng_seed: u32,
+    pub ray_epsilon: f32,
 }
 
 impl Default for AdvancedParams
@@ -767,6 +769,7 @@ impl Default for AdvancedParams
         return Self {
             max_radiance: 100.0,
             rng_seed: 0,
+            ray_epsilon: 0.001,
         };
     }
 }
@@ -1560,6 +1563,7 @@ fn get_push_constants(desc: &PathtraceDesc, scene: &Scene, pathtrace_type: Optio
     // Advanced
     push_constants.max_radiance = desc.advanced.max_radiance;
     push_constants.rng_seed = desc.advanced.rng_seed;
+    push_constants.ray_epsilon = desc.advanced.ray_epsilon;
 
     return push_constants;
 }

@@ -100,7 +100,17 @@ fn main()
                     delta_time = delta_time.min(min_delta_time);
                     time_begin = Instant::now();
 
-                    let frame = surface.get_current_texture().unwrap();
+                    let frame_result = surface.get_current_texture();
+                    match frame_result
+                    {
+                        Err(wgpu::SurfaceError::Timeout) => panic!("Error: Timeout"),
+                        Err(wgpu::SurfaceError::Outdated) => panic!("Error: Outdated"),
+                        Err(wgpu::SurfaceError::Lost) => panic!("Error: Lost"),
+                        Err(wgpu::SurfaceError::OutOfMemory) => panic!("Error: OutOfMemory"),
+                        Err(wgpu::SurfaceError::Other) => panic!("Error: Other"),
+                        Ok(_) => {},
+                    }
+                    let frame = frame_result.unwrap();
 
                     app_state.update_and_render(&egui_ctx, &mut egui_state, &mut egui_renderer, &frame.texture, &input, delta_time);
 
@@ -163,6 +173,7 @@ pub struct AppState<'a>
     pub use_gbuffers_for_denoise: bool,
     pub max_radiance: f32,
     pub rng_seed: u32,
+    pub ray_epsilon: f32,
 
     // Camera
     pub cam_pos: lp::Vec3,
@@ -296,6 +307,7 @@ impl<'a> AppState<'a>
             use_gbuffers_for_denoise: true,
             max_radiance: 100.0,
             rng_seed: 0,
+            ray_epsilon: 0.001,
 
             // Camera
             cam_pos: Default::default(),
@@ -456,6 +468,7 @@ impl<'a> AppState<'a>
             advanced: lp::AdvancedParams {
                 max_radiance: self.max_radiance,
                 rng_seed: self.rng_seed,
+                ray_epsilon: self.ray_epsilon,
             }
         };
         let desc_albedo = lp::PathtraceDesc {
@@ -470,6 +483,7 @@ impl<'a> AppState<'a>
             advanced: lp::AdvancedParams {
                 max_radiance: self.max_radiance,
                 rng_seed: self.rng_seed,
+                ray_epsilon: self.ray_epsilon,
             }
         };
         let desc_normals = lp::PathtraceDesc {
@@ -484,6 +498,7 @@ impl<'a> AppState<'a>
             advanced: lp::AdvancedParams {
                 max_radiance: self.max_radiance,
                 rng_seed: self.rng_seed,
+                ray_epsilon: self.ray_epsilon,
             }
         };
 
@@ -779,6 +794,13 @@ impl<'a> AppState<'a>
                     let response = ui.add(egui::DragValue::new(&mut self.rng_seed));
                     if response.changed() { self.reset_accumulation(); }
                     ui.label("RNG Seed");
+                });
+
+                ui.horizontal(|ui| {
+                    // NOTE: The range doesn't start at 0 because it makes certain scenes very slow to the point of a driver reset.
+                    let response = ui.add(egui::DragValue::new(&mut self.ray_epsilon).range(0.00001..=0.1).speed(0.0001));
+                    if response.changed() { self.reset_accumulation(); }
+                    ui.label("Ray Epsilon");
                 });
 
                 ui.add_space(12.0);
