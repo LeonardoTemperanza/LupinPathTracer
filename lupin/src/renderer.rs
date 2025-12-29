@@ -298,6 +298,7 @@ pub fn request_device_for_lupin(adapter: &wgpu::Adapter) -> (wgpu::Device, wgpu:
                            wgpu::Features::SAMPLED_TEXTURE_AND_STORAGE_BUFFER_ARRAY_NON_UNIFORM_INDEXING |
                            wgpu::Features::PARTIALLY_BOUND_BINDING_ARRAY |
                            wgpu::Features::PUSH_CONSTANTS |
+                           wgpu::Features::SHADER_INT64 |
                            supported_optional_features,
         required_limits: wgpu::Limits {
             max_storage_buffers_per_shader_stage: MAX_MESHES * NUM_STORAGE_BUFFERS_PER_MESH + MAX_ENVS + 64,
@@ -364,6 +365,7 @@ pub fn request_device_for_lupin_with_denoising_capabilities(adapter: &wgpu::Adap
                            wgpu::Features::SAMPLED_TEXTURE_AND_STORAGE_BUFFER_ARRAY_NON_UNIFORM_INDEXING |
                            wgpu::Features::PARTIALLY_BOUND_BINDING_ARRAY |
                            wgpu::Features::PUSH_CONSTANTS |
+                           wgpu::Features::SHADER_INT64 |
                            supported_optional_features,
         required_limits: wgpu::Limits {
             max_storage_buffers_per_shader_stage: MAX_MESHES * NUM_STORAGE_BUFFERS_PER_MESH + MAX_ENVS + 64,
