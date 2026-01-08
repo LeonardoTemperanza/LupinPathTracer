@@ -580,6 +580,7 @@ fn hash_color(id: u32) -> vec3f
 // General algorithms and structure from:
 // https://github.com/xelatihy/yocto-gl
 
+const MAX_VOLUMES: i32 = 10;  // Max volumes to consider for a single ray.
 var<private> DEBUG_NUM_BOUNCES: u32 = 0;
 
 // This is the "poor man's MIS". It's a bit slower than
@@ -590,10 +591,13 @@ fn pathtrace_standard(start_ray: Ray) -> vec3f
     var ray = start_ray;
     var weight = vec3f(1.0f);
     var radiance = vec3f(0.0f);
+    var volume_stack = array<MaterialPoint, MAX_VOLUMES>();
+    var volume_stack_len = 0u;
     var opacity_bounce: u32 = 0;
+
     for(var bounce = 0; bounce <= i32(MAX_BOUNCES); bounce++)
     {
-        let hit = ray_skip_alpha_stochastically(ray);
+        var hit = ray_skip_alpha_stochastically(ray);
         if !hit.hit
         {
             radiance += weight * sample_environments(ray.dir);
@@ -605,52 +609,105 @@ fn pathtrace_standard(start_ray: Ray) -> vec3f
             DEBUG_NUM_BOUNCES++;
         }
 
+        // Handle transmission if inside volume
+        var in_volume = false;
+        if volume_stack_len > 0
+        {
+            var vsdf = volume_stack[volume_stack_len];
+            let rnd1 = random_f32();
+            let rnd2 = random_f32();
+            var distance = sample_transmittance(vsdf.density, hit.dst, rnd1, rnd2);
+            weight *= eval_transmittance(vsdf.density, distance) / sample_transmittance_pdf(vsdf.density, distance, hit.dst);
+            in_volume = distance < hit.dst;
+            hit.dst = distance;
+        }
+
         let hit_pos = ray.ori + ray.dir * hit.dst;
         let outgoing = -ray.dir;
-
-        let instance = instances[hit.instance_idx];
-        let mat = materials[instance.mat_idx];
-        let mat_point = get_material_point(hit);
-
-        let normal = compute_shading_normal(hit);
-
-        // Accumulate emission.
-        radiance += weight * mat_point.emission /** f32(dot(normal, outgoing) >= 0.0f) */;
-
-        // Compute next direction.
-        var incoming = vec3f();
-        if !is_mat_delta(mat_point)
+        if !in_volume
         {
-            const light_prob = 0.5f;
-            const bsdf_prob = 1.0f - light_prob;
-            if random_f32() < bsdf_prob
+            let instance = instances[hit.instance_idx];
+            let mat = materials[instance.mat_idx];
+            let mat_point = get_material_point(hit);
+
+            let normal = compute_shading_normal(hit);
+
+            // Accumulate emission.
+            radiance += weight * mat_point.emission /** f32(dot(normal, outgoing) >= 0.0f) */;
+
+            // Compute next direction.
+            var incoming = vec3f();
+            if !is_mat_delta(mat_point)
             {
-                let rnd0 = random_f32();
-                let rnd1 = random_vec2f();
-                incoming = sample_bsdfcos(mat_point, normal, outgoing, rnd0, rnd1);
+                const light_prob = 0.5f;
+                const bsdf_prob = 1.0f - light_prob;
+                if random_f32() < bsdf_prob
+                {
+                    let rnd0 = random_f32();
+                    let rnd1 = random_vec2f();
+                    incoming = sample_bsdfcos(mat_point, normal, outgoing, rnd0, rnd1);
+                }
+                else
+                {
+                    incoming = sample_lights(hit_pos, outgoing);
+                }
+
+                if all(incoming == vec3f(0.0f)) { break; }
+
+                let prob = bsdf_prob  * sample_bsdfcos_pdf(mat_point, normal, outgoing, incoming) +
+                           light_prob * sample_lights_pdf(hit_pos, incoming);
+                weight *= eval_bsdfcos(mat_point, normal, outgoing, incoming) / prob;
             }
             else
             {
-                incoming = sample_lights(hit_pos, normal, outgoing);
+                incoming = sample_delta(mat_point, normal, outgoing, random_f32());
+                if all(incoming == vec3f(0.0f)) { break; }
+                weight *= eval_delta(mat_point, normal, outgoing, incoming) /
+                          sample_delta_pdf(mat_point, normal, outgoing, incoming);
+            }
+
+            // Update volume stack.
+            if true
+            {
+
+            }
+
+            // Set up next ray.
+            ray.ori = hit_pos;
+            ray.dir = incoming;
+            ray.inv_dir = 1.0f / ray.dir;
+        }
+        else  // in_volume
+        {
+            let vsdf = volume_stack[volume_stack_len - 1];
+            let normal = compute_shading_normal(hit);
+
+            // Next direction
+            var incoming = vec3f(0.0f);
+
+            const light_prob = 0.5f;
+            const scatter_prob = 1.0f - light_prob;
+            if random_f32() < scatter_prob
+            {
+                let rnd0 = random_f32();
+                let rnd1 = random_vec2f();
+                incoming = sample_scattering(vsdf, outgoing, rnd1);
+            }
+            else
+            {
+                incoming = sample_lights(hit_pos, outgoing);
             }
 
             if all(incoming == vec3f(0.0f)) { break; }
-
-            let prob = bsdf_prob  * sample_bsdfcos_pdf(mat_point, normal, outgoing, incoming) +
+            let prob = scatter_prob * sample_scattering_pdf(vsdf, outgoing, incoming) +
                        light_prob * sample_lights_pdf(hit_pos, incoming);
-            weight *= eval_bsdfcos(mat_point, normal, outgoing, incoming) / prob;
-        }
-        else
-        {
-            incoming = sample_delta(mat_point, normal, outgoing, random_f32());
-            if all(incoming == vec3f(0.0f)) { break; }
-            weight *= eval_delta(mat_point, normal, outgoing, incoming) /
-                      sample_delta_pdf(mat_point, normal, outgoing, incoming);
-        }
+            weight *= eval_scattering(vsdf, outgoing, incoming) / prob;
 
-        ray.ori = hit_pos;
-        ray.dir = incoming;
-        ray.inv_dir = 1.0f / ray.dir;
+            // Set up next ray.
+            ray.ori = hit_pos;
+            ray.dir = incoming;
+            ray.inv_dir = 1.0f / ray.dir;
+        }
 
         // Check weight.
         if all(weight == vec3f(0.0f)) || !vec3f_is_finite(weight) { break; }
@@ -724,7 +781,7 @@ fn pathtrace_mis(start_ray: Ray) -> vec3f
 
                 var mis_incoming = vec3f();
                 if do_sample_light {
-                    mis_incoming = sample_lights(hit_pos, normal, outgoing);
+                    mis_incoming = sample_lights(hit_pos, outgoing);
                 } else {
                     let rnd0 = random_f32();
                     let rnd1 = random_vec2f();
@@ -921,7 +978,7 @@ fn pathtrace_direct(start_ray: Ray) -> vec3f
         // Direct light.
         if !is_mat_delta(mat_point)
         {
-            let incoming = sample_lights(hit_pos, normal, outgoing);
+            let incoming = sample_lights(hit_pos, outgoing);
             let pdf = sample_lights_pdf(hit_pos, incoming);
             let bsdfcos = eval_bsdfcos(mat_point, normal, outgoing, incoming);
             if all(bsdfcos != vec3f(0.0f)) && pdf > 0.0f
@@ -963,7 +1020,7 @@ fn pathtrace_direct(start_ray: Ray) -> vec3f
             }
             else
             {
-                incoming = sample_lights(hit_pos, normal, outgoing);
+                incoming = sample_lights(hit_pos, outgoing);
             }
 
             if all(incoming == vec3f(0.0f)) { break; }
@@ -1665,6 +1722,37 @@ fn sample_microfacet(roughness: f32, normal: vec3f, rn: vec2f, ggx: bool) -> vec
     return normalize(basis_fromz(normal) * local_half_vector);
 }
 
+fn sample_transmittance(density: vec3f, max_distance: f32, rl: f32, rd: f32) -> f32
+{
+    let test = vec3f();
+    let channel = clamp(i32(rl * 3), 0, 2);
+    let distance = select(-log(1.0 - rd) / density[channel], F32_MAX, density[channel] == 0);
+    return min(distance, max_distance);
+}
+
+fn sample_scattering(mat: MaterialPoint, outgoing: vec3f, rn: vec2f) -> vec3f
+{
+    if all(mat.density == vec3f(0.0f)) { return vec3f(0.0f); }
+
+    var cos_theta = 0.0f;
+    if abs(mat.sc_anisotropy) < 1e-3f
+    {
+        cos_theta = 1.0f - 2.0f * rn.y;
+    }
+    else
+    {
+        let square = (1.0f - mat.sc_anisotropy * mat.sc_anisotropy) /
+                      (1.0f + mat.sc_anisotropy - 2.0f * mat.sc_anisotropy * rn.y);
+        cos_theta = (1.0f + mat.sc_anisotropy * mat.sc_anisotropy - square * square) /
+                    (2.0f * mat.sc_anisotropy);
+    }
+
+    let sin_theta      = sqrt(max(0.0f, 1.0f - cos_theta * cos_theta));
+    let phi            = 2.0f * PI * rn.x;
+    let local_incoming = vec3f(sin_theta * cos(phi), sin_theta * sin(phi), cos_theta);
+    return basis_fromz(-outgoing) * local_incoming;
+}
+
 fn eval_bsdfcos(material: MaterialPoint, normal: vec3f, outgoing: vec3f, incoming: vec3f) -> vec3f
 {
     if material.roughness == 0.0f { return vec3f(); }
@@ -1804,6 +1892,11 @@ fn eval_gltfpbr(color: vec3f, ior: f32, roughness: f32, metallic: f32, normal: v
                abs(dot(up_normal, incoming)) +
            F * D * G / (4 * dot(up_normal, outgoing) * dot(up_normal, incoming)) *
                abs(dot(up_normal, incoming));
+}
+
+fn eval_transmittance(density: vec3f, distance: f32) -> vec3f
+{
+    return exp(-density * distance);
 }
 
 fn sample_bsdfcos_pdf(material: MaterialPoint, normal: vec3f,
@@ -2048,6 +2141,16 @@ fn eval_passthrough(color: vec3f, normal: vec3f, outgoing: vec3f, incoming: vec3
     }
 }
 
+fn eval_scattering(mat: MaterialPoint, outgoing: vec3f, incoming: vec3f) -> vec3f
+{
+    if all(mat.density == vec3f(0.0f)) { return vec3f(0.0f); }
+
+    let cosine = -dot(outgoing, incoming);
+    let denom = 1.0f + mat.sc_anisotropy * mat.sc_anisotropy - 2.0f * mat.sc_anisotropy * cosine;
+    let phasefunction = (1.0f - mat.sc_anisotropy * mat.sc_anisotropy) / (4.0f * PI * denom * sqrt(denom));
+    return mat.scattering * mat.density * phasefunction;
+}
+
 fn sample_delta_pdf(material: MaterialPoint, normal: vec3f, outgoing: vec3f, incoming: vec3f) -> f32
 {
     if material.roughness != 0.0f { return 0.0f; }
@@ -2105,6 +2208,24 @@ fn sample_passthrough_pdf(color: vec3f, normal: vec3f, outgoing: vec3f, incoming
     }
 }
 
+fn sample_transmittance_pdf(density: vec3f, distance: f32, max_distance: f32) -> f32
+{
+    if distance < max_distance {
+        return dot(density * exp(-density * distance), vec3f(1.0f)) / 3.0f;
+    } else {
+        return dot(exp(-density * max_distance), vec3f(1.0f)) / 3.0f;
+    }
+}
+
+fn sample_scattering_pdf(mat: MaterialPoint, outgoing: vec3f, incoming: vec3f) -> f32
+{
+    if all(mat.density == vec3f(0.0f)) { return 0.0f; }
+
+    let cosine = -dot(outgoing, incoming);
+    let denom  = 1.0f + mat.sc_anisotropy * mat.sc_anisotropy - 2.0f * mat.sc_anisotropy * cosine;
+    return (1.0f - mat.sc_anisotropy * mat.sc_anisotropy) / (4.0f * PI * denom * sqrt(denom));
+}
+
 fn basis_fromz(v: vec3f) -> mat3x3f
 {
     // https://graphics.pixar.com/library/OrthonormalB/paper.pdf
@@ -2133,12 +2254,19 @@ fn refract_(w: vec3f, n: vec3f, inv_eta: f32) -> vec3f
     return -w * inv_eta + (inv_eta * cosine - sqrt(k)) * n;
 }
 
-// LIGHT SAMPLING
-
-fn sample_lights(pos: vec3f, normal: vec3f, outgoing: vec3f) -> vec3f
+fn sample_sphere(ruv: vec2f) -> vec3f
 {
-    let up_normal = select(normal, -normal, dot(normal, outgoing) <= 0.0f);
+    let z   = 2.0f * ruv.y - 1.0f;
+    let r   = sqrt(clamp(1.0f - z * z, 0.0f, 1.0f));
+    let phi = 2.0f * PI * ruv.x;
+    return vec3f(r * cos(phi), r * sin(phi), z);
+}
 
+////////////////////////
+// Light Sampling
+
+fn sample_lights(pos: vec3f, outgoing: vec3f) -> vec3f
+{
     let num_lights = select(arrayLength(&lights), 0u, (constants.flags & FLAG_LIGHTS_EMPTY)  != 0);
     let num_envs = select(arrayLength(&environments), 0u, (constants.flags & FLAG_ENVS_EMPTY) != 0);
     if num_lights + num_envs <= 0 { return vec3f(); }
@@ -2162,20 +2290,25 @@ fn sample_lights(pos: vec3f, normal: vec3f, outgoing: vec3f) -> vec3f
         let world_tri_pos = local_to_world * vec4f(local_tri_pos, 1.0f);
 
         let incoming = normalize(world_tri_pos - pos);
-
-        if !same_hemisphere(up_normal, outgoing, incoming) { return vec3f(0.0f); }
         return incoming;
     }
     else
     {
         let env_idx = light_idx - num_lights;
         let env_tex_idx = environments[env_idx].emission_tex_idx;
-        let env_tex_size = textureDimensions(textures[env_tex_idx]);
+        var incoming = vec3f(0.0f);
 
-        let sample = sample_env_alias_table(env_idx);
-        let incoming = env_idx_to_dir(sample, env_idx);
+        if env_tex_idx == SENTINEL_IDX
+        {
+            incoming = sample_sphere(random_vec2f());
+        }
+        else
+        {
+            let env_tex_size = textureDimensions(textures[env_tex_idx]);
+            let sample = sample_env_alias_table(env_idx);
+            incoming = env_idx_to_dir(sample, env_idx);
+        }
 
-        if !same_hemisphere(up_normal, outgoing, incoming) { return vec3f(0.0f); }
         return incoming;
     }
 }
@@ -2188,38 +2321,6 @@ fn sample_lights_pdf(pos: vec3f, incoming: vec3f) -> f32
     let num_envs = select(arrayLength(&environments), 0u, (constants.flags & FLAG_ENVS_EMPTY) != 0);
 
     pdf += compute_instance_lights_pdf(Ray(pos, incoming, 1.0f / incoming));
-
-/*
-    for(var i = 0u; i < num_lights; i++)
-    {
-        let light = lights[i];
-        let instance_idx = light.instance_idx;
-
-        var light_pdf = 0.0f;
-        var next_pos = pos;
-        for(var bounce = 0u; bounce < 100; bounce++)
-        {
-            var ray = Ray(next_pos, incoming, 1.0f / incoming);
-            let hit_info = ray_instance_intersection(ray, F32_MAX, instance_idx);
-            let hit_dst = hit_info.hit.x;
-            let hit_uv  = hit_info.hit.yz;
-            if hit_dst == F32_MAX { break; }  // No intersection.
-
-            let light_normal = compute_tri_geom_normal(instance_idx, hit_info.tri_idx);
-
-            let light_pos = ray.ori + ray.dir * hit_dst;
-
-            let prob = alias_tables[i].data[hit_info.tri_idx].prob;
-            let dist2 = dot(light_pos - pos, light_pos - pos);
-            let cos_theta = abs(dot(light_normal, incoming));
-
-            light_pdf += dist2 / (cos_theta * light.area);
-            next_pos = light_pos + incoming;
-        }
-
-        pdf += light_pdf;
-    }
-*/
 
     for(var i = 0u; i < num_envs; i++)
     {
