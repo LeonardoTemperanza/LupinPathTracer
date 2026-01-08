@@ -1,18 +1,14 @@
 
-clean up rng thing
-add rng seed, epsilon
+Before publishing:
 Stop using the deprecated method on winit
-Improve the json parser
 volumetric rendering
+Fix slow denoising on CPU fallback
+Finish up tester program
+Fix random startup/rebuild time issue
 
 Enable more warnings and fix those.
-clean up loader
-
-Speed up CPU fallback
-Speed up recreation of pipelines?
 
 pathtracer
-    add RAY_EPSILON to override constants (or push constants?)
 
 loader
     improve json parser

@@ -914,17 +914,21 @@ impl<'a> AppState<'a>
                             .add_filter("json", &["json"])
                             .pick_file()
                         {
-                            if let Ok(res) = lpl::load_scene_yoctogl_v24(&path, self.device, self.queue, false)
+                            let res = lpl::load_scene_yoctogl_v24(&path, self.device, self.queue, false);
+                            match res
                             {
-                                (self.scene, self.scene_cameras) = res;
-                                self.reset_accumulation();
-                                if !self.scene_cameras.is_empty() {
-                                    self.switch_to_cam(0);
+                                Ok(res) =>
+                                {
+                                    (self.scene, self.scene_cameras) = res;
+                                    self.reset_accumulation();
+                                    if !self.scene_cameras.is_empty() {
+                                        self.switch_to_cam(0);
+                                    }
                                 }
-                            }
-                            else
-                            {
-                                println!("Failed to load json file!");
+                                Err(res) =>
+                                {
+                                    println!("{}", res);
+                                }
                             }
                         }
                     }
@@ -1137,21 +1141,18 @@ impl<'a> AppState<'a>
 
     fn switch_to_freeroam(&mut self)
     {
+        self.reset_accumulation();
         if self.selected_cam == -1 { return; }
         self.selected_cam = -1;
 
-        if is_transform_flipped(self.cam_transform.to_mat4()) {
-            println!("flipped");
-        }
-
         (self.cam_pos, self.cam_rot, _) = lp::matrix_to_xform(self.cam_transform.to_mat4());
         self.cam_angles = get_euler_angles(self.cam_rot);
-        //self.cam_angles.x += std::f32::consts::PI;
         self.cam_angles.y *= -1.0;
     }
 
     fn switch_to_cam(&mut self, cam_idx: i32)
     {
+        self.reset_accumulation();
         if cam_idx < 0 { return; }
         self.selected_cam = cam_idx;
         self.cam_transform = self.scene_cameras[cam_idx as usize].transform;

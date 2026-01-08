@@ -169,13 +169,25 @@ impl Default for Material
     }
 }
 
-#[derive(Default, Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug)]
 #[repr(C)]
 pub struct Environment
 {
     pub emission: Vec3,
     pub emission_tex_idx: u32,
     pub transform: Mat4,
+}
+
+impl Default for Environment
+{
+    fn default() -> Self
+    {
+        return Self {
+            emission: Default::default(),
+            emission_tex_idx: SENTINEL_IDX,
+            transform: Default::default(),
+        };
+    }
 }
 
 #[derive(Default, Clone, Copy, Debug)]

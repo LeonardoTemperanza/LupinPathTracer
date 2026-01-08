@@ -354,78 +354,6 @@ fn push_asset<T>(vec: &mut Vec<T>, el: T) -> u32
     return (vec.len() - 1) as u32;
 }
 
-fn load_mesh_obj<P: AsRef<std::path::Path>>(path: P, scene: &mut lp::SceneCPU) -> u32
-{
-    assert_eq!(scene.verts_pos_array.len(), scene.mesh_infos.len());
-    assert_eq!(scene.mesh_infos.len(), scene.indices_array.len());
-
-    let tobj_scene = tobj::load_obj(path.as_ref().to_str().unwrap(), &tobj::GPU_LOAD_OPTIONS);
-    assert!(tobj_scene.is_ok());
-
-    let (mut models, _materials) = tobj_scene.expect("Failed to load OBJ file");
-
-    let mesh = &mut models[0].mesh;
-
-    let mut aabb = lp::Aabb::neutral();
-    let mut mesh_verts_pos = Vec::<lp::Vec4>::with_capacity(mesh.positions.len());
-    for i in (0..mesh.positions.len()).step_by(3)
-    {
-        let pos = lp::Vec3 { x: mesh.positions[i + 0], y: mesh.positions[i + 1], z: mesh.positions[i + 2] };
-        mesh_verts_pos.push(lp::Vec4 { x: pos.x, y: pos.y, z: pos.z, w: 0.0 });
-        lp::grow_aabb_to_include_vert(&mut aabb, pos);
-    }
-
-    let bvh = lp::build_bvh(mesh_verts_pos.as_slice(), &mut mesh.indices);
-
-    let mut mesh_info = lp::MeshInfo::default();
-
-    if mesh.normals.len() > 0
-    {
-        let mut normals = Vec::<lp::Vec4>::new();
-
-        for i in 0..mesh.normals.len()/3
-        {
-            let normal = lp::Vec4 {
-                x: mesh.normals[i*3+0],
-                y: mesh.normals[i*3+1],
-                z: mesh.normals[i*3+2],
-                w: 0.0,
-            }.normalized();
-
-            normals.push(normal);
-        }
-
-        scene.verts_normal_array.push(normals);
-        let normals_idx = scene.verts_normal_array.len() - 1;
-        mesh_info.normals_buf_idx = normals_idx as u32;
-    }
-
-    if mesh.texcoords.len() > 0
-    {
-        let mut tex_coords = Vec::<lp::Vec2>::new();
-
-        for i in 0..mesh.texcoords.len()/2
-        {
-            let tex_coord = lp::Vec2 {
-                x: mesh.texcoords[i*2+0],
-                y: 1.0 - mesh.texcoords[i*2+1]  // WGPU Convention is +=right,down and tipically it's +=right,up
-            };
-
-            tex_coords.push(tex_coord);
-        }
-
-        scene.verts_texcoord_array.push(tex_coords);
-        let texcoords_idx = scene.verts_texcoord_array.len() - 1;
-        mesh_info.texcoords_buf_idx = texcoords_idx as u32;
-    };
-
-    scene.mesh_infos.push(mesh_info);
-    scene.verts_pos_array.push(mesh_verts_pos);
-    scene.indices_array.push(mesh.indices.clone());
-
-    return (scene.mesh_infos.len() - 1) as u32;
-}
-
 /// Camera that has been placed into the scene.
 /// A scene can contain many cameras.
 #[derive(Default)]
@@ -518,6 +446,11 @@ pub fn load_scene_yoctogl_v24(path: &std::path::Path, device: &wgpu::Device, que
                                 p.expect_char(':');
                                 scene_cam.params.focus = p.parse_f32();
                             },
+                            b"aperture" =>
+                            {
+                                p.expect_char(':');
+                                scene_cam.params.aperture = p.parse_f32();
+                            },
                             b"frame" =>
                             {
                                 p.expect_char(':');
@@ -528,6 +461,16 @@ pub fn load_scene_yoctogl_v24(path: &std::path::Path, device: &wgpu::Device, que
                                 p.expect_char(':');
                                 scene_cam.params.lens = p.parse_f32();
                             },
+                            b"orthographic" =>
+                            {
+                                p.expect_char(':');
+                                scene_cam.params.is_orthographic = p.parse_bool();
+                            }
+                            b"film" =>
+                            {
+                                p.expect_char(':');
+                                scene_cam.params.film = p.parse_f32();
+                            }
                             _ => {}
                         }
 
@@ -804,12 +747,12 @@ pub fn load_scene_yoctogl_v24(path: &std::path::Path, device: &wgpu::Device, que
         }
 
         dict_continue = p.next_list_el();
-        if p.found_error { return Err(LoadError::InvalidJson); }
+        if p.found_error { return Err(LoadError::InvalidJson(p.error_str)); }
     }
 
     p.expect_char('}');
 
-    if p.found_error { return Err(LoadError::InvalidJson); }
+    if p.found_error { return Err(LoadError::InvalidJson(p.error_str)); }
 
     // Load textures.
     for info in &tex_load_infos
@@ -835,7 +778,17 @@ pub fn load_scene_yoctogl_v24(path: &std::path::Path, device: &wgpu::Device, que
     let mut environment_infos = Vec::<lp::EnvMapInfo>::with_capacity(scene.environments.len());
     for env in &scene.environments
     {
-        if env.emission_tex_idx == lp::SENTINEL_IDX { continue; }
+        if env.emission_tex_idx == lp::SENTINEL_IDX
+        {
+            // Functions always expect environment infos (TODO?)
+            environment_infos.push(lp::EnvMapInfo {
+                data: vec!(lp::Vec4::ones()),
+                width: 1,
+                height: 1,
+            });
+            continue;
+        }
+
         let info = &tex_load_infos[env.emission_tex_idx as usize];
 
         //let mut uses = 0;
@@ -1013,8 +966,10 @@ fn parse_material_yocto_v24(p: &mut Parser, tex_load_infos: &mut Vec<TextureLoad
 // Utility functions used for parsing any simple ASCII textual format.
 struct Parser<'a>
 {
+    pub whole_file: &'a [u8],
     pub buf: &'a [u8],
     pub found_error: bool,
+    pub error_str: String,
 }
 
 impl<'a> Parser<'a>
@@ -1023,6 +978,8 @@ impl<'a> Parser<'a>
     {
         return Self {
             buf,
+            error_str: Default::default(),
+            whole_file: buf,
             found_error: false
         };
     }
@@ -1062,7 +1019,7 @@ impl<'a> Parser<'a>
         if self.buf.len() > 0 && self.buf[0] == b'\n' {
             self.buf = &self.buf[1..];
         } else {
-            self.found_error = true;
+            self.parse_error(String::from("Expecting a new line, file ended prematurely."));
         }
     }
 
@@ -1101,7 +1058,7 @@ impl<'a> Parser<'a>
         self.buf = &self.buf[trimmed_start..];
         if self.found_error { return; }
 
-        if token != ident { self.found_error = true; println!("Expected {}, got {}.", String::from_utf8_lossy(ident), String::from_utf8_lossy(token)); }
+        if token != ident { self.parse_error(format!("Expected {}, got {}.", String::from_utf8_lossy(ident), String::from_utf8_lossy(token))); }
     }
 
     fn peek_ident(&mut self) -> &[u8]
@@ -1125,9 +1082,9 @@ impl<'a> Parser<'a>
     fn expect_char(&mut self, c: char)
     {
         self.eat_whitespace();
-        if self.buf.len() == 0 { self.found_error = true; println!("Expected {}, got EOF.", c); return; }
-        if !c.is_ascii()       { self.found_error = true; println!("Expected {}, got unknown.", c); return; }
-        if self.buf[0] != c as u8 { self.found_error = true; println!("Expected {}, got {}.", c, self.buf[0] as char); return; }
+        if self.buf.len() == 0 { self.parse_error(format!("Expected {}, got EOF.", c)); return; }
+        if !c.is_ascii()       { self.parse_error(format!("Expected {}, got unknown.", c)); return; }
+        if self.buf[0] != c as u8 { self.parse_error(format!("Expected {}, got {}.", c, self.buf[0] as char)); return; }
         self.buf = &self.buf[1..];
     }
 
@@ -1192,14 +1149,26 @@ impl<'a> Parser<'a>
         return res;
     }
 
+    fn parse_bool(&mut self) -> bool
+    {
+        self.eat_whitespace();
+
+        let ident = self.next_ident();
+        match ident
+        {
+            b"true" => { return true; }
+            b"false" => { return false; }
+            _ => { self.parse_error(String::from("Expected bool.")); return false; }
+        }
+    }
+
     fn parse_f32(&mut self) -> f32
     {
         self.eat_whitespace();
 
         if self.buf.is_empty()
         {
-            self.found_error = true;
-            println!("Expected f32, got EOF.");
+            self.parse_error(String::from("Expected f32, got end of file."));
             return 0.0;
         }
 
@@ -1214,8 +1183,7 @@ impl<'a> Parser<'a>
 
         if end == 0
         {
-            self.found_error = true;
-            println!("Expected f32.");
+            self.parse_error(String::from("Expected f32."));
             return 0.0
         }
 
@@ -1229,15 +1197,13 @@ impl<'a> Parser<'a>
                 Ok(num) => return num,
                 Err(_) =>
                 {
-                    self.found_error = true;
-                    println!("Expected f32.");
+                    self.parse_error(String::from("Expected f32."));
                     return 0.0
                 }
             },
             Err(_) =>
             {
-                self.found_error = true;
-                println!("Expected f32.");
+                self.parse_error(String::from("Expected f32."));
                 return 0.0
             }
         };
@@ -1249,8 +1215,7 @@ impl<'a> Parser<'a>
 
         if self.buf.is_empty()
         {
-            self.found_error = true;
-            println!("Expected u32, got EOF.");
+            self.parse_error(String::from("Expected u32, got end of file."));
             return 0;
         }
 
@@ -1265,8 +1230,7 @@ impl<'a> Parser<'a>
 
         if end == 0
         {
-            self.found_error = true;
-            println!("Expected u32.");
+            self.parse_error(String::from("Expected u32."));
             return 0
         }
 
@@ -1280,76 +1244,39 @@ impl<'a> Parser<'a>
                 Ok(num) => return num,
                 Err(_) =>
                 {
-                    self.found_error = true;
-                    println!("Expected u32.");
+                    self.parse_error(String::from("Expected u32."));
                     return 0
                 }
             },
             Err(_) =>
             {
-                self.found_error = true;
-                println!("Expected u32.");
+                self.parse_error(String::from("Expected u32."));
                 return 0
             }
         };
     }
 
-    fn ensure_whitespace(&mut self)
+    pub fn parse_error(&mut self, msg: String)
     {
+        if self.found_error { return; }
+        self.found_error = true;
 
-    }
+        let (up_to_error, _) = exclude_subslice(self.whole_file, self.buf);
+        let line_num = up_to_error.iter().filter(|&&b| b == b'\n').count() + 1;
+        self.error_str = format!("Error on line {}: {}", line_num, msg);
 
-    fn json_ignore_value(&mut self)
-    {
-        self.eat_whitespace();
-        if self.buf.is_empty() { self.found_error = true; return; }
-
-        if self.buf[0] == b'{'  // Object
+        fn exclude_subslice<'a>(a: &'a [u8], b: &'a [u8]) -> (&'a [u8], &'a [u8])
         {
-            self.buf = &self.buf[1..];
+            let a_ptr = a.as_ptr() as usize;
+            let b_ptr = b.as_ptr() as usize;
 
-            let parens = 1;
-            while parens > 0
-            {
+            assert!(b_ptr >= a_ptr);
+            assert!(b_ptr + b.len() <= a_ptr + a.len());
 
-            }
+            let start = (b_ptr - a_ptr) as usize;
+            let end = start + b.len();
 
-            // Skip until the next '}'
-        }
-        else if self.buf[0] == b'['  // Array
-        {
-            self.buf = &self.buf[1..];
-
-            let parens = 1;
-            while parens > 0
-            {
-
-            }
-
-            // Skip until the next ']'
-        }
-        else if u8::is_ascii_digit(&self.buf[0])  // Number
-        {
-
-        }
-        else
-        {
-            if self.buf.starts_with(b"true")
-            {
-                self.buf = &self.buf[4..];
-            }
-            else if self.buf.starts_with(b"true")
-            {
-
-            }
-            else if self.buf.starts_with(b"false")
-            {
-
-            }
-            else if self.buf.starts_with(b"null")
-            {
-
-            }
+            (&a[..start], &a[end..])
         }
     }
 }
@@ -1362,7 +1289,21 @@ pub enum LoadError
     Io(std::io::Error),
     ImageErr(image::ImageError),
     InvalidPly,
-    InvalidJson,
+    InvalidJson(String),
+}
+
+impl std::fmt::Display for LoadError
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result
+    {
+        match self
+        {
+            LoadError::Io(err)             => write!(f, "I/O Error: {}", err),
+            LoadError::ImageErr(err)       => write!(f, "Image Loading Error: {}", err),
+            LoadError::InvalidPly          => write!(f, "Invalid Mesh Error."),
+            LoadError::InvalidJson(string) => write!(f, "Invalid JSON: {}", string)
+        }
+    }
 }
 
 impl From<std::io::Error> for LoadError
@@ -1464,11 +1405,9 @@ fn load_mesh_ply(path: &std::path::Path, scene: &mut lp::SceneCPU) -> Result<u32
                             b"ny" => { ny_buf.present = true; ny_buf.offset = offset; },
                             b"nz" => { nz_buf.present = true; nz_buf.offset = offset; },
                             b"u"  => { u_buf.present  = true; u_buf.offset  = offset; },
-                            // NOTE: Alternative name for "u"
-                            b"s"  => { u_buf.present  = true; u_buf.offset  = offset; },
+                            b"s"  => { u_buf.present  = true; u_buf.offset  = offset; },  // NOTE: Alternative name for "u"
                             b"v"  => { v_buf.present  = true; v_buf.offset  = offset; },
-                            // NOTE: Alternative name for "v"
-                            b"t"  => { v_buf.present  = true; v_buf.offset  = offset; },
+                            b"t"  => { v_buf.present  = true; v_buf.offset  = offset; },  // NOTE: Alternative name for "v"
                             b"red"   => { r_buf.present = true; r_buf.offset = offset; },
                             b"green" => { g_buf.present = true; g_buf.offset = offset; },
                             b"blue"  => { b_buf.present = true; b_buf.offset = offset; },
@@ -1508,7 +1447,7 @@ fn load_mesh_ply(path: &std::path::Path, scene: &mut lp::SceneCPU) -> Result<u32
                 }
             }
             b"end_header" => { p.go_to_next_line(); break; }
-            _ => { p.found_error = true; }
+            _ => { p.parse_error(String::from("Unknown .PLY field.")); }
         }
 
         if p.found_error {
@@ -1531,10 +1470,6 @@ fn load_mesh_ply(path: &std::path::Path, scene: &mut lp::SceneCPU) -> Result<u32
     {
         assert!(nx_buf.present && ny_buf.present && nz_buf.present);
         let normals = buf_extract_vec3_as_vec4(p.buf, &nx_buf, &ny_buf, &nz_buf, num_verts);
-
-        //for normal in &mut normals {
-        //    *normal = lp::normalize_vec3(normal);
-        //}
 
         scene.verts_normal_array.push(normals);
         let normals_idx = scene.verts_normal_array.len() - 1;
