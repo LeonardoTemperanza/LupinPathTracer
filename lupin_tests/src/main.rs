@@ -15,6 +15,15 @@ use winit::event::WindowEvent;
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
 use winit::window::{Window, WindowId};
 
+use clap::Parser;
+
+use std::path::PathBuf;
+use std::io;
+use std::fs::{self, DirEntry};
+use std::path::Path;
+
+use std::io::Write;
+
 #[derive(Copy, Clone, Debug)]
 pub struct Scene
 {
@@ -23,21 +32,8 @@ pub struct Scene
     pub max_radiance: f32,
 }
 
-const SCENES: &[Scene] = &[
-    Scene { name: "coffee", samples: 2000, max_radiance: 100.0 },
-    Scene { name: "ecosys", samples: 1000, max_radiance: 100.0 },
-    Scene { name: "bathroom1", samples: 6000, max_radiance: 100.0 },
-    Scene { name: "car2", samples: 1000, max_radiance: 100.0 },
-    Scene { name: "landscape", samples: 500, max_radiance: 100.0 },
-    Scene { name: "classroom", samples: 2000, max_radiance: 100.0 },
-    Scene { name: "junkshop", samples: 2000, max_radiance: 100.0 },
-    Scene { name: "bistroexterior", samples: 1000, max_radiance: 10.0 },
-    Scene { name: "bistrointerior", samples: 1000, max_radiance: 100.0 },
-    Scene { name: "lonemonk", samples: 2000, max_radiance: 100.0 },
-    Scene { name: "sanmiguel", samples: 1000, max_radiance: 20.0 }
-];
-
 const SAMPLES_PER_PIXEL: u32 = 5;
+const NUM_SAMPLES: u32 = 700;
 const NUM_BOUNCES: u32 = 8;
 
 pub struct App
@@ -45,11 +41,25 @@ pub struct App
     window: Option<Arc<Window>>,
     ctx: Option<GPUContext>,
 
+    scenes: Vec<PathBuf>,
+    cmd_line_args: CmdLineArgs,
+
     // Render progress
     scene_idx: usize,
+    camera_idx: usize,
+    changed_cam: bool,
     accum_count: u32,
     scene: Option<lp::Scene>,
     cameras: Vec<lpl::SceneCamera>,
+}
+
+#[derive(Parser, Debug)]
+struct CmdLineArgs
+{
+    #[arg(long, default_value_t = false)]
+    first_camera_only: bool,
+    #[arg(long, default_value_t = false)]
+    overwrite_renders: bool,
 }
 
 pub struct GPUContext
@@ -71,35 +81,20 @@ impl App
     {
         let ctx = self.ctx.as_mut().unwrap();
 
-        let scene = SCENES[self.scene_idx];
-        while matches!(self.scene, None)
+        let scene_path = &self.scenes[self.scene_idx];
+        if matches!(self.scene, None)
         {
-            print!("'{}': ", scene.name);
-            use std::io::Write;
-            std::io::stdout().flush().unwrap();
-
-            let mut path_json_buf = std::path::PathBuf::new();
-            path_json_buf.push(SCENES_DIR);
-            path_json_buf.push(scene.name);
-            path_json_buf.push(scene.name);
-            path_json_buf.set_extension("json");
-
-            let path_json = path_json_buf.as_path();
-
-            let res = std::fs::exists(path_json);
-            if res.is_err() || !res.unwrap()
-            {
-                eprintln!("Scene \"{}\" not found.", scene.name);
-                self.scene_idx += 1;
-                continue;
-            }
-
+            let path_json = std::path::Path::new(&scene_path);
             let (lp_scene, cameras) = lpl::load_scene_yoctogl_v24(path_json, &ctx.device, &ctx.queue, false).unwrap();
             self.scene = Some(lp_scene);
             self.cameras = cameras;
+        }
 
-            let (width, height) = compute_dimensions_for_1080p(self.cameras[0].params.aspect);
+        if self.changed_cam
+        {
+            let (width, height) = compute_dimensions_for_1080p(self.cameras[self.camera_idx].params.aspect);
             ctx.output.resize(&ctx.device, width, height);
+            self.changed_cam = false;
         }
 
         let lp_scene = self.scene.as_ref().unwrap();
@@ -109,13 +104,14 @@ impl App
                 accum_counter: self.accum_count,
             }),
             tile_params: None,
-            camera_params: self.cameras[0].params,
-            camera_transform: self.cameras[0].transform,
+            camera_params: self.cameras[self.camera_idx].params,
+            camera_transform: self.cameras[self.camera_idx].transform,
             force_software_bvh: false,
-            advanced: lp::AdvancedParams {
-                max_radiance: scene.max_radiance,
-            }
+            advanced: Default::default(),
         });
+
+        print!("\r'{}': Camera {}: {}/{} ", scene_path.display(), self.camera_idx, self.accum_count * SAMPLES_PER_PIXEL, NUM_SAMPLES);
+        std::io::stdout().flush().unwrap();
 
         lp::tonemap_and_fit_aspect(&ctx.device, &ctx.queue, &ctx.tonemap_res, ctx.output.front(), &swapchain, &lp::TonemapDesc{
             viewport: None,
@@ -125,15 +121,34 @@ impl App
         });
 
         self.accum_count += 1;
-        ctx.output.flip();
 
-        if self.accum_count * SAMPLES_PER_PIXEL > scene.samples
+        if self.accum_count * SAMPLES_PER_PIXEL > NUM_SAMPLES
         {
-            self.scene_idx += 1;
+            if self.cmd_line_args.overwrite_renders
+            {
+                let mut out_path = scene_path.clone();
+                out_path.pop();
+                out_path.push(format!("render_cam{}.hdr", self.camera_idx));
+                let res = lpl::save_texture(&ctx.device, &ctx.queue, &out_path, ctx.output.front());
+                match res
+                {
+                    Err(res) => { println!("Failed to save texture: {}", res); }
+                    Ok(res)  => { println!("Ok."); }
+                }
+            }
+
+            self.camera_idx = (self.camera_idx + 1) % self.cameras.len();
+            if self.camera_idx == 0
+            {
+                self.scene_idx += 1;
+                self.scene = None;
+            }
+
+            self.changed_cam = true;
             self.accum_count = 0;
-            self.scene = None;
-            println!("Ok.");
         }
+
+        ctx.output.flip();
     }
 }
 
@@ -188,6 +203,24 @@ impl ApplicationHandler for App
                 output,
                 surface_config,
             });
+
+            // Get all scene paths
+            for entry in fs::read_dir(Path::new(SCENES_DIR)).unwrap()
+            {
+                let entry = entry.unwrap();
+                let path = entry.path();
+
+                if path.is_dir()
+                {
+                    if let Some(dir_name) = path.file_name().and_then(|n| n.to_str())
+                    {
+                        let json_path = path.join(format!("{dir_name}.json"));
+                        if json_path.is_file() {
+                            self.scenes.push(json_path);
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -218,7 +251,7 @@ impl ApplicationHandler for App
                 self.update_and_render(&frame.texture);
                 frame.present();
 
-                if self.scene_idx >= SCENES.len() {
+                if self.scene_idx >= self.scenes.len() {
                     event_loop.exit();
                 } else {
                     // Continuously request drawing messages to let the main loop continue
@@ -235,22 +268,26 @@ impl Default for App
     fn default() -> Self
     {
         return Self {
+            cmd_line_args: CmdLineArgs::parse(),
             window: None,
             ctx: None,
             scene_idx: 0,
+            camera_idx: 0,
+            changed_cam: true,
             accum_count: 0,
             scene: None,
+            scenes: vec![],
             cameras: vec![],
         }
     }
 }
 
-const SCENES_DIR: &str = "lupin_scenes";
+const SCENES_DIR: &str = "test_scenes";
 
 fn main()
 {
     if std::fs::exists(SCENES_DIR).is_err() {
-        panic!("It appears that the \"{}\" directory is missing (it's not directly visible from the current working directory).", SCENES_DIR);
+        panic!("It appears that the \"{}\" directory is missing (it's not directly visible from the current working directory). The \"{}\" directory is located in the project's base directory.", SCENES_DIR, SCENES_DIR);
     }
 
     let event_loop = EventLoop::new().unwrap();

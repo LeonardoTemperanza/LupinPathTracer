@@ -1839,10 +1839,9 @@ pub fn save_texture(device: &wgpu::Device, queue: &wgpu::Queue, path: &std::path
         wgpu::TextureFormat::Rgba16Float => 8,
         _ => { panic!("unsupported texture format"); }
     };
-    let unpadded_bytes_per_row = width * bytes_per_pixel;
     let align = wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
-    let padded_bytes_per_row = ((unpadded_bytes_per_row + align - 1) / align) * align;
-    let buffer_size = (padded_bytes_per_row * height) as u64;
+    let row_size = align_up(width * bytes_per_pixel, wgpu::COPY_BYTES_PER_ROW_ALIGNMENT);
+    let buffer_size = (row_size * height) as u64;
 
     let output_buffer = device.create_buffer(&wgpu::BufferDescriptor {
         label: Some("Output Buffer"),
@@ -1861,7 +1860,7 @@ pub fn save_texture(device: &wgpu::Device, queue: &wgpu::Queue, path: &std::path
             buffer: &output_buffer,
             layout: wgpu::TexelCopyBufferLayout {
                 offset: 0,
-                bytes_per_row: Some(padded_bytes_per_row),
+                bytes_per_row: Some(row_size),
                 rows_per_image: Some(height),
             },
         },
@@ -1887,8 +1886,8 @@ pub fn save_texture(device: &wgpu::Device, queue: &wgpu::Queue, path: &std::path
             let mut data_no_alpha = Vec::with_capacity((width * height * 3) as usize);
             for row in 0..height
             {
-                let start = (row * padded_bytes_per_row) as usize;
-                let end = start + unpadded_bytes_per_row as usize;
+                let start = (row * row_size) as usize;
+                let end = start + (width * bytes_per_pixel) as usize;
                 let row_data = &data[start..end];
 
                 for px in row_data.chunks_exact(4)
@@ -1913,9 +1912,9 @@ pub fn save_texture(device: &wgpu::Device, queue: &wgpu::Queue, path: &std::path
             let mut data_f32_no_alpha = Vec::<f32>::with_capacity((width * height * 3) as usize);
             for row in 0..height
             {
-                let start = (row * padded_bytes_per_row) as usize;
-                let end = start + unpadded_bytes_per_row as usize;
-                let row_data = &data_f16[start..end];
+                let start = (row * row_size) as usize;
+                let end = start + (width * bytes_per_pixel) as usize;
+                let row_data = &data_f16[start/2..end/2];  // Convert from number of bytes to number of f16.
 
                 for px in row_data.chunks_exact(4)
                 {
@@ -1930,4 +1929,10 @@ pub fn save_texture(device: &wgpu::Device, queue: &wgpu::Queue, path: &std::path
         },
         _ => { panic!("Unsupported texture type."); }
     }
+}
+
+fn align_up(value: u32, align: u32) -> u32
+{
+    assert!(0 == (align & (align - 1)), "Must align to a power of two");
+    return (value + (align - 1)) & !(align - 1);
 }
