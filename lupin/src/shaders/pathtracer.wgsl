@@ -592,8 +592,7 @@ fn pathtrace_standard(start_ray: Ray) -> vec3f
     var weight = vec3f(1.0f);
     var radiance = vec3f(0.0f);
     var volume_stack = array<MaterialPoint, MAX_VOLUMES>();
-    var volume_stack_len = 0u;
-    var opacity_bounce: u32 = 0;
+    var volume_stack_len = 0;
 
     for(var bounce = 0; bounce <= i32(MAX_BOUNCES); bounce++)
     {
@@ -609,11 +608,11 @@ fn pathtrace_standard(start_ray: Ray) -> vec3f
             DEBUG_NUM_BOUNCES++;
         }
 
-        // Handle transmission if inside volume
+        // Handle transmission inside a volume.
         var in_volume = false;
-        if volume_stack_len > 0
+        if volume_stack_len > 0 && volume_stack_len < MAX_VOLUMES
         {
-            var vsdf = volume_stack[volume_stack_len];
+            var vsdf = volume_stack[volume_stack_len - 1];
             let rnd1 = random_f32();
             let rnd2 = random_f32();
             var distance = sample_transmittance(vsdf.density, hit.dst, rnd1, rnd2);
@@ -667,9 +666,19 @@ fn pathtrace_standard(start_ray: Ray) -> vec3f
             }
 
             // Update volume stack.
-            if true
+            if is_mat_volumetric(mat_point) && dot(normal, outgoing) * dot(normal, incoming) < 0.0f
             {
-
+                if volume_stack_len == 0
+                {
+                    if volume_stack_len < MAX_VOLUMES {
+                        volume_stack[volume_stack_len] = mat_point;
+                    }
+                    volume_stack_len++;
+                }
+                else
+                {
+                    volume_stack_len--;
+                }
             }
 
             // Set up next ray.
@@ -680,7 +689,6 @@ fn pathtrace_standard(start_ray: Ray) -> vec3f
         else  // in_volume
         {
             let vsdf = volume_stack[volume_stack_len - 1];
-            let normal = compute_shading_normal(hit);
 
             // Next direction
             var incoming = vec3f(0.0f);
@@ -731,7 +739,8 @@ fn pathtrace_mis(start_ray: Ray) -> vec3f
     var ray = start_ray;
     var weight = vec3f(1.0f);
     var radiance = vec3f(0.0f);
-    var opacity_bounce: u32 = 0;
+    var volume_stack = array<MaterialPoint, MAX_VOLUMES>();
+    var volume_stack_len = 0;
 
     var next_emission = true;
     var next_intersection = HitInfo();
@@ -756,93 +765,155 @@ fn pathtrace_mis(start_ray: Ray) -> vec3f
             DEBUG_NUM_BOUNCES++;
         }
 
+        // Handle transmission inside a volume.
+        var in_volume = false;
+        if volume_stack_len > 0 && volume_stack_len < MAX_VOLUMES
+        {
+            var vsdf = volume_stack[volume_stack_len - 1];
+            let rnd1 = random_f32();
+            let rnd2 = random_f32();
+            var distance = sample_transmittance(vsdf.density, hit.dst, rnd1, rnd2);
+            weight *= eval_transmittance(vsdf.density, distance) / sample_transmittance_pdf(vsdf.density, distance, hit.dst);
+            in_volume = distance < hit.dst;
+            hit.dst = distance;
+        }
+
         let hit_pos = ray.ori + ray.dir * hit.dst;
         let outgoing = -ray.dir;
 
-        let instance = instances[hit.instance_idx];
-        let mat = materials[instance.mat_idx];
-        let mat_point = get_material_point(hit);
-
-        let normal = compute_shading_normal(hit);
-
-        // Accumulate emission.
-        if next_emission {
-            radiance += weight * mat_point.emission /** f32(dot(normal, outgoing) >= 0.0f) */;
-        }
-
-        // Compute next direction.
-        var incoming = vec3f();
-        if !is_mat_delta(mat_point)
+        if !in_volume
         {
-            // Direct with MIS.
-            for(var i = 0; i < 2; i++)
+            let instance = instances[hit.instance_idx];
+            let mat = materials[instance.mat_idx];
+            let mat_point = get_material_point(hit);
+
+            let normal = compute_shading_normal(hit);
+
+            // Accumulate emission.
+            if next_emission {
+                radiance += weight * mat_point.emission /** f32(dot(normal, outgoing) >= 0.0f) */;
+            }
+
+            // Compute next direction.
+            var incoming = vec3f();
+            if !is_mat_delta(mat_point)
             {
-                let do_sample_light = bool(i);
-
-                var mis_incoming = vec3f();
-                if do_sample_light {
-                    mis_incoming = sample_lights(hit_pos, outgoing);
-                } else {
-                    let rnd0 = random_f32();
-                    let rnd1 = random_vec2f();
-                    mis_incoming = sample_bsdfcos(mat_point, normal, outgoing, rnd0, rnd1);
-                }
-
-                if all(mis_incoming == vec3f(0.0f)) { break; }
-
-                if !do_sample_light { incoming = mis_incoming; }
-
-                let bsdfcos = eval_bsdfcos(mat_point, normal, outgoing, mis_incoming);
-                let light_pdf = sample_lights_pdf(hit_pos, mis_incoming);
-                let bsdf_pdf = sample_bsdfcos_pdf(mat_point, normal, outgoing, mis_incoming);
-
-                var mis_weight = 0.0f;
-                if do_sample_light {
-                    mis_weight = mis_heuristic(light_pdf, bsdf_pdf) / light_pdf;
-                } else {
-                    mis_weight = mis_heuristic(bsdf_pdf, light_pdf) / bsdf_pdf;
-                }
-
-                if all(bsdfcos != vec3f(0.0f)) && mis_weight != 0
+                // Direct with MIS.
+                for(var i = 0; i < 2; i++)
                 {
-                    let mis_ray = Ray(hit_pos, mis_incoming, 1.0f / mis_incoming);
-                    let mis_hit = ray_scene_intersection(mis_ray);
-                    if !do_sample_light { next_intersection = mis_hit; }
+                    let do_sample_light = bool(i);
 
-                    var emission = vec3f();
-                    if mis_hit.hit
-                    {
-                        let mis_mat_point = get_material_point(mis_hit);
-                        emission = mis_mat_point.emission;
-                    }
-                    else
-                    {
-                        emission = sample_environments(mis_incoming);
+                    var mis_incoming = vec3f();
+                    if do_sample_light {
+                        mis_incoming = sample_lights(hit_pos, outgoing);
+                    } else {
+                        let rnd0 = random_f32();
+                        let rnd1 = random_vec2f();
+                        mis_incoming = sample_bsdfcos(mat_point, normal, outgoing, rnd0, rnd1);
                     }
 
-                    radiance += weight * bsdfcos * emission * mis_weight;
+                    if all(mis_incoming == vec3f(0.0f)) { break; }
+
+                    if !do_sample_light { incoming = mis_incoming; }
+
+                    let bsdfcos = eval_bsdfcos(mat_point, normal, outgoing, mis_incoming);
+                    let light_pdf = sample_lights_pdf(hit_pos, mis_incoming);
+                    let bsdf_pdf = sample_bsdfcos_pdf(mat_point, normal, outgoing, mis_incoming);
+
+                    var mis_weight = 0.0f;
+                    if do_sample_light {
+                        mis_weight = mis_heuristic(light_pdf, bsdf_pdf) / light_pdf;
+                    } else {
+                        mis_weight = mis_heuristic(bsdf_pdf, light_pdf) / bsdf_pdf;
+                    }
+
+                    if all(bsdfcos != vec3f(0.0f)) && mis_weight != 0
+                    {
+                        let mis_ray = Ray(hit_pos, mis_incoming, 1.0f / mis_incoming);
+                        let mis_hit = ray_scene_intersection(mis_ray);
+                        if !do_sample_light { next_intersection = mis_hit; }
+
+                        var emission = vec3f();
+                        if mis_hit.hit
+                        {
+                            let mis_mat_point = get_material_point(mis_hit);
+                            emission = mis_mat_point.emission;
+                        }
+                        else
+                        {
+                            emission = sample_environments(mis_incoming);
+                        }
+
+                        radiance += weight * bsdfcos * emission * mis_weight;
+                    }
+                }
+
+                // Indirect
+                weight *= eval_bsdfcos(mat_point, normal, outgoing, incoming) /
+                          sample_bsdfcos_pdf(mat_point, normal, outgoing, incoming);
+                next_emission = false;
+            }
+            else
+            {
+                incoming = sample_delta(mat_point, normal, outgoing, random_f32());
+                if all(incoming == vec3f(0.0f)) { break; }
+                weight *= eval_delta(mat_point, normal, outgoing, incoming) /
+                          sample_delta_pdf(mat_point, normal, outgoing, incoming);
+                next_emission = true;
+            }
+
+            // Update volume stack.
+            if is_mat_volumetric(mat_point) && dot(normal, outgoing) * dot(normal, incoming) < 0.0f
+            {
+                if volume_stack_len == 0
+                {
+                    if volume_stack_len < MAX_VOLUMES {
+                        volume_stack[volume_stack_len] = mat_point;
+                    }
+                    volume_stack_len++;
+                }
+                else
+                {
+                    volume_stack_len--;
                 }
             }
 
-            // Indirect
-            weight *= eval_bsdfcos(mat_point, normal, outgoing, incoming) /
-                      sample_bsdfcos_pdf(mat_point, normal, outgoing, incoming);
-            next_emission = false;
+            ray.ori = hit_pos;
+            ray.dir = incoming;
+            ray.inv_dir = 1.0f / ray.dir;
         }
-        else
+        else  // in_volume
         {
-            incoming = sample_delta(mat_point, normal, outgoing, random_f32());
+            let vsdf = volume_stack[volume_stack_len - 1];
+
+            // Next direction
+            var incoming = vec3f(0.0f);
+
+            const light_prob = 0.5f;
+            const scatter_prob = 1.0f - light_prob;
+            if random_f32() < scatter_prob
+            {
+                let rnd0 = random_f32();
+                let rnd1 = random_vec2f();
+                incoming = sample_scattering(vsdf, outgoing, rnd1);
+                next_emission = true;
+            }
+            else
+            {
+                incoming = sample_lights(hit_pos, outgoing);
+                next_emission = true;
+            }
+
             if all(incoming == vec3f(0.0f)) { break; }
-            weight *= eval_delta(mat_point, normal, outgoing, incoming) /
-                      sample_delta_pdf(mat_point, normal, outgoing, incoming);
-            next_emission = true;
+            let prob = scatter_prob * sample_scattering_pdf(vsdf, outgoing, incoming) +
+                       light_prob * sample_lights_pdf(hit_pos, incoming);
+            weight *= eval_scattering(vsdf, outgoing, incoming) / prob;
+
+            // Set up next ray.
+            ray.ori = hit_pos;
+            ray.dir = incoming;
+            ray.inv_dir = 1.0f / ray.dir;
         }
-
-        // TODO: Update volume stack.
-
-        ray.ori = hit_pos;
-        ray.dir = incoming;
-        ray.inv_dir = 1.0f / ray.dir;
 
         // Check weight.
         if all(weight == vec3f(0.0f)) || !vec3f_is_finite(weight) { break; }
@@ -871,10 +942,12 @@ fn pathtrace_naive(start_ray: Ray) -> vec3f
     var ray = start_ray;
     var weight = vec3f(1.0f);
     var radiance = vec3f(0.0f);
-    var opacity_bounce: u32 = 0;
+    var volume_stack = array<MaterialPoint, MAX_VOLUMES>();
+    var volume_stack_len = 0;
+
     for(var bounce = 0; bounce <= i32(MAX_BOUNCES); bounce++)
     {
-        let hit = ray_skip_alpha_stochastically(ray);
+        var hit = ray_skip_alpha_stochastically(ray);
         if !hit.hit
         {
             radiance += weight * sample_environments(ray.dir);
@@ -888,37 +961,84 @@ fn pathtrace_naive(start_ray: Ray) -> vec3f
 
         let hit_pos = ray.ori + ray.dir * hit.dst;
         let outgoing = -ray.dir;
-
         let mat_point = get_material_point(hit);
 
-        // TODO: No caustics param.
-
-        let normal = compute_shading_normal(hit);
-
-        // Accumulate emission.
-        radiance += weight * mat_point.emission /** f32(dot(normal, outgoing) >= 0.0f)*/;
-
-        // Compute next direction.
-        var incoming = vec3f();
-        if !is_mat_delta(mat_point)
+        // Handle transmission inside a volume.
+        var in_volume = false;
+        if volume_stack_len > 0 && volume_stack_len < MAX_VOLUMES
         {
+            var vsdf = volume_stack[volume_stack_len - 1];
+            let rnd1 = random_f32();
+            let rnd2 = random_f32();
+            var distance = sample_transmittance(vsdf.density, hit.dst, rnd1, rnd2);
+            weight *= eval_transmittance(vsdf.density, distance) / sample_transmittance_pdf(vsdf.density, distance, hit.dst);
+            in_volume = distance < hit.dst;
+            hit.dst = distance;
+        }
+
+        if !in_volume
+        {
+            let normal = compute_shading_normal(hit);
+
+            // Accumulate emission.
+            radiance += weight * mat_point.emission /** f32(dot(normal, outgoing) >= 0.0f)*/;
+
+            // Compute next direction.
+            var incoming = vec3f();
+            if !is_mat_delta(mat_point)
+            {
+                let rnd0 = random_f32();
+                let rnd1 = random_vec2f();
+                incoming = sample_bsdfcos(mat_point, normal, outgoing, rnd0, rnd1);
+                if all(incoming == vec3f(0.0f)) { break; }
+
+                weight *= eval_bsdfcos(mat_point, normal, outgoing, incoming) / sample_bsdfcos_pdf(mat_point, normal, outgoing, incoming);
+            }
+            else
+            {
+                incoming = sample_delta(mat_point, normal, outgoing, random_f32());
+                if all(incoming == vec3f(0.0f)) { break; }
+                weight *= eval_delta(mat_point, normal, outgoing, incoming) / sample_delta_pdf(mat_point, normal, outgoing, incoming);
+            }
+
+            // Update volume stack.
+            if is_mat_volumetric(mat_point) && dot(normal, outgoing) * dot(normal, incoming) < 0.0f
+            {
+                if volume_stack_len == 0
+                {
+                    if volume_stack_len < MAX_VOLUMES {
+                        volume_stack[volume_stack_len] = mat_point;
+                    }
+                    volume_stack_len++;
+                }
+                else
+                {
+                    volume_stack_len--;
+                }
+            }
+
+            ray.ori = hit_pos;
+            ray.dir = incoming;
+            ray.inv_dir = 1.0f / ray.dir;
+        }
+        else  // in_volume
+        {
+            let vsdf = volume_stack[volume_stack_len - 1];
+
+            // Next direction
             let rnd0 = random_f32();
             let rnd1 = random_vec2f();
-            incoming = sample_bsdfcos(mat_point, normal, outgoing, rnd0, rnd1);
-            if all(incoming == vec3f(0.0f)) { break; }
+            let incoming = sample_scattering(vsdf, outgoing, rnd1);
 
-            weight *= eval_bsdfcos(mat_point, normal, outgoing, incoming) / sample_bsdfcos_pdf(mat_point, normal, outgoing, incoming);
-        }
-        else
-        {
-            incoming = sample_delta(mat_point, normal, outgoing, random_f32());
             if all(incoming == vec3f(0.0f)) { break; }
-            weight *= eval_delta(mat_point, normal, outgoing, incoming) / sample_delta_pdf(mat_point, normal, outgoing, incoming);
-        }
+            let prob = sample_scattering_pdf(vsdf, outgoing, incoming);
+            weight *= eval_scattering(vsdf, outgoing, incoming) / prob;
 
-        ray.ori = hit_pos;
-        ray.dir = incoming;
-        ray.inv_dir = 1.0f / ray.dir;
+            // Set up next ray.
+            ray.ori = hit_pos;
+            ray.dir = incoming;
+            ray.inv_dir = 1.0f / ray.dir;
+        }
 
         // Check weight.
         if all(weight == vec3f(0.0f)) || !vec3f_is_finite(weight) { break; }
@@ -941,13 +1061,14 @@ fn pathtrace_direct(start_ray: Ray) -> vec3f
     var ray = start_ray;
     var weight = vec3f(1.0f);
     var radiance = vec3f(0.0f);
-    var opacity_bounce: u32 = 0;
+    var volume_stack = array<MaterialPoint, MAX_VOLUMES>();
+    var volume_stack_len = 0;
 
     var next_emission = true;
 
     for(var bounce = 0; bounce <= i32(MAX_BOUNCES); bounce++)
     {
-        let hit = ray_skip_alpha_stochastically(ray);
+        var hit = ray_skip_alpha_stochastically(ray);
         if !hit.hit
         {
             if next_emission {
@@ -964,59 +1085,129 @@ fn pathtrace_direct(start_ray: Ray) -> vec3f
         let hit_pos = ray.ori + ray.dir * hit.dst;
         let outgoing = -ray.dir;
 
-        let instance = instances[hit.instance_idx];
-        let mat = materials[instance.mat_idx];
-        let mat_point = get_material_point(hit);
-
-        let normal = compute_shading_normal(hit);
-
-        // Accumulate emission.
-        if next_emission {
-            radiance += weight * mat_point.emission /** f32(dot(normal, outgoing) >= 0.0f) */;
+        // Handle transmission inside a volume.
+        var in_volume = false;
+        if volume_stack_len > 0 && volume_stack_len < MAX_VOLUMES
+        {
+            var vsdf = volume_stack[volume_stack_len - 1];
+            let rnd1 = random_f32();
+            let rnd2 = random_f32();
+            var distance = sample_transmittance(vsdf.density, hit.dst, rnd1, rnd2);
+            weight *= eval_transmittance(vsdf.density, distance) / sample_transmittance_pdf(vsdf.density, distance, hit.dst);
+            in_volume = distance < hit.dst;
+            hit.dst = distance;
         }
 
-        // Direct light.
-        if !is_mat_delta(mat_point)
+        if !in_volume
         {
-            let incoming = sample_lights(hit_pos, outgoing);
-            let pdf = sample_lights_pdf(hit_pos, incoming);
-            let bsdfcos = eval_bsdfcos(mat_point, normal, outgoing, incoming);
-            if all(bsdfcos != vec3f(0.0f)) && pdf > 0.0f
+            let instance = instances[hit.instance_idx];
+            let mat = materials[instance.mat_idx];
+            let mat_point = get_material_point(hit);
+
+            let normal = compute_shading_normal(hit);
+
+            // Accumulate emission.
+            if next_emission {
+                radiance += weight * mat_point.emission /** f32(dot(normal, outgoing) >= 0.0f) */;
+            }
+
+            // Direct light.
+            if !is_mat_delta(mat_point)
             {
-                let light_ray = Ray(hit_pos, incoming, 1.0f / incoming);
-                let light_hit = ray_scene_intersection(light_ray);
-                var emission = vec3f();
-                if light_hit.hit
+                let incoming = sample_lights(hit_pos, outgoing);
+                let pdf = sample_lights_pdf(hit_pos, incoming);
+                let bsdfcos = eval_bsdfcos(mat_point, normal, outgoing, incoming);
+                if all(bsdfcos != vec3f(0.0f)) && pdf > 0.0f
                 {
-                    let light_mat_point = get_material_point(light_hit);
-                    emission = light_mat_point.emission;
+                    let light_ray = Ray(hit_pos, incoming, 1.0f / incoming);
+                    let light_hit = ray_scene_intersection(light_ray);
+                    var emission = vec3f();
+                    if light_hit.hit
+                    {
+                        let light_mat_point = get_material_point(light_hit);
+                        emission = light_mat_point.emission;
+                    }
+                    else
+                    {
+                        emission = sample_environments(incoming);
+                    }
+
+                    radiance += weight * bsdfcos * emission / pdf;
+                }
+
+                next_emission = false;
+            }
+            else
+            {
+                next_emission = true;
+            }
+
+            // Compute next direction.
+            var incoming = vec3f();
+            if !is_mat_delta(mat_point)
+            {
+                const light_prob = 0.5f;
+                const bsdf_prob = 1.0f - light_prob;
+                if random_f32() < bsdf_prob
+                {
+                    let rnd0 = random_f32();
+                    let rnd1 = random_vec2f();
+                    incoming = sample_bsdfcos(mat_point, normal, outgoing, rnd0, rnd1);
                 }
                 else
                 {
-                    emission = sample_environments(incoming);
+                    incoming = sample_lights(hit_pos, outgoing);
                 }
 
-                radiance += weight * bsdfcos * emission / pdf;
+                if all(incoming == vec3f(0.0f)) { break; }
+
+                let prob = bsdf_prob  * sample_bsdfcos_pdf(mat_point, normal, outgoing, incoming) +
+                           light_prob * sample_lights_pdf(hit_pos, incoming);
+                weight *= eval_bsdfcos(mat_point, normal, outgoing, incoming) / prob;
+            }
+            else
+            {
+                incoming = sample_delta(mat_point, normal, outgoing, random_f32());
+                if all(incoming == vec3f(0.0f)) { break; }
+                weight *= eval_delta(mat_point, normal, outgoing, incoming) /
+                          sample_delta_pdf(mat_point, normal, outgoing, incoming);
             }
 
-            next_emission = false;
-        }
-        else
-        {
-            next_emission = true;
-        }
+            // Update volume stack.
+            if is_mat_volumetric(mat_point) && dot(normal, outgoing) * dot(normal, incoming) < 0.0f
+            {
+                if volume_stack_len == 0
+                {
+                    if volume_stack_len < MAX_VOLUMES {
+                        volume_stack[volume_stack_len] = mat_point;
+                    }
+                    volume_stack_len++;
+                }
+                else
+                {
+                    volume_stack_len--;
+                }
+            }
 
-        // Compute next direction.
-        var incoming = vec3f();
-        if !is_mat_delta(mat_point)
+            // Set up next ray.
+            ray.ori = hit_pos;
+            ray.dir = incoming;
+            ray.inv_dir = 1.0f / ray.dir;
+        }
+        else  // in_volume
         {
+            let vsdf = volume_stack[volume_stack_len - 1];
+
+            // Next direction
+            var incoming = vec3f(0.0f);
+
             const light_prob = 0.5f;
-            const bsdf_prob = 1.0f - light_prob;
-            if random_f32() < bsdf_prob
+            const scatter_prob = 1.0f - light_prob;
+            if random_f32() < scatter_prob
             {
                 let rnd0 = random_f32();
                 let rnd1 = random_vec2f();
-                incoming = sample_bsdfcos(mat_point, normal, outgoing, rnd0, rnd1);
+                incoming = sample_scattering(vsdf, outgoing, rnd1);
             }
             else
             {
@@ -1024,24 +1215,15 @@ fn pathtrace_direct(start_ray: Ray) -> vec3f
             }
 
             if all(incoming == vec3f(0.0f)) { break; }
-
-            let prob = bsdf_prob  * sample_bsdfcos_pdf(mat_point, normal, outgoing, incoming) +
+            let prob = scatter_prob * sample_scattering_pdf(vsdf, outgoing, incoming) +
                        light_prob * sample_lights_pdf(hit_pos, incoming);
-            weight *= eval_bsdfcos(mat_point, normal, outgoing, incoming) / prob;
-        }
-        else
-        {
-            incoming = sample_delta(mat_point, normal, outgoing, random_f32());
-            if all(incoming == vec3f(0.0f)) { break; }
-            weight *= eval_delta(mat_point, normal, outgoing, incoming) /
-                      sample_delta_pdf(mat_point, normal, outgoing, incoming);
-        }
+            weight *= eval_scattering(vsdf, outgoing, incoming) / prob;
 
-        // TODO: Update volume stack.
-
-        ray.ori = hit_pos;
-        ray.dir = incoming;
-        ray.inv_dir = 1.0f / ray.dir;
+            // Set up next ray.
+            ray.ori = hit_pos;
+            ray.dir = incoming;
+            ray.inv_dir = 1.0f / ray.dir;
+        }
 
         // Check weight.
         if all(weight == vec3f(0.0f)) || !vec3f_is_finite(weight) { break; }
@@ -1235,6 +1417,13 @@ fn is_mat_delta(mat: MaterialPoint) -> bool
            (mat.mat_type == MAT_TYPE_REFRACTIVE  && mat.roughness == 0.0f) ||
            (mat.mat_type == MAT_TYPE_TRANSPARENT && mat.roughness == 0.0f) ||
            (mat.mat_type == MAT_TYPE_VOLUMETRIC);
+}
+
+fn is_mat_volumetric(mat: MaterialPoint) -> bool
+{
+    return (mat.mat_type == MAT_TYPE_REFRACTIVE) ||
+           (mat.mat_type == MAT_TYPE_VOLUMETRIC) ||
+           (mat.mat_type == MAT_TYPE_SUBSURFACE);
 }
 
 fn reflectivity_to_eta(reflectivity: vec3f) -> vec3f
