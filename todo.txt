@@ -1,5 +1,6 @@
 
 Before publishing:
+Fix colors don't work for refractive materials
 Stop using the deprecated method on winit
 volumetric rendering
 Fix slow denoising on CPU fallback

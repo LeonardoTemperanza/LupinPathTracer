@@ -2262,6 +2262,11 @@ fn sample_sphere(ruv: vec2f) -> vec3f
     return vec3f(r * cos(phi), r * sin(phi), z);
 }
 
+fn sample_sphere_pdf() -> f32
+{
+    return 1.0f / (4.0f * PI);
+}
+
 ////////////////////////
 // Light Sampling
 
@@ -2325,16 +2330,23 @@ fn sample_lights_pdf(pos: vec3f, incoming: vec3f) -> f32
     for(var i = 0u; i < num_envs; i++)
     {
         let env_tex_idx = environments[i].emission_tex_idx;
-        let env_tex_size = textureDimensions(textures[env_tex_idx]);
+        if env_tex_idx == SENTINEL_IDX
+        {
+            pdf += sample_sphere_pdf();
+        }
+        else
+        {
+            let env_tex_size = textureDimensions(textures[env_tex_idx]);
 
-        let pixel_coords = dir_to_env_coords(incoming, i);
-        let pixel_idx = pixel_coords.y * env_tex_size.x + pixel_coords.x;
+            let pixel_coords = dir_to_env_coords(incoming, i);
+            let pixel_idx = pixel_coords.y * env_tex_size.x + pixel_coords.x;
 
-        let prob = env_alias_tables[i].data[pixel_idx].prob;
-        let solid_angle = (2.0f * PI / f32(env_tex_size.x)) *
-                          (PI / f32(env_tex_size.y)) *
-                          sin(PI * (f32(pixel_coords.y) + 0.5f) / f32(env_tex_size.y));
-        pdf += prob / solid_angle;
+            let prob = env_alias_tables[i].data[pixel_idx].prob;
+            let solid_angle = (2.0f * PI / f32(env_tex_size.x)) *
+                              (PI / f32(env_tex_size.y)) *
+                              sin(PI * (f32(pixel_coords.y) + 0.5f) / f32(env_tex_size.y));
+            pdf += prob / solid_angle;
+        }
     }
 
     pdf /= f32(num_lights + num_envs);
