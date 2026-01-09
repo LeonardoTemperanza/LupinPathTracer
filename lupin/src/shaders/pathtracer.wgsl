@@ -596,7 +596,7 @@ fn pathtrace_standard(start_ray: Ray) -> vec3f
 
     for(var bounce = 0; bounce <= i32(MAX_BOUNCES); bounce++)
     {
-        var hit = ray_skip_alpha_stochastically(ray);
+        let hit = ray_skip_alpha_stochastically(ray);
         if !hit.hit
         {
             radiance += weight * sample_environments(ray.dir);
@@ -610,21 +610,21 @@ fn pathtrace_standard(start_ray: Ray) -> vec3f
 
         // Handle transmission inside a volume.
         var in_volume = false;
+        var volume_dst = hit.dst;
         if volume_stack_len > 0 && volume_stack_len < MAX_VOLUMES
         {
             var vsdf = volume_stack[volume_stack_len - 1];
             let rnd1 = random_f32();
             let rnd2 = random_f32();
-            var distance = sample_transmittance(vsdf.density, hit.dst, rnd1, rnd2);
-            weight *= eval_transmittance(vsdf.density, distance) / sample_transmittance_pdf(vsdf.density, distance, hit.dst);
-            in_volume = distance < hit.dst;
-            hit.dst = distance;
+            volume_dst = sample_transmittance(vsdf.density, hit.dst, rnd1, rnd2);
+            weight *= eval_transmittance(vsdf.density, volume_dst) / sample_transmittance_pdf(vsdf.density, volume_dst, hit.dst);
+            in_volume = volume_dst < hit.dst;
         }
 
-        let hit_pos = ray.ori + ray.dir * hit.dst;
         let outgoing = -ray.dir;
         if !in_volume
         {
+            let hit_pos = ray.ori + ray.dir * hit.dst;
             let instance = instances[hit.instance_idx];
             let mat = materials[instance.mat_idx];
             let mat_point = get_material_point(hit);
@@ -688,6 +688,7 @@ fn pathtrace_standard(start_ray: Ray) -> vec3f
         }
         else  // in_volume
         {
+            let hit_pos = ray.ori + ray.dir * volume_dst;
             let vsdf = volume_stack[volume_stack_len - 1];
 
             // Next direction
@@ -767,22 +768,23 @@ fn pathtrace_mis(start_ray: Ray) -> vec3f
 
         // Handle transmission inside a volume.
         var in_volume = false;
+        var volume_dst = hit.dst;
         if volume_stack_len > 0 && volume_stack_len < MAX_VOLUMES
         {
             var vsdf = volume_stack[volume_stack_len - 1];
             let rnd1 = random_f32();
             let rnd2 = random_f32();
-            var distance = sample_transmittance(vsdf.density, hit.dst, rnd1, rnd2);
-            weight *= eval_transmittance(vsdf.density, distance) / sample_transmittance_pdf(vsdf.density, distance, hit.dst);
-            in_volume = distance < hit.dst;
-            hit.dst = distance;
+            volume_dst = sample_transmittance(vsdf.density, hit.dst, rnd1, rnd2);
+            weight *= eval_transmittance(vsdf.density, volume_dst) / sample_transmittance_pdf(vsdf.density, volume_dst, hit.dst);
+            in_volume = volume_dst < hit.dst;
         }
 
-        let hit_pos = ray.ori + ray.dir * hit.dst;
         let outgoing = -ray.dir;
 
         if !in_volume
         {
+            let hit_pos = ray.ori + ray.dir * hit.dst;
+
             let instance = instances[hit.instance_idx];
             let mat = materials[instance.mat_idx];
             let mat_point = get_material_point(hit);
@@ -884,6 +886,7 @@ fn pathtrace_mis(start_ray: Ray) -> vec3f
         }
         else  // in_volume
         {
+            let hit_pos = ray.ori + ray.dir * volume_dst;
             let vsdf = volume_stack[volume_stack_len - 1];
 
             // Next direction
@@ -947,7 +950,7 @@ fn pathtrace_naive(start_ray: Ray) -> vec3f
 
     for(var bounce = 0; bounce <= i32(MAX_BOUNCES); bounce++)
     {
-        var hit = ray_skip_alpha_stochastically(ray);
+        let hit = ray_skip_alpha_stochastically(ray);
         if !hit.hit
         {
             radiance += weight * sample_environments(ray.dir);
@@ -959,25 +962,25 @@ fn pathtrace_naive(start_ray: Ray) -> vec3f
             DEBUG_NUM_BOUNCES++;
         }
 
-        let hit_pos = ray.ori + ray.dir * hit.dst;
-        let outgoing = -ray.dir;
-        let mat_point = get_material_point(hit);
-
         // Handle transmission inside a volume.
         var in_volume = false;
+        var volume_dst = hit.dst;
         if volume_stack_len > 0 && volume_stack_len < MAX_VOLUMES
         {
             var vsdf = volume_stack[volume_stack_len - 1];
             let rnd1 = random_f32();
             let rnd2 = random_f32();
-            var distance = sample_transmittance(vsdf.density, hit.dst, rnd1, rnd2);
-            weight *= eval_transmittance(vsdf.density, distance) / sample_transmittance_pdf(vsdf.density, distance, hit.dst);
-            in_volume = distance < hit.dst;
-            hit.dst = distance;
+            volume_dst = sample_transmittance(vsdf.density, hit.dst, rnd1, rnd2);
+            weight *= eval_transmittance(vsdf.density, volume_dst) / sample_transmittance_pdf(vsdf.density, volume_dst, hit.dst);
+            in_volume = volume_dst < hit.dst;
         }
+
+        let outgoing = -ray.dir;
+        let mat_point = get_material_point(hit);
 
         if !in_volume
         {
+            let hit_pos = ray.ori + ray.dir * hit.dst;
             let normal = compute_shading_normal(hit);
 
             // Accumulate emission.
@@ -1023,6 +1026,7 @@ fn pathtrace_naive(start_ray: Ray) -> vec3f
         }
         else  // in_volume
         {
+            let hit_pos = ray.ori + ray.dir * volume_dst;
             let vsdf = volume_stack[volume_stack_len - 1];
 
             // Next direction
@@ -1082,24 +1086,24 @@ fn pathtrace_direct(start_ray: Ray) -> vec3f
             DEBUG_NUM_BOUNCES++;
         }
 
-        let hit_pos = ray.ori + ray.dir * hit.dst;
-        let outgoing = -ray.dir;
-
         // Handle transmission inside a volume.
         var in_volume = false;
+        var volume_dst = hit.dst;
         if volume_stack_len > 0 && volume_stack_len < MAX_VOLUMES
         {
             var vsdf = volume_stack[volume_stack_len - 1];
             let rnd1 = random_f32();
             let rnd2 = random_f32();
-            var distance = sample_transmittance(vsdf.density, hit.dst, rnd1, rnd2);
-            weight *= eval_transmittance(vsdf.density, distance) / sample_transmittance_pdf(vsdf.density, distance, hit.dst);
-            in_volume = distance < hit.dst;
-            hit.dst = distance;
+            volume_dst = sample_transmittance(vsdf.density, hit.dst, rnd1, rnd2);
+            weight *= eval_transmittance(vsdf.density, volume_dst) / sample_transmittance_pdf(vsdf.density, volume_dst, hit.dst);
+            in_volume = volume_dst < hit.dst;
         }
+
+        let outgoing = -ray.dir;
 
         if !in_volume
         {
+            let hit_pos = ray.ori + ray.dir * hit.dst;
             let instance = instances[hit.instance_idx];
             let mat = materials[instance.mat_idx];
             let mat_point = get_material_point(hit);
@@ -1196,6 +1200,7 @@ fn pathtrace_direct(start_ray: Ray) -> vec3f
         }
         else  // in_volume
         {
+            let hit_pos = ray.ori + ray.dir * volume_dst;
             let vsdf = volume_stack[volume_stack_len - 1];
 
             // Next direction
