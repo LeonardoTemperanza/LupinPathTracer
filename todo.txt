@@ -1,8 +1,9 @@
 
 Before publishing:
+Finish up tester program
+Reuse resources instead of recreating them when needed.
 Stop using the deprecated method on winit
 Fix slow denoising on CPU fallback
-Finish up tester program
 Fix random startup/rebuild time issue
 
 Enable more warnings and fix those.

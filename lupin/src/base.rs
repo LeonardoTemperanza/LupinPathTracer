@@ -1073,6 +1073,14 @@ pub fn to_u8_slice<T>(slice: &[T])->&[u8]
     };
 }
 
+pub fn from_u8_slice<T>(slice: &[u8]) -> &[T]
+{
+    let buf_size = slice.len();
+    return unsafe {
+        std::slice::from_raw_parts(slice.as_ptr() as *const _ as *const T, buf_size)
+    };
+}
+
 pub fn to_u64_slice<T>(slice: &[T])->&[u64]
 {
     let buf_size = slice.len() * std::mem::size_of::<T>();

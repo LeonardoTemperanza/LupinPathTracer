@@ -116,6 +116,8 @@ pub struct TonemapDesc
     pub filmic: bool,
     /// Whether or not to perform Linear -> SRGB conversion.
     pub srgb: bool,
+    /// Whether or not to clear the texture's previous contents.
+    pub clear: bool,
 }
 
 impl Default for TonemapDesc
@@ -127,6 +129,7 @@ impl Default for TonemapDesc
             exposure: 0.0,
             filmic: false,
             srgb: true,
+            clear: true,
         };
     }
 }
@@ -200,7 +203,7 @@ pub fn tonemap_and_fit_aspect(device: &wgpu::Device, queue: &wgpu::Queue, resour
                 view: &render_target_view,
                 resolve_target: None,
                 ops: wgpu::Operations {
-                    load: wgpu::LoadOp::Clear(wgpu::Color { r: 0.0, g: 0.0, b: 0.0, a: 1.0 }),
+                    load: if desc.clear { wgpu::LoadOp::Clear(wgpu::Color { r: 0.0, g: 0.0, b: 0.0, a: 1.0 }) } else { wgpu::LoadOp::Load },
                     store: wgpu::StoreOp::Store
                 },
                 depth_slice: None,

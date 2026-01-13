@@ -513,7 +513,8 @@ impl<'a> AppState<'a>
             viewport: Some(viewport),
             exposure: self.exposure,
             filmic: self.filmic,
-            srgb: self.srgb
+            srgb: self.srgb,
+            ..Default::default()
         };
 
         let mut render_type = self.render_type;
@@ -1063,6 +1064,7 @@ impl<'a> AppState<'a>
                                 exposure: self.exposure,
                                 filmic: self.filmic,
                                 srgb: self.srgb,
+                                ..Default::default()
                             });
 
                             let res = lpl::save_texture(&self.device, &self.queue,

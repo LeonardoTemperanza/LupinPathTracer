@@ -208,6 +208,11 @@ pub fn build_scene_cornell_box(device: &wgpu::Device, queue: &wgpu::Queue, build
 
 pub fn load_texture(device: &wgpu::Device, queue: &wgpu::Queue, path: &str, hdr: bool) -> Result<wgpu::Texture, image::ImageError>
 {
+    return load_texture_with_usage(device, queue, path, hdr, wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST);
+}
+
+pub fn load_texture_with_usage(device: &wgpu::Device, queue: &wgpu::Queue, path: &str, hdr: bool, usage: wgpu::TextureUsages) -> Result<wgpu::Texture, image::ImageError>
+{
     use image::GenericImageView;
 
     let img = image::open(path)?;
@@ -232,7 +237,7 @@ pub fn load_texture(device: &wgpu::Device, queue: &wgpu::Queue, path: &str, hdr:
         sample_count: 1,
         dimension: wgpu::TextureDimension::D2,
         format: format,
-        usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+        usage: usage | wgpu::TextureUsages::COPY_DST,
         view_formats: &[]
     });
 
@@ -278,67 +283,6 @@ pub fn load_texture(device: &wgpu::Device, queue: &wgpu::Queue, path: &str, hdr:
     }
 
     return Ok(texture);
-}
-
-// TODO: Return result here.
-pub fn load_hdr_texture_and_keep_cpu_copy(device: &wgpu::Device, queue: &wgpu::Queue, path: &str) -> (lp::EnvMapInfo, wgpu::Texture)
-{
-    use image::GenericImageView;
-
-    let img = image::open(path).expect("Failed to load image");
-    let dimensions = img.dimensions();
-
-    let size = wgpu::Extent3d {
-        width: dimensions.0,
-        height: dimensions.1,
-        depth_or_array_layers: 1
-    };
-
-    let texture = device.create_texture(&wgpu::TextureDescriptor {
-        label: None,
-        size: size,
-        mip_level_count: 1,
-        sample_count: 1,
-        dimension: wgpu::TextureDimension::D2,
-        format: wgpu::TextureFormat::Rgba16Float,
-        usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-        view_formats: &[]
-    });
-
-    let rgba_f32 = img.to_rgba32f();
-    let rgba = rgba32f_to_rgba16f(&rgba_f32);
-
-    queue.write_texture(
-        wgpu::TexelCopyTextureInfo {
-            texture: &texture,
-            mip_level: 0,
-            origin: wgpu::Origin3d::ZERO,
-            aspect: wgpu::TextureAspect::All
-        },
-        lp::to_u8_slice(&rgba),
-        wgpu::TexelCopyBufferLayout {
-            offset: 0,
-            bytes_per_row: Some(8 * dimensions.0),
-            rows_per_image: Some(dimensions.1)
-        },
-        size
-    );
-
-    let vec4_data: Vec<lp::Vec4> = rgba_f32
-        .chunks_exact(4)
-        .map(|chunk| lp::Vec4 {
-            x: chunk[0],
-            y: chunk[1],
-            z: chunk[2],
-            w: chunk[3],
-        })
-        .collect();
-
-    return (lp::EnvMapInfo {
-        data: vec4_data,
-        width: rgba_f32.width(),
-        height: rgba_f32.height(),
-    }, texture);
 }
 
 fn rgba32f_to_rgba16f(image_rgba32f: &image::ImageBuffer<image::Rgba<f32>, Vec<f32>>) -> Vec<half::f16>

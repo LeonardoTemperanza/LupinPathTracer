@@ -279,6 +279,7 @@ pub fn supports_rt(device: &wgpu::Device) -> bool
 pub struct DoubleBufferedTexture
 {
     pub textures: [wgpu::Texture; 2],
+    pub views:    [wgpu::TextureView; 2],
     pub front_idx: usize,
     pub back_idx: usize
 }
@@ -287,11 +288,11 @@ impl<'a> DoubleBufferedTexture
 {
     pub fn create(device: &wgpu::Device, desc: &wgpu::TextureDescriptor) -> DoubleBufferedTexture
     {
+        let textures = [ device.create_texture(desc), device.create_texture(desc), ];
+        let views = [ textures[0].create_view(&Default::default()), textures[1].create_view(&Default::default()) ];
         return Self {
-            textures: [
-                device.create_texture(desc),
-                device.create_texture(desc),
-            ],
+            textures,
+            views,
             front_idx: 0,
             back_idx: 1,
         }
@@ -307,6 +308,16 @@ impl<'a> DoubleBufferedTexture
         return &self.textures[self.back_idx];
     }
 
+    pub fn front_view(&'a self) -> &'a wgpu::TextureView
+    {
+        return &self.views[self.front_idx];
+    }
+
+    pub fn back_view(&'a self) -> &'a wgpu::TextureView
+    {
+        return &self.views[self.back_idx];
+    }
+
     pub fn copy_front_to_back(&self, device: &wgpu::Device, queue: &wgpu::Queue)
     {
         assert!(self.textures[0].format() == self.textures[1].format());
@@ -314,9 +325,9 @@ impl<'a> DoubleBufferedTexture
         let format = self.textures[0].format();
         let blitter = wgpu::util::TextureBlitter::new(device, format);
         let mut encoder = device.create_command_encoder(&Default::default());
-        let src = self.textures[self.front_idx].create_view(&Default::default());
-        let dst = self.textures[self.back_idx].create_view(&Default::default());
-        blitter.copy(device, &mut encoder, &src, &dst);
+        let src = &self.views[self.front_idx];
+        let dst = &self.views[self.back_idx];
+        blitter.copy(device, &mut encoder, src, dst);
         queue.submit(Some(encoder.finish()));
     }
 
@@ -331,6 +342,8 @@ impl<'a> DoubleBufferedTexture
     {
         resize_texture(device, &mut self.textures[0], width, height);
         resize_texture(device, &mut self.textures[1], width, height);
+        self.views[0] = self.textures[0].create_view(&Default::default());
+        self.views[1] = self.textures[1].create_view(&Default::default());
     }
 }
 
