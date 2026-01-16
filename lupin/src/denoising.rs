@@ -1,19 +1,51 @@
 
 use crate::renderer::*;
 
-pub enum DenoiseBuffer
+pub struct DenoiseBuffersPrivate
 {
-    Shared(oidn_wgpu_interop::SharedBuffer),
-    Private(oidn::Buffer)
+    pub output: oidn::Buffer,
+    pub albedo: oidn::Buffer,
+    pub normals: oidn::Buffer,
+    pub cpu_to_gpu: wgpu::Buffer,
+    pub gpu_to_cpu: wgpu::Buffer,
 }
 
-impl DenoiseBuffer
+pub struct DenoiseBuffersShared
 {
-    pub fn oidn_buffer(&self) -> &oidn::Buffer
+    pub output: oidn_wgpu_interop::SharedBuffer,
+    pub albedo: oidn_wgpu_interop::SharedBuffer,
+    pub normals: oidn_wgpu_interop::SharedBuffer,
+}
+
+pub enum DenoiseBuffers
+{
+    Shared(DenoiseBuffersShared),
+    Private(DenoiseBuffersPrivate),
+}
+
+impl DenoiseBuffers
+{
+    pub fn oidn_buffer_output(&self) -> &oidn::Buffer
     {
         return match self {
-            DenoiseBuffer::Shared(shared) => shared.oidn_buffer(),
-            DenoiseBuffer::Private(private) => &private,
+            DenoiseBuffers::Shared(shared) => shared.output.oidn_buffer(),
+            DenoiseBuffers::Private(private) => &private.output,
+        }
+    }
+
+    pub fn oidn_buffer_albedo(&self) -> &oidn::Buffer
+    {
+        return match self {
+            DenoiseBuffers::Shared(shared) => shared.albedo.oidn_buffer(),
+            DenoiseBuffers::Private(private) => &private.albedo,
+        }
+    }
+
+    pub fn oidn_buffer_normals(&self) -> &oidn::Buffer
+    {
+        return match self {
+            DenoiseBuffers::Shared(shared) => shared.normals.oidn_buffer(),
+            DenoiseBuffers::Private(private) => &private.normals,
         }
     }
 }
@@ -23,9 +55,7 @@ impl DenoiseBuffer
 /// dimensions. Formats are all assumed to be rgbaf16 linear.
 pub struct DenoiseResources
 {
-    pub beauty: DenoiseBuffer,
-    pub albedo: DenoiseBuffer,
-    pub normals: DenoiseBuffer,
+    pub buffers: DenoiseBuffers,
     pub filter: oidn::sys::OIDNFilter,
     pub width: u32,
     pub height: u32,
@@ -50,12 +80,10 @@ impl Drop for DenoiseResources
     }
 }
 
-pub fn build_denoise_resources(_device: &wgpu::Device, denoise_device: &DenoiseDevice,
+pub fn build_denoise_resources(device: &wgpu::Device, denoise_device: &DenoiseDevice,
                                width: u32, height: u32) -> DenoiseResources
 {
-    let beauty: DenoiseBuffer;
-    let albedo: DenoiseBuffer;
-    let normals: DenoiseBuffer;
+    let buffers: DenoiseBuffers;
 
     let filter: oidn::sys::OIDNFilter;
 
@@ -91,13 +119,28 @@ pub fn build_denoise_resources(_device: &wgpu::Device, denoise_device: &DenoiseD
                 oidn_check(device_raw);
             }
 
-            beauty = DenoiseBuffer::Shared(beauty_shared);
-            albedo = DenoiseBuffer::Shared(albedo_shared);
-            normals = DenoiseBuffer::Shared(normals_shared);
+            buffers = DenoiseBuffers::Shared(DenoiseBuffersShared {
+                output: beauty_shared,
+                albedo: albedo_shared,
+                normals: normals_shared,
+            });
         }
         // Doesn't support shared device.
         DenoiseDevice::OidnDevice(oidn_device) =>
         {
+            let cpu_to_gpu = device.create_buffer(&wgpu::BufferDescriptor {
+                label: None,
+                size: buffer_size as u64,  // Only ever need to transfer output.
+                usage: wgpu::BufferUsages::MAP_WRITE | wgpu::BufferUsages::COPY_SRC,
+                mapped_at_creation: false,
+            });
+            let gpu_to_cpu = device.create_buffer(&wgpu::BufferDescriptor {
+                label: None,
+                size: buffer_size as u64 * 3,  // Enough space to fit all buffers.
+                usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            });
+
             unsafe
             {
                 use oidn::sys::*;
@@ -123,17 +166,19 @@ pub fn build_denoise_resources(_device: &wgpu::Device, denoise_device: &DenoiseD
                 oidnCommitFilter(filter);
                 oidn_check(device_raw);
 
-                beauty = DenoiseBuffer::Private(oidn_device.create_buffer_from_raw(beauty_private_raw));
-                albedo = DenoiseBuffer::Private(oidn_device.create_buffer_from_raw(albedo_private_raw));
-                normals = DenoiseBuffer::Private(oidn_device.create_buffer_from_raw(normals_private_raw));
+                buffers = DenoiseBuffers::Private(DenoiseBuffersPrivate {
+                    output: oidn_device.create_buffer_from_raw(beauty_private_raw),
+                    albedo: oidn_device.create_buffer_from_raw(albedo_private_raw),
+                    normals: oidn_device.create_buffer_from_raw(normals_private_raw),
+                    cpu_to_gpu,
+                    gpu_to_cpu
+                });
             }
         }
     }
 
     return DenoiseResources {
-        beauty,
-        albedo,
-        normals,
+        buffers,
         filter,
         width,
         height,
@@ -193,13 +238,7 @@ pub fn denoise(device: &wgpu::Device, queue: &wgpu::Queue,
     let height = resources.height;
 
     // Copy input buffers
-    copy_texture_to_oidn_buf(device, queue, desc.pathtrace_output, &resources.beauty);
-    if let Some(albedo) = desc.albedo {
-        copy_texture_to_oidn_buf(device, queue, albedo, &resources.albedo);
-    }
-    if let Some(normals) = desc.normals {
-        copy_texture_to_oidn_buf(device, queue, normals, &resources.normals);
-    }
+    copy_textures_to_oidn_bufs(device, queue, desc, &resources.buffers);
 
     let filter_quality = match desc.quality
     {
@@ -208,8 +247,8 @@ pub fn denoise(device: &wgpu::Device, queue: &wgpu::Queue,
         DenoiseQuality::High => { oidn::Quality::High }
     };
 
-    let albedo_oidn = resources.albedo.oidn_buffer();
-    let normals_oidn = resources.normals.oidn_buffer();
+    let albedo_oidn = resources.buffers.oidn_buffer_albedo();
+    let normals_oidn = resources.buffers.oidn_buffer_normals();
     let device_oidn = denoise_device.oidn_device();
 
     // Must wait for WGPU to finish before we can start the OIDN workload.
@@ -261,7 +300,7 @@ pub fn denoise(device: &wgpu::Device, queue: &wgpu::Queue,
     }
 
     // Copy to output texture.
-    copy_oidn_buf_to_texture(device, queue, &resources.beauty, desc.denoise_output);
+    copy_oidn_output_to_texture(device, queue, &resources.buffers, desc.denoise_output);
 }
 
 unsafe fn oidn_check(oidn_device: oidn::sys::OIDNDevice)
@@ -284,109 +323,88 @@ unsafe fn oidn_check(oidn_device: oidn::sys::OIDNDevice)
     }
 }
 
-fn align_up(value: u32, align: u32) -> u32
+fn copy_textures_to_oidn_bufs(device: &wgpu::Device, queue: &wgpu::Queue,
+                              desc: &DenoiseDesc, outputs: &DenoiseBuffers)
 {
-    assert!(0 == (align & (align - 1)), "Must align to a power of two");
-    return (value + (align - 1)) & !(align - 1);
-}
-
-fn copy_texture_to_oidn_buf(device: &wgpu::Device, queue: &wgpu::Queue,
-                            input: &wgpu::Texture, output: &DenoiseBuffer)
-{
-    let width = input.width();
-    let height = input.height();
+    let width = desc.pathtrace_output.width();
+    let height = desc.pathtrace_output.height();
     let row_size = align_up(4 * 2 * width, wgpu::COPY_BYTES_PER_ROW_ALIGNMENT);
-    let buffer_size = row_size * height;
+    let buffer_size = (row_size * height) as usize;
 
-    match output
+    match outputs
     {
-        DenoiseBuffer::Shared(shared) =>
+        DenoiseBuffers::Shared(shared) =>
         {
             let mut encoder = device.create_command_encoder(&Default::default());
-
-            encoder.copy_texture_to_buffer(
-                wgpu::TexelCopyTextureInfo {
-                    texture: input,
-                    mip_level: 0,
-                    origin: Default::default(),
-                    aspect: Default::default()
-                },
-                wgpu::TexelCopyBufferInfo {
-                    buffer: shared.wgpu_buffer(),
-                    layout: wgpu::TexelCopyBufferLayout {
-                        offset: 0,
-                        bytes_per_row: Some(row_size),
-                        rows_per_image: Some(height)
-                    }
-                },
-                input.size()
-            );
+            copy_tex_to_buf(&mut encoder, desc.pathtrace_output, shared.output.wgpu_buffer(), 0);
+            if let Some(albedo) = desc.albedo {
+                copy_tex_to_buf(&mut encoder, albedo, shared.albedo.wgpu_buffer(), 0);
+            }
+            if let Some(normals) = desc.normals {
+                copy_tex_to_buf(&mut encoder, normals, shared.normals.wgpu_buffer(), 0);
+            }
             queue.submit(Some(encoder.finish()));
         }
-        DenoiseBuffer::Private(private) =>
+        DenoiseBuffers::Private(private) =>
         {
-            // Copy texture to CPU buffer first, then back to OIDN buffer (CPU/GPU)
-
-            let readback_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-                label: None,
-                size: buffer_size as u64,
-                usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
-                mapped_at_creation: false,
-            });
+            // Copy texture to transfer buffer first, then back to OIDN buffer (CPU/GPU)
 
             let mut encoder = device.create_command_encoder(&Default::default());
-
-            encoder.copy_texture_to_buffer(
-                wgpu::TexelCopyTextureInfo {
-                    texture: input,
-                    mip_level: 0,
-                    origin: wgpu::Origin3d::ZERO,
-                    aspect: wgpu::TextureAspect::All,
-                },
-                wgpu::TexelCopyBufferInfo {
-                    buffer: &readback_buffer,
-                    layout: wgpu::TexelCopyBufferLayout {
-                        offset: 0,
-                        bytes_per_row: Some(row_size),
-                        rows_per_image: Some(height as u32),
-                    },
-                },
-                input.size(),
-            );
+            copy_tex_to_buf(&mut encoder, desc.pathtrace_output, &private.gpu_to_cpu, 0);
+            if let Some(albedo) = desc.albedo {
+                copy_tex_to_buf(&mut encoder, albedo, &private.gpu_to_cpu, buffer_size);
+            }
+            if let Some(normals) = desc.normals {
+                copy_tex_to_buf(&mut encoder, normals, &private.gpu_to_cpu, buffer_size * 2);
+            }
             queue.submit(Some(encoder.finish()));
 
-            let slice = readback_buffer.slice(..);
-            let _mapping = slice.map_async(wgpu::MapMode::Read, | _ | {} );
-            device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
-
-            let data = slice.get_mapped_range();
-
-            unsafe
             {
-                use oidn::sys::*;
-                let private_raw = private.raw();
-                oidnWriteBuffer(private_raw, 0, data.len(), data.as_ptr() as *const std::ffi::c_void);
+                let slice = private.gpu_to_cpu.slice(..);
+
+                let _ = slice.map_async(wgpu::MapMode::Read, | _ | {} );
+                device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
+
+                let data = slice.get_mapped_range();
+                unsafe
+                {
+                    use oidn::sys::*;
+                    let output_raw = private.output.raw();
+                    let albedo_raw = private.albedo.raw();
+                    let normals_raw = private.normals.raw();
+                    let output = &data[0..buffer_size as usize];
+                    let albedo = &data[buffer_size as usize..buffer_size*2];
+                    let normals = &data[buffer_size*2..buffer_size*3];
+                    oidnWriteBuffer(output_raw, 0, output.len(), output.as_ptr() as *const std::ffi::c_void);
+                    if desc.albedo.is_some() {
+                        oidnWriteBuffer(albedo_raw, 0, albedo.len(), albedo.as_ptr() as *const std::ffi::c_void);
+                    }
+                    if desc.normals.is_some() {
+                        oidnWriteBuffer(normals_raw, 0, normals.len(), normals.as_ptr() as *const std::ffi::c_void);
+                    }
+                }
             }
+
+            private.gpu_to_cpu.unmap();
         }
     }
 }
 
-fn copy_oidn_buf_to_texture(device: &wgpu::Device, queue: &wgpu::Queue,
-                            input: &DenoiseBuffer, output: &wgpu::Texture)
+fn copy_oidn_output_to_texture(device: &wgpu::Device, queue: &wgpu::Queue,
+                               input: &DenoiseBuffers, output: &wgpu::Texture)
 {
     let width = output.width();
     let height = output.height();
     let row_size = align_up(4 * 2 * width, wgpu::COPY_BYTES_PER_ROW_ALIGNMENT);
-    let buffer_size = row_size * height;
 
     match input
     {
-        DenoiseBuffer::Shared(shared) =>
+        DenoiseBuffers::Shared(shared) =>
         {
             let mut encoder = device.create_command_encoder(&Default::default());
             encoder.copy_buffer_to_texture(
                 wgpu::TexelCopyBufferInfo {
-                    buffer: shared.wgpu_buffer(),
+                    buffer: shared.output.wgpu_buffer(),
                     layout: wgpu::TexelCopyBufferLayout {
                         offset: 0,
                         bytes_per_row: Some(row_size),
@@ -403,39 +421,31 @@ fn copy_oidn_buf_to_texture(device: &wgpu::Device, queue: &wgpu::Queue,
             );
             queue.submit(Some(encoder.finish()));
         }
-        DenoiseBuffer::Private(private) =>
+        DenoiseBuffers::Private(private) =>
         {
-            // Copy OIDN buffer to CPU buffer first, then back to GPU texture
-
-            let readback_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-                label: None,
-                size: buffer_size as u64,
-                usage: wgpu::BufferUsages::MAP_WRITE | wgpu::BufferUsages::COPY_SRC,
-                mapped_at_creation: false,
-            });
+            // Copy OIDN buffer to transfer buffer first, then back to GPU texture
 
             {
-                let slice = readback_buffer.slice(..);
+                let slice = private.cpu_to_gpu.slice(..);
                 let _mapping = slice.map_async(wgpu::MapMode::Write, | _ | {} );
                 device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
 
-                let data = slice.get_mapped_range();
+                let data = slice.get_mapped_range_mut();
 
                 unsafe
                 {
                     use oidn::sys::*;
-                    let private_raw = private.raw();
+                    let private_raw = private.output.raw();
                     oidnReadBuffer(private_raw, 0, data.len(), data.as_ptr() as *mut std::ffi::c_void);
                 }
-
             }
 
-            readback_buffer.unmap();
+            private.cpu_to_gpu.unmap();
 
             let mut encoder = device.create_command_encoder(&Default::default());
             encoder.copy_buffer_to_texture(
                 wgpu::TexelCopyBufferInfo {
-                    buffer: &readback_buffer,
+                    buffer: &private.cpu_to_gpu,
                     layout: wgpu::TexelCopyBufferLayout {
                         offset: 0,
                         bytes_per_row: Some(row_size),
@@ -455,4 +465,33 @@ fn copy_oidn_buf_to_texture(device: &wgpu::Device, queue: &wgpu::Queue,
             device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
         }
     }
+}
+
+fn copy_tex_to_buf(cmd_buf: &mut wgpu::CommandEncoder, output: &wgpu::Texture, buf: &wgpu::Buffer, offset: usize)
+{
+    let row_size = align_up(4 * 2 * output.width(), wgpu::COPY_BYTES_PER_ROW_ALIGNMENT);
+
+    cmd_buf.copy_texture_to_buffer(
+        wgpu::TexelCopyTextureInfo {
+            texture: output,
+            mip_level: 0,
+            origin: Default::default(),
+            aspect: Default::default()
+        },
+        wgpu::TexelCopyBufferInfo {
+            buffer: buf,
+            layout: wgpu::TexelCopyBufferLayout {
+                offset: offset as u64,
+                bytes_per_row: Some(row_size),
+                rows_per_image: Some(output.height())
+            }
+        },
+        output.size()
+    );
+}
+
+fn align_up(value: u32, align: u32) -> u32
+{
+    assert!(0 == (align & (align - 1)), "Must align to a power of two");
+    return (value + (align - 1)) & !(align - 1);
 }

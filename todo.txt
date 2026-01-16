@@ -1,9 +1,7 @@
 
 Before publishing:
-Finish up tester program
-Reuse resources instead of recreating them when needed.
+Keep texture views and binding group in Scene.
 Stop using the deprecated method on winit
-Fix slow denoising on CPU fallback
 Fix random startup/rebuild time issue
 
 Enable more warnings and fix those.
