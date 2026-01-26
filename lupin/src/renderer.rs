@@ -445,25 +445,6 @@ pub struct PathtraceResources
     pub falsecolor_pipeline: PathtracePipeline,
     pub debug_pipeline: PathtracePipeline,
     pub dummy_prev_frame_texture: wgpu::Texture,
-
-    // NOTE: Hack to guard for 0 size buffers.
-    // WGPU doesn't allow 0 size buffers and
-    // 0 length arrays of bindings. (Sigh...)
-    pub dummy_buf_mesh_infos: wgpu::Buffer,
-    pub dummy_buf_vertpos: wgpu::Buffer,
-    pub dummy_buf_vertnormal: wgpu::Buffer,
-    pub dummy_buf_vertuv: wgpu::Buffer,
-    pub dummy_buf_vertcolor: wgpu::Buffer,
-    pub dummy_buf_idx: wgpu::Buffer,
-    pub dummy_buf_bvh_node: wgpu::Buffer,
-    pub dummy_scene_tex: wgpu::Texture,
-    pub dummy_scene_sampler: wgpu::Sampler,
-    pub dummy_buf_alias_bin: wgpu::Buffer,
-    pub dummy_buf_tlas: wgpu::Buffer,
-    pub dummy_buf_instance: wgpu::Buffer,
-    pub dummy_buf_material: wgpu::Buffer,
-    pub dummy_buf_environment: wgpu::Buffer,
-    pub dummy_buf_light: wgpu::Buffer,
 }
 
 pub struct BakedPathtraceParams
@@ -657,41 +638,11 @@ pub fn build_pathtrace_resources(device: &wgpu::Device, baked_pathtrace_params: 
         view_formats: &[],
     });
 
-    let dummy_scene_tex = device.create_texture(&wgpu::TextureDescriptor {
-        label: Some("Dummy Scene Texture"),
-        size,
-        mip_level_count: 1,
-        sample_count: 1,
-        dimension: wgpu::TextureDimension::D2,
-        format: wgpu::TextureFormat::Rgba8Snorm,
-        usage: wgpu::TextureUsages::TEXTURE_BINDING,
-        view_formats: &[],
-    });
-
     return PathtraceResources {
         pipeline: PathtracePipeline { custom: pipeline, rt: pipeline_rt },
         debug_pipeline: PathtracePipeline { custom: debug_pipeline, rt: debug_pipeline_rt },
         falsecolor_pipeline: PathtracePipeline { custom: falsecolor_pipeline, rt: falsecolor_pipeline_rt },
         dummy_prev_frame_texture,
-
-        // NOTE: Hack to guard for 0 size buffers.
-        // WGPU doesn't allow 0 size bindings and
-        // 0 length arrays of bindings. (Sigh...)
-        dummy_buf_mesh_infos: create_storage_buffer_with_size_and_name(device, std::mem::size_of::<MeshInfo>(), "dummy_buf_meshinfos"),
-        dummy_buf_vertpos: create_storage_buffer_with_size_and_name(device, std::mem::size_of::<Vec4>(), "dummy_buf_vertpos"),
-        dummy_buf_vertnormal: create_storage_buffer_with_size_and_name(device, std::mem::size_of::<Vec4>(), "dummy_buf_vertnormal"),
-        dummy_buf_vertuv: create_storage_buffer_with_size_and_name(device, std::mem::size_of::<Vec2>(), "dummy_buf_vertuv"),
-        dummy_buf_vertcolor: create_storage_buffer_with_size_and_name(device, std::mem::size_of::<Vec4>(), "dummy_buf_vertcolor"),
-        dummy_buf_idx: create_storage_buffer_with_size_and_name(device, std::mem::size_of::<u32>(), "dummy_buf_idx"),
-        dummy_buf_bvh_node: create_storage_buffer_with_size_and_name(device, std::mem::size_of::<BvhNode>(), "dummy_buf_bvh_node"),
-        dummy_scene_tex,
-        dummy_scene_sampler: create_linear_sampler(device),
-        dummy_buf_alias_bin: create_storage_buffer_with_size_and_name(device, std::mem::size_of::<AliasBin>(), "dummy_buf_alias_bin"),
-        dummy_buf_tlas: create_storage_buffer_with_size_and_name(device, std::mem::size_of::<TlasNode>(), "dummy_buf_tlas"),
-        dummy_buf_instance: create_storage_buffer_with_size_and_name(device, std::mem::size_of::<Instance>(), "dummy_buf_instance"),
-        dummy_buf_material: create_storage_buffer_with_size_and_name(device, std::mem::size_of::<Material>(), "dummy_buf_material"),
-        dummy_buf_environment: create_storage_buffer_with_size_and_name(device, std::mem::size_of::<Environment>(), "dummy_buf_environment"),
-        dummy_buf_light: create_storage_buffer_with_size_and_name(device, std::mem::size_of::<Light>(), "dummy_buf_light"),
     };
 }
 
