@@ -187,6 +187,8 @@ const FLAG_DEBUG_AABB_CHECKS: u32       = 1 << 4;
 const FLAG_DEBUG_NUM_BOUNCES: u32       = 1 << 5;
 const FLAG_DEBUG_FIRST_HIT_ONLY: u32    = 1 << 6;
 
+const FLAG_INSTANCES_EMPTY: u32            = 1 << 7;
+
 // Falsecolor enum
 const FALSECOLOR_ALBEDO: u32       = 0;
 const FALSECOLOR_NORMALS: u32      = 1;

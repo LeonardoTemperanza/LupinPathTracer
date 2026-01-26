@@ -115,6 +115,8 @@ const RAY_QUERY_INTERSECTION_AABB = 3;
 // Will simply return the closest hit.
 fn ray_scene_intersection(ray: Ray) -> HitInfo
 {
+    if (constants.flags & FLAG_INSTANCES_EMPTY) != 0 { return HitInfo(); }
+
     var rq: ray_query;
     let flags = RAY_FLAG_SKIP_AABBS;
     let mask = 0xFFu;
@@ -183,6 +185,8 @@ fn compute_instance_lights_pdf(ray: Ray) -> f32
 // Will return the closest hit, while skipping hits based on alpha.
 fn ray_skip_alpha_stochastically(start_ray: Ray) -> HitInfo
 {
+    if (constants.flags & FLAG_INSTANCES_EMPTY) != 0 { return HitInfo(); }
+
     var hit = HitInfo();
     var ray = start_ray;
     var dst = 0.0f;

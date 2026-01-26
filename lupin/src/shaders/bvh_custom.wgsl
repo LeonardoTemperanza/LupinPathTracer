@@ -6,6 +6,8 @@ const _MAX_TLAS_DEPTH: u32 = 50;  // This roughly supports 2^(_MAX_TLAS_DEPTH / 
 
 fn ray_scene_intersection(ray: Ray)->HitInfo
 {
+    if (constants.flags & FLAG_INSTANCES_EMPTY) != 0 { return HitInfo(); }
+
     var tlas_stack: array<u32, _MAX_TLAS_DEPTH+1>;  // local
     var stack_idx: u32 = 2;
     tlas_stack[0] = 0u;
@@ -151,6 +153,8 @@ fn compute_instance_lights_pdf(ray: Ray) -> f32
 
 fn ray_skip_alpha_stochastically(start_ray: Ray) -> HitInfo
 {
+    if (constants.flags & FLAG_INSTANCES_EMPTY) != 0 { return HitInfo(); }
+
     var hit = HitInfo();
     var ray = start_ray;
     var dst = 0.0f;

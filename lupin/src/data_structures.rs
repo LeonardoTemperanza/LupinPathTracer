@@ -3,6 +3,13 @@ use crate::base::*;
 use crate::wgpu_utils::*;
 use crate::renderer::*;
 
+#[allow(unused_macros)]
+macro_rules! static_assert {
+    ($($tt:tt)*) => {
+        const _: () = assert!($($tt)*);
+    }
+}
+
 #[derive(Default, Debug)]
 pub struct EnvMapInfo
 {
@@ -684,19 +691,27 @@ pub fn tlas_find_best_match(tlas: &[TlasNode], idx_array: &[u32], node_a: u32) -
     return best_b;
 }
 
-/// * `build_sw_and_hw` - If true, and hardware raytracing is supported on the current device, then it will build both types of acceleration structures.
+/// * `build_sw_and_hw` - If true, and hardware raytracing is supported on the `device`, then it will build both types of acceleration structures.
 ///                       Otherwise it will only attempt to build the supported one.
-pub fn build_accel_structures_and_upload(device: &wgpu::Device, queue: &wgpu::Queue, scene: &SceneCPU, textures: Vec<wgpu::Texture>, samplers: Vec<wgpu::Sampler>, envs_info: &[EnvMapInfo], build_sw_and_hw: bool) -> Scene
+pub fn build_accel_structures_and_upload(device: &wgpu::Device, queue: &wgpu::Queue, scene: &SceneCPU, textures: Vec<wgpu::Texture>, texture_views: Vec<wgpu::TextureView>, samplers: Vec<wgpu::Sampler>, envs_info: &[EnvMapInfo], build_sw_and_hw: bool) -> Scene
 {
-    let verts_normal_array: Vec::<wgpu::Buffer> = scene.verts_normal_array.iter().map(|x| upload_storage_buffer(device, queue, to_u8_slice(x))).collect();
-    let verts_texcoord_array: Vec::<wgpu::Buffer> = scene.verts_texcoord_array.iter().map(|x| upload_storage_buffer(device, queue, to_u8_slice(x))).collect();
-    let verts_color_array: Vec::<wgpu::Buffer> = scene.verts_color_array.iter().map(|x| upload_storage_buffer(device, queue, to_u8_slice(x))).collect();
-    let verts_pos_array: Vec::<wgpu::Buffer> = scene.verts_pos_array.iter().map(|x| upload_vertex_pos_buffer(device, queue, to_u8_slice(x))).collect();
+    let build_sw_bvh = !supports_rt(device) || build_sw_and_hw;
+    let build_hw_bvh = supports_rt(device);
 
-    let mesh_infos = upload_storage_buffer_with_name(device, queue, to_u8_slice(&scene.mesh_infos), "mesh_infos");
-    let instances = upload_storage_buffer_with_name(device, queue, to_u8_slice(&scene.instances), "instances");
-    let materials = upload_storage_buffer_with_name(device, queue, to_u8_slice(&scene.materials), "materials");
-    let environments = upload_storage_buffer_with_name(device, queue, to_u8_slice(&scene.environments), "environments");
+    // NOTE: WGPU does not correctly handle 0 size buffers and 0 length arrays of bindings.
+    let mut verts_normal_array: Vec::<wgpu::Buffer> = scene.verts_normal_array.iter().map(|x| upload_storage_buffer_non_zero(device, queue, x)).collect();
+    let mut verts_texcoord_array: Vec::<wgpu::Buffer> = scene.verts_texcoord_array.iter().map(|x| upload_storage_buffer_non_zero(device, queue, x)).collect();
+    let mut verts_color_array: Vec::<wgpu::Buffer> = scene.verts_color_array.iter().map(|x| upload_storage_buffer_non_zero(device, queue, x)).collect();
+    let mut verts_pos_array: Vec::<wgpu::Buffer> = scene.verts_pos_array.iter().map(|x| upload_vertex_pos_buffer(device, queue, to_u8_slice(x))).collect();
+    if verts_normal_array.len() == 0   { verts_normal_array.push(upload_storage_buffer_non_zero::<Vec4>(device, queue, &[])); }
+    if verts_texcoord_array.len() == 0 { verts_texcoord_array.push(upload_storage_buffer_non_zero::<Vec2>(device, queue, &[])); }
+    if verts_color_array.len() == 0    { verts_color_array.push(upload_storage_buffer_non_zero::<Vec4>(device, queue, &[])); }
+    if verts_pos_array.len() == 0      { verts_pos_array.push(upload_storage_buffer_non_zero::<Vec4>(device, queue, &[])); }
+
+    let mesh_infos = upload_storage_buffer_with_name_non_zero(device, queue, &scene.mesh_infos, "mesh_infos");
+    let instances = upload_storage_buffer_with_name_non_zero(device, queue, &scene.instances, "instances");
+    let materials = upload_storage_buffer_with_name_non_zero(device, queue, &scene.materials, "materials");
+    let environments = upload_storage_buffer_with_name_non_zero(device, queue, &scene.environments, "environments");
 
     // Build lights
     let lights = build_lights(scene, envs_info);
@@ -704,13 +719,13 @@ pub fn build_accel_structures_and_upload(device: &wgpu::Device, queue: &wgpu::Qu
     // Build BVH
     let mut bvh_nodes_array = Vec::<wgpu::Buffer>::new();
     let mut indices_array = Vec::<wgpu::Buffer>::new();
-    if !supports_rt(device) || build_sw_and_hw
+    if build_sw_bvh
     {
         for (i, verts) in scene.verts_pos_array.iter().enumerate()
         {
             let mut indices = scene.indices_array[i].clone();
             let bvh = build_bvh(&verts, &mut indices);
-            bvh_nodes_array.push(upload_storage_buffer(device, queue, to_u8_slice(&bvh)));
+            bvh_nodes_array.push(upload_storage_buffer_non_zero(device, queue, &bvh));
             indices_array.push(upload_vertex_pos_buffer(device, queue, to_u8_slice(&indices)));
         }
     }
@@ -719,7 +734,11 @@ pub fn build_accel_structures_and_upload(device: &wgpu::Device, queue: &wgpu::Qu
         indices_array = scene.indices_array.iter().map(|x| upload_indices_buffer(device, queue, to_u8_slice(x))).collect();
     }
 
-    let (rt_tlas, rt_blases) = if supports_rt(device) {
+
+    if bvh_nodes_array.len() == 0 { bvh_nodes_array.push(upload_storage_buffer_non_zero::<BvhNode>(device, queue, &[])); }
+    if indices_array.len() == 0   { indices_array.push(upload_storage_buffer_non_zero::<u32>(device, queue, &[])); }
+
+    let (rt_tlas, rt_blases) = if build_hw_bvh {
         build_rt_accel_structures(device, queue, scene, &lights, &verts_pos_array, &indices_array)
     } else {
         (None, vec![])
@@ -735,23 +754,80 @@ pub fn build_accel_structures_and_upload(device: &wgpu::Device, queue: &wgpu::Qu
         model_aabbs.push(aabb);
     }
 
-    let tlas_nodes_cpu = if !supports_rt(device) || build_sw_and_hw {
+    let tlas_nodes_cpu = if build_sw_bvh {
         build_tlas(&scene.instances, &model_aabbs)
     } else {
         vec![]
     };
 
-    let tlas_nodes = upload_storage_buffer_with_name(device, queue, to_u8_slice(&tlas_nodes_cpu), "tlas_nodes");
+    let tlas_nodes = upload_storage_buffer_with_name_non_zero(device, queue, &tlas_nodes_cpu, "tlas_nodes");
 
     // Build alias tables
-    let alias_tables_gpu: Vec::<wgpu::Buffer> = lights.alias_tables.iter().map(|x| upload_storage_buffer(device, queue, to_u8_slice(x))).collect();
-    let env_alias_tables_gpu: Vec::<wgpu::Buffer> = lights.env_alias_tables.iter().map(|x| upload_storage_buffer(device, queue, to_u8_slice(x))).collect();
+    let mut alias_tables_gpu: Vec::<wgpu::Buffer> = lights.alias_tables.iter().map(|x| upload_storage_buffer_non_zero(device, queue, x)).collect();
+    let mut env_alias_tables_gpu: Vec::<wgpu::Buffer> = lights.env_alias_tables.iter().map(|x| upload_storage_buffer_non_zero(device, queue, x)).collect();
+    if alias_tables_gpu.len() == 0     { alias_tables_gpu.push(upload_storage_buffer_non_zero::<AliasBin>(device, queue, &[])); }
+    if env_alias_tables_gpu.len() == 0 { env_alias_tables_gpu.push(upload_storage_buffer_non_zero::<AliasBin>(device, queue, &[])); }
 
-    let lights = Lights {
-        lights: upload_storage_buffer_with_name(device, queue, to_u8_slice(&lights.lights), "lights"),
+    let lights_gpu = Lights {
+        lights: upload_storage_buffer_with_name_non_zero(device, queue, &lights.lights, "lights"),
         alias_tables: alias_tables_gpu,
         env_alias_tables: env_alias_tables_gpu
     };
+
+    let bindgroup_sw_bvh = if build_sw_bvh {
+        Some(create_sw_bvh_bindgroup(device, &bvh_nodes_array[..], &tlas_nodes))
+    } else {
+        None
+    };
+
+    let bindgroup_hw_bvh = if build_hw_bvh {
+        Some(create_hw_bvh_bindgroup(device, rt_tlas.as_ref().unwrap()))
+    } else {
+        None
+    };
+
+    let textures_non_zero = if textures.len() == 0 {
+        vec![device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("Dummy texture"),
+            size: wgpu::Extent3d {
+                width: 1,
+                height: 1,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8Snorm,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING,
+            view_formats: &[],
+        })]
+    } else {
+        textures
+    };
+    let texture_views_non_zero = if texture_views.len() == 0 {
+        vec![textures_non_zero[0].create_view(&Default::default())]
+    } else {
+        texture_views
+    };
+    let samplers_non_zero = if samplers.len() == 0 {
+        vec![create_linear_sampler(device)]
+    } else {
+        samplers
+    };
+
+    let bindgroup_scene = create_scene_bindgroup(device,
+                                                 &mesh_infos,
+                                                 &verts_pos_array,
+                                                 &indices_array,
+                                                 &verts_normal_array,
+                                                 &verts_texcoord_array,
+                                                 &verts_color_array,
+                                                 &instances,
+                                                 &materials,
+                                                 &texture_views_non_zero,
+                                                 &samplers_non_zero,
+                                                 &environments,
+                                                 &lights_gpu);
 
     return Scene {
         mesh_infos,
@@ -764,13 +840,35 @@ pub fn build_accel_structures_and_upload(device: &wgpu::Device, queue: &wgpu::Qu
         tlas_nodes,
         instances,
         materials,
-        textures,
-        samplers,
+        textures: textures_non_zero,
+        texture_views: texture_views_non_zero,
+        samplers: samplers_non_zero,
         environments,
-        lights,
+        lights: lights_gpu,
         rt_tlas,
         rt_blases,
+        bindgroup_sw_bvh,
+        bindgroup_hw_bvh,
+        bindgroup_scene,
+
+        envs_empty: envs_info.len() == 0,
+        lights_empty: lights.lights.len() == 0,
+        instances_empty: scene.instances.len() == 0,
     };
+
+    fn upload_storage_buffer_with_name_non_zero<T>(device: &wgpu::Device, queue: &wgpu::Queue, buf: &[T], label: &str) -> wgpu::Buffer
+    {
+        const ZERO_BUF: [u8; 256] = [0; 256];
+        let buf_u8 = if buf.len() <= 0 { to_u8_slice(&ZERO_BUF[..std::mem::size_of::<T>()]) } else { to_u8_slice(buf) };
+        return upload_storage_buffer_with_name(device, queue, buf_u8, label);
+    }
+
+    fn upload_storage_buffer_non_zero<T>(device: &wgpu::Device, queue: &wgpu::Queue, buf: &[T]) -> wgpu::Buffer
+    {
+        const ZERO_BUF: [u8; 256] = [0; 256];
+        let buf_u8 = if buf.len() <= 0 { to_u8_slice(&ZERO_BUF[..std::mem::size_of::<T>()]) } else { to_u8_slice(buf) };
+        return upload_storage_buffer(device, queue, buf_u8);
+    }
 }
 
 /// Used to verify if a scene has been built correctly. It's best to call it

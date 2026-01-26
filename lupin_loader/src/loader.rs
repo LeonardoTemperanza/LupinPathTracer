@@ -8,7 +8,7 @@ pub fn build_scene_empty(device: &wgpu::Device, queue: &wgpu::Queue) -> lp::Scen
 {
     let scene_cpu = lp::SceneCPU::default();
     lp::validate_scene(&scene_cpu, 0, 0);
-    return lp::build_accel_structures_and_upload(device, queue, &scene_cpu, vec![], vec![], &[], true);
+    return lp::build_accel_structures_and_upload(device, queue, &scene_cpu, vec![], vec![], vec![], &[], true);
 }
 
 pub fn build_scene_cornell_box(device: &wgpu::Device, queue: &wgpu::Queue, build_sw_and_hw: bool) -> (lp::Scene, Vec<SceneCamera>)
@@ -203,7 +203,7 @@ pub fn build_scene_cornell_box(device: &wgpu::Device, queue: &wgpu::Queue, build
             aspect: 1.0,
         },
     }];
-    return (lp::build_accel_structures_and_upload(device, queue, &scene, vec![], vec![], &[], build_sw_and_hw), cameras);
+    return (lp::build_accel_structures_and_upload(device, queue, &scene, vec![], vec![], vec![], &[], build_sw_and_hw), cameras);
 }
 
 pub fn load_texture(device: &wgpu::Device, queue: &wgpu::Queue, path: &str, hdr: bool) -> Result<wgpu::Texture, image::ImageError>
@@ -334,6 +334,7 @@ pub fn load_scene_yoctogl_v24(path: &std::path::Path, device: &wgpu::Device, que
 
     let mut scene = lp::SceneCPU::default();
     let mut textures = Vec::<wgpu::Texture>::new();
+    let mut texture_views = Vec::<wgpu::TextureView>::new();
     let mut samplers = Vec::<wgpu::Sampler>::new();
 
     let mut tex_load_infos = Vec::<TextureLoadInfo>::new();
@@ -714,7 +715,9 @@ pub fn load_scene_yoctogl_v24(path: &std::path::Path, device: &wgpu::Device, que
             return Err(err.into());
         }
 
+        let view = res.as_ref().unwrap().create_view(&Default::default());
         textures.push(res.unwrap());
+        texture_views.push(view);
         push_asset(&mut samplers, lp::create_linear_sampler(device));
     }
 
@@ -760,7 +763,7 @@ pub fn load_scene_yoctogl_v24(path: &std::path::Path, device: &wgpu::Device, que
 
     lp::validate_scene(&scene, textures.len() as u32, samplers.len() as u32);
 
-    let scene_gpu = lp::build_accel_structures_and_upload(device, queue, &scene, textures, samplers, &environment_infos, build_both_bvhs);
+    let scene_gpu = lp::build_accel_structures_and_upload(device, queue, &scene, textures, texture_views, samplers, &environment_infos, build_both_bvhs);
     return Ok((scene_gpu, scene_cams));
 }
 
