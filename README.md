@@ -6,7 +6,7 @@
 - Russian Roulette path termination.
 - Progressive and tiled rendering.
 - Emissive mesh lights and HDRIs.
-- Matte, glossy, reflective, transparent, refractive, subsurface, volumetric, materials, with GLTF-PBR compatibility.
+- Materials: Matte, glossy, reflective, transparent, refractive, subsurface, volumetric, with GLTF-PBR compatibility.
 - Support for emission-maps, metallic and roughness maps and normal-maps.
 - Support for different aperture, aspect ratio, focal length, and orthographic cameras.
 - Optional GPU Denoising with [OIDN](https://www.openimagedenoise.org/).
