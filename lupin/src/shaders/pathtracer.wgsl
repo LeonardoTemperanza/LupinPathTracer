@@ -53,7 +53,7 @@ struct PushConstants
     ray_epsilon: f32,
 }
 
-var<push_constant> constants: PushConstants;
+var<immediate> constants: PushConstants;
 
 // Override constants
 override MAX_BOUNCES: u32 = 5;

@@ -4,13 +4,12 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-#lupin = { path = "../lupin" }
 lupin = { path = "../lupin", features = [ "denoising" ] }
 lupin_loader = { path = "../lupin_loader" }
 
 # GUI
 winit = "0.30.7"
 egui  = "0.33.0"
-egui-wgpu  = "0.33.0"
+egui-wgpu  = { path = "./egui-wgpu/" }
 egui-winit = "0.33.0"
 rfd = "0.14"  # File dialog

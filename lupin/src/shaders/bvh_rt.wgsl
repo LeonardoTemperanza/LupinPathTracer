@@ -1,4 +1,6 @@
 
+enable wgpu_ray_query;
+
 @group(3) @binding(0) var rt_tlas: acceleration_structure;
 
 // NOTE: Requires masks to be set up with the following bitflags

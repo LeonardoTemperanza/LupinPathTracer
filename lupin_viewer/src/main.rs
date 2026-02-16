@@ -469,6 +469,7 @@ impl AppState
                 label: None,
                 timestamp_writes: None,
                 occlusion_query_set: None,
+                multiview_mask: None,
             });
 
             // Apparently the egui_wgpu needs to get around the borrow-checker like this...
@@ -866,13 +867,13 @@ impl AppState
                 ui.add_space(4.0);
                 {
                     ui.horizontal(|ui| {
-                        let response = ui.add(egui::DragValue::new(&mut self.samples_per_pixel).range(1..=200));
+                        let response = ui.add(egui::DragValue::new(&mut self.samples_per_pixel).range(1..=10));
                         if response.changed() { self.should_rebuild_pathtrace_resources = true; }
                         ui.label("Samples per pixel");
                     });
 
                     ui.horizontal(|ui| {
-                        let response = ui.add(egui::DragValue::new(&mut self.max_bounces).range(1..=200));
+                        let response = ui.add(egui::DragValue::new(&mut self.max_bounces).range(1..=10));
                         if response.changed() { self.should_rebuild_pathtrace_resources = true; }
                         ui.label("Max bounces");
                     });

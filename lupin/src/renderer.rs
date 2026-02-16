@@ -327,7 +327,7 @@ pub fn request_device_for_lupin(adapter: &wgpu::Adapter) -> (wgpu::Device, wgpu:
                            wgpu::Features::STORAGE_RESOURCE_BINDING_ARRAY |
                            wgpu::Features::SAMPLED_TEXTURE_AND_STORAGE_BUFFER_ARRAY_NON_UNIFORM_INDEXING |
                            wgpu::Features::PARTIALLY_BOUND_BINDING_ARRAY |
-                           wgpu::Features::PUSH_CONSTANTS |
+                           wgpu::Features::IMMEDIATES |
                            wgpu::Features::SHADER_INT64 |
                            supported_optional_features,
         required_limits: wgpu::Limits {
@@ -336,7 +336,7 @@ pub fn request_device_for_lupin(adapter: &wgpu::Adapter) -> (wgpu::Device, wgpu:
             max_binding_array_sampler_elements_per_shader_stage: MAX_TEXTURES,
             max_sampled_textures_per_shader_stage: MAX_TEXTURES + 64,
             max_samplers_per_shader_stage: MAX_TEXTURES + 8,
-            max_push_constant_size: MAX_PUSH_CONSTANTS_SIZE,
+            max_immediate_size: MAX_PUSH_CONSTANTS_SIZE,
             max_acceleration_structures_per_shader_stage: allowed_accel_structures,
             max_tlas_instance_count: max_rt_instances,
             max_blas_geometry_count: max_blas_geometry_count,
@@ -394,7 +394,7 @@ pub fn request_device_for_lupin_with_denoising_capabilities(adapter: &wgpu::Adap
                            wgpu::Features::STORAGE_RESOURCE_BINDING_ARRAY |
                            wgpu::Features::SAMPLED_TEXTURE_AND_STORAGE_BUFFER_ARRAY_NON_UNIFORM_INDEXING |
                            wgpu::Features::PARTIALLY_BOUND_BINDING_ARRAY |
-                           wgpu::Features::PUSH_CONSTANTS |
+                           wgpu::Features::IMMEDIATES |
                            wgpu::Features::SHADER_INT64 |
                            supported_optional_features,
         required_limits: wgpu::Limits {
@@ -403,7 +403,7 @@ pub fn request_device_for_lupin_with_denoising_capabilities(adapter: &wgpu::Adap
             max_binding_array_sampler_elements_per_shader_stage: MAX_TEXTURES,
             max_sampled_textures_per_shader_stage: MAX_TEXTURES + 64,
             max_samplers_per_shader_stage: MAX_TEXTURES + 8,
-            max_push_constant_size: MAX_PUSH_CONSTANTS_SIZE,
+            max_immediate_size: MAX_PUSH_CONSTANTS_SIZE,
             max_acceleration_structures_per_shader_stage: allowed_accel_structures,
             max_tlas_instance_count: max_rt_instances,
             max_blas_geometry_count: max_blas_geometry_count,
@@ -468,10 +468,10 @@ impl Default for BakedPathtraceParams
 
 pub fn build_pathtrace_resources(device: &wgpu::Device, baked_pathtrace_params: &BakedPathtraceParams) -> PathtraceResources
 {
-    let mut shader_src_custom = String::from(DEFAULT_PATHTRACER_SRC);
-    shader_src_custom.push_str(PATHTRACER_BVH_CUSTOM_SRC);
-    let mut shader_src_rt = String::from(DEFAULT_PATHTRACER_SRC);
-    shader_src_rt.push_str(PATHTRACER_BVH_RT_SRC);
+    let mut shader_src_custom = String::from(PATHTRACER_BVH_CUSTOM_SRC);
+    shader_src_custom.push_str(DEFAULT_PATHTRACER_SRC);
+    let mut shader_src_rt = String::from(PATHTRACER_BVH_RT_SRC);
+    shader_src_rt.push_str(DEFAULT_PATHTRACER_SRC);
 
     let shader_desc_custom = wgpu::ShaderModuleDescriptor {
         label: Some("Lupin Pathtracer Shader"),
@@ -510,10 +510,7 @@ pub fn build_pathtrace_resources(device: &wgpu::Device, baked_pathtrace_params: 
             &render_target_bindgroup_layout,
             &bvh_custom_bindgroup_layout,
         ],
-        push_constant_ranges: &[wgpu::PushConstantRange {
-            stages: wgpu::ShaderStages::COMPUTE,
-            range: 0..std::mem::size_of::<PushConstants>() as u32,
-        }],
+        immediate_size: std::mem::size_of::<PushConstants>() as u32,
     });
 
     let constants = [
@@ -578,10 +575,7 @@ pub fn build_pathtrace_resources(device: &wgpu::Device, baked_pathtrace_params: 
                 &render_target_bindgroup_layout,
                 &bvh_rt_bindgroup_layout,
             ],
-            push_constant_ranges: &[wgpu::PushConstantRange {
-                stages: wgpu::ShaderStages::COMPUTE,
-                range: 0..std::mem::size_of::<PushConstants>() as u32,
-            }],
+            immediate_size: std::mem::size_of::<PushConstants>() as u32,
         });
 
         pipeline_rt = Some(device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
@@ -825,7 +819,7 @@ pub fn pathtrace_scene(device: &wgpu::Device, queue: &wgpu::Queue, resources: &P
                 let offset_y = (i / num_tiles_x) * tile_size * WORKGROUP_SIZE;
 
                 let push_constants = get_push_constants_tiled(desc, scene, Some(pathtrace_type), None, None, num_tiles_x, tile_size, i);
-                pass.set_push_constants(0, to_u8_slice(&[push_constants]));
+                pass.set_immediates(0, to_u8_slice(&[push_constants]));
 
                 let num_workers_x = u32::min(tile_size, (target_width - offset_x) / WORKGROUP_SIZE);
                 let num_workers_y = u32::min(tile_size, (target_height - offset_y) / WORKGROUP_SIZE);
@@ -835,7 +829,7 @@ pub fn pathtrace_scene(device: &wgpu::Device, queue: &wgpu::Queue, resources: &P
         else  // Full-screen rendering.
         {
             let push_constants = get_push_constants(desc, scene, Some(pathtrace_type), None, None);
-            pass.set_push_constants(0, to_u8_slice(&[push_constants]));
+            pass.set_immediates(0, to_u8_slice(&[push_constants]));
 
             let num_workers_x = (render_target.width() + WORKGROUP_SIZE - 1) / WORKGROUP_SIZE;
             let num_workers_y = (render_target.height() + WORKGROUP_SIZE - 1) / WORKGROUP_SIZE;
@@ -931,7 +925,7 @@ pub fn pathtrace_scene_falsecolor(device: &wgpu::Device, queue: &wgpu::Queue, re
                 let offset_y = (i / num_tiles_x) * tile_size * WORKGROUP_SIZE;
 
                 let push_constants = get_push_constants_tiled(desc, scene, None, Some(falsecolor_type), None, num_tiles_x, tile_size, i);
-                pass.set_push_constants(0, to_u8_slice(&[push_constants]));
+                pass.set_immediates(0, to_u8_slice(&[push_constants]));
 
                 let num_workers_x = u32::min(tile_size, (target_width - offset_x) / WORKGROUP_SIZE);
                 let num_workers_y = u32::min(tile_size, (target_height - offset_y) / WORKGROUP_SIZE);
@@ -941,7 +935,7 @@ pub fn pathtrace_scene_falsecolor(device: &wgpu::Device, queue: &wgpu::Queue, re
         else  // Full-screen rendering.
         {
             let push_constants = get_push_constants(desc, scene, None, Some(falsecolor_type), None);
-            pass.set_push_constants(0, to_u8_slice(&[push_constants]));
+            pass.set_immediates(0, to_u8_slice(&[push_constants]));
 
             let num_workers_x = (render_target.width() + WORKGROUP_SIZE - 1) / WORKGROUP_SIZE;
             let num_workers_y = (render_target.height() + WORKGROUP_SIZE - 1) / WORKGROUP_SIZE;
@@ -1023,7 +1017,7 @@ pub fn pathtrace_scene_debug(device: &wgpu::Device, queue: &wgpu::Queue, resourc
                 let offset_y = (i / num_tiles_x) * tile_size * WORKGROUP_SIZE;
 
                 let push_constants = get_push_constants_tiled(desc, scene, None, None, Some(debug_desc), num_tiles_x, tile_size, i);
-                pass.set_push_constants(0, to_u8_slice(&[push_constants]));
+                pass.set_immediates(0, to_u8_slice(&[push_constants]));
 
                 let num_workers_x = u32::min(tile_size, (target_width - offset_x) / WORKGROUP_SIZE);
                 let num_workers_y = u32::min(tile_size, (target_height - offset_y) / WORKGROUP_SIZE);
@@ -1033,7 +1027,7 @@ pub fn pathtrace_scene_debug(device: &wgpu::Device, queue: &wgpu::Queue, resourc
         else  // Full-screen rendering.
         {
             let push_constants = get_push_constants(desc, scene, None, None, Some(debug_desc));
-            pass.set_push_constants(0, to_u8_slice(&[push_constants]));
+            pass.set_immediates(0, to_u8_slice(&[push_constants]));
 
             let num_workers_x = (render_target.width() + WORKGROUP_SIZE - 1) / WORKGROUP_SIZE;
             let num_workers_y = (render_target.height() + WORKGROUP_SIZE - 1) / WORKGROUP_SIZE;

@@ -43,10 +43,7 @@ pub fn build_tonemap_resources(device: &wgpu::Device) -> TonemapResources
     let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label: Some("Lupin Tonemapping Pipeline Layout"),
         bind_group_layouts: &[&bind_group_layout],
-        push_constant_ranges: &[wgpu::PushConstantRange {
-            stages: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
-            range: 0..std::mem::size_of::<TonemapUniforms>() as u32,
-        }],
+        immediate_size: std::mem::size_of::<TonemapUniforms>() as u32,
     });
 
     let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
@@ -86,7 +83,7 @@ pub fn build_tonemap_resources(device: &wgpu::Device) -> TonemapResources
             mask: !0,
             alpha_to_coverage_enabled: false,
         },
-        multiview: None,
+        multiview_mask: None,
         cache: None,
     });
 
@@ -96,7 +93,7 @@ pub fn build_tonemap_resources(device: &wgpu::Device) -> TonemapResources
         address_mode_w: wgpu::AddressMode::ClampToEdge,
         mag_filter: wgpu::FilterMode::Linear,
         min_filter: wgpu::FilterMode::Linear,
-        mipmap_filter: wgpu::FilterMode::Linear,
+        mipmap_filter: wgpu::MipmapFilterMode::Linear,
         ..Default::default()
     });
 
@@ -210,13 +207,14 @@ pub fn tonemap_and_fit_aspect(device: &wgpu::Device, queue: &wgpu::Queue, resour
             })],
             depth_stencil_attachment: None,
             occlusion_query_set: None,
-            timestamp_writes: None
+            timestamp_writes: None,
+            multiview_mask: None,
         });
 
         pass.set_viewport(viewport.x, viewport.y, viewport.w, viewport.h, 0.0, 1.0);
         pass.set_scissor_rect(viewport.x as u32, viewport.y as u32, viewport.w as u32, viewport.h as u32);
         pass.set_pipeline(&pipeline);
-        pass.set_push_constants(wgpu::ShaderStages::FRAGMENT | wgpu::ShaderStages::VERTEX, 0, to_u8_slice(&[params]));
+        pass.set_immediates(0, to_u8_slice(&[params]));
         pass.set_bind_group(0, &bind_group, &[]);
         pass.draw(0..6, 0..1);
     }

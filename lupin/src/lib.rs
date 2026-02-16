@@ -2,7 +2,7 @@
 #![allow(unexpected_cfgs)]
 
 //! # Lupin
-//! Lupin is a cross-platform, data-oriented library for fast photorealistic
+//! Lupin is a data-oriented library for fast photorealistic
 //! rendering on the GPU with WGPU. It's meant to be simple and C-like, and supports hardware raytracing.
 //! For scene serialization, lupin_loader could be used, or a custom loader which uses lupin's scene-building API.
 

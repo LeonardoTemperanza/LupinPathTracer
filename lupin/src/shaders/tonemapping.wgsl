@@ -2,7 +2,7 @@
 @group(0) @binding(0) var source_texture: texture_2d<f32>;
 @group(0) @binding(1) var source_sampler: sampler;
 
-var<push_constant> constants: TonemapParams;
+var<immediate> constants: TonemapParams;
 
 struct TonemapParams
 {

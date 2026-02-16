@@ -4,7 +4,7 @@
 @group(0) @binding(2) var expected_output: texture_storage_2d<rgba16float, read>;
 
 struct PushConstants { epsilon: f32 }
-var<push_constant> constants: PushConstants;
+var<immediate> constants: PushConstants;
 
 const WORKGROUP_SIZE_X: u32 = 4;
 const WORKGROUP_SIZE_Y: u32 = 4;
