@@ -8,13 +8,15 @@
 //#![windows_subsystem = "windows"]
 
 use std::time::Instant;
+use std::sync::Arc;
 
 pub use winit::
 {
     window::*,
     event::*,
     dpi::*,
-    event_loop::*
+    event_loop::*,
+    application::ApplicationHandler
 };
 
 use ::egui::FontDefinitions;
@@ -32,99 +34,94 @@ pub use lupin_loader as lpl;
 fn main()
 {
     let event_loop = EventLoop::new().unwrap();
-    let window_attributes = WindowAttributes::default()
-        .with_title("Lupin Pathtracer")
-        .with_inner_size(PhysicalSize::new(1920.0, 1080.0))
-        .with_visible(false);
+    let mut winit_app = WinitApp::default();
+    event_loop.run_app(&mut winit_app).unwrap();
+}
 
-    let window = event_loop.create_window(window_attributes).unwrap();
+pub struct WinitApp
+{
+    pub app: Option<AppState>,
+    pub time_begin: Instant,  // To measure delta_time
+    pub input: Input,
+    pub egui_ctx: egui::Context,
+}
 
-    let win_size = window.inner_size();
-    let (width, height) = (win_size.width as i32, win_size.height as i32);
-
-    let mut surface_config = wgpu::SurfaceConfiguration {
-        usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
-        format: wgpu::TextureFormat::Rgba8Unorm,
-        width: width as u32,
-        height: height as u32,
-        present_mode: wgpu::PresentMode::AutoNoVsync,  // Disabling vsync makes it so tiled rendering isn't slowed down.
-        desired_maximum_frame_latency: 0,
-        alpha_mode: wgpu::CompositeAlphaMode::Auto,
-        view_formats: vec![],
-    };
-
-    let (device, queue, surface, adapter, denoise_device) = lp::init_default_wgpu_context_with_denoising_capabilities(&surface_config, &window);
-
-    let mut app_state = AppState::new(&device, &denoise_device, &queue, &window);
-
-    let egui_ctx = egui::Context::default();
-    let viewport_id = egui_ctx.viewport_id();
-    let mut egui_state = egui_winit::State::new(egui_ctx.clone(), viewport_id, &window, None, None, None);
-    let mut egui_renderer = egui_wgpu::Renderer::new(&device, wgpu::TextureFormat::Rgba8Unorm, Default::default());
-
-    let mut input = Input::default();
-
-    let min_delta_time: f32 = 1.0/10.0;
-    let mut delta_time: f32 = 1.0/60.0;
-    let mut time_begin = Instant::now();
-
-    window.set_visible(true);
-
-    event_loop.run(|event, target|
+impl Default for WinitApp
+{
+    fn default() -> Self
     {
-        process_input_event(&mut input, &event);
+        return Self {
+            app: None,
+            time_begin: Instant::now(),
+            input: Default::default(),
+            egui_ctx: egui::Context::default(),
+        };
+    }
+}
 
-        if let Event::WindowEvent { window_id: _, event } = event
+impl ApplicationHandler for WinitApp
+{
+    fn resumed(&mut self, event_loop: &ActiveEventLoop)
+    {
+        let is_first_resumed = matches!(self.app, None);
+        if !is_first_resumed { return; }
+
+        let window_attributes = Window::default_attributes()
+            .with_title("Lupin Viewer")
+            .with_inner_size(winit::dpi::LogicalSize::new(1000.0, 1000.0));
+
+        let window = Arc::new(event_loop.create_window(window_attributes).unwrap());
+        self.app = Some(AppState::new(window, &self.egui_ctx));
+    }
+
+    fn window_event(&mut self, event_loop: &ActiveEventLoop, id: WindowId, event: WindowEvent)
+    {
+        if matches!(self.app, None) { return; }
+        let app = self.app.as_mut().unwrap();
+
+        process_input_event(&mut self.input, &Event::WindowEvent { window_id: id, event: event.clone() });
+
+        // Collect inputs
+        let _ = app.egui_state.on_window_event(&app.window, &event);
+
+        match &event
         {
-            // Collect inputs
-            let _ = egui_state.on_window_event(&window, &event);
-
-            match event
+            WindowEvent::Resized(new_size) =>
             {
-                WindowEvent::Resized(new_size) =>
-                {
-                    // Resize surface
-                    surface_config.width  = new_size.width;
-                    surface_config.height = new_size.height;
-                    surface.configure(&device, &surface_config);
+                app.on_resize(new_size.width, new_size.height);
+                app.window.request_redraw();
+            },
+            WindowEvent::CloseRequested =>
+            {
+                event_loop.exit();
+            },
+            WindowEvent::RedrawRequested =>
+            {
+                const MIN_DELTA_TIME: f32 = 0.1;  // 10fps
 
-                    window.request_redraw();
-                },
-                WindowEvent::CloseRequested =>
-                {
-                    target.exit();
-                },
-                WindowEvent::RedrawRequested =>
-                {
-                    delta_time = time_begin.elapsed().as_secs_f32();
-                    delta_time = delta_time.min(min_delta_time);
-                    time_begin = Instant::now();
+                if matches!(self.app, None) { return; }
 
-                    let frame_result = surface.get_current_texture();
-                    match frame_result
-                    {
-                        Err(wgpu::SurfaceError::Timeout) => panic!("Error: Timeout"),
-                        Err(wgpu::SurfaceError::Outdated) => panic!("Error: Outdated"),
-                        Err(wgpu::SurfaceError::Lost) => panic!("Error: Lost"),
-                        Err(wgpu::SurfaceError::OutOfMemory) => panic!("Error: OutOfMemory"),
-                        Err(wgpu::SurfaceError::Other) => panic!("Error: Other"),
-                        Ok(_) => {},
-                    }
-                    let frame = frame_result.unwrap();
+                let app = self.app.as_mut().unwrap();
 
-                    app_state.update_and_render(&egui_ctx, &mut egui_state, &mut egui_renderer, &frame.texture, &input, delta_time);
+                let mut delta_time = self.time_begin.elapsed().as_secs_f32();
+                delta_time = delta_time.min(MIN_DELTA_TIME);
+                self.time_begin = Instant::now();
 
-                    frame.present();
+                app.update_and_render(&self.egui_ctx, &self.input, delta_time);
+                begin_input_events(&mut self.input);
 
-                    begin_input_events(&mut input);
-
-                    // Continuously request drawing messages to let the main loop continue
-                    window.request_redraw();
-                },
-                _ => {},
-            }
+                // Continuously request drawing messages to let the main loop continue
+                app.window.request_redraw();
+            },
+            _ => {},
         }
-    }).unwrap();
+    }
+
+
+    fn device_event(&mut self, event_loop: &ActiveEventLoop, device_id: DeviceId, event: DeviceEvent)
+    {
+        process_input_event(&mut self.input, &Event::DeviceEvent { device_id, event });
+    }
 }
 
 #[derive(Debug, PartialEq, Clone, Copy)]
@@ -143,12 +140,19 @@ pub struct DebugVizInfo
     pub heatmap_max: f32,
 }
 
-pub struct AppState<'a>
+pub struct AppState
 {
-    pub device: &'a wgpu::Device,
-    pub denoise_device: &'a lp::DenoiseDevice,
-    pub queue: &'a wgpu::Queue,
-    pub window: &'a winit::window::Window,
+    // WGPU
+    pub device: wgpu::Device,
+    pub denoise_device: lp::DenoiseDevice,
+    pub queue: wgpu::Queue,
+    pub window: Arc<winit::window::Window>,
+    pub surface: wgpu::Surface<'static>,
+    pub surface_config: wgpu::SurfaceConfiguration,
+
+    // EGUI
+    pub egui_state: egui_winit::State,
+    pub egui_renderer: egui_wgpu::Renderer,
 
     // UI
     pub render_type: RenderType,
@@ -191,9 +195,9 @@ pub struct AppState<'a>
     pub selected_cam: i32,  // If -1, no cam is selected (free-roam).
 
     // Textures
-    pub output: DoubleBufferedTexture,
-    pub albedo: DoubleBufferedTexture,
-    pub normals: DoubleBufferedTexture,
+    pub output: lp::DoubleBufferedTexture,
+    pub albedo: lp::DoubleBufferedTexture,
+    pub normals: lp::DoubleBufferedTexture,
     pub denoised: wgpu::Texture,
 
     // Saved state for accumulation
@@ -202,10 +206,30 @@ pub struct AppState<'a>
     pub gbuffers_accum_counter: u32,
 }
 
-impl<'a> AppState<'a>
+impl AppState
 {
-    pub fn new(device: &'a wgpu::Device, denoise_device: &'a lp::DenoiseDevice, queue: &'a wgpu::Queue, window: &'a winit::window::Window) -> Self
+    pub fn new(window: Arc<winit::window::Window>, egui_ctx: &egui::Context) -> Self
     {
+        let win_size = window.inner_size();
+        let (width, height) = (win_size.width as i32, win_size.height as i32);
+
+        let surface_config = wgpu::SurfaceConfiguration {
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+            format: wgpu::TextureFormat::Rgba8Unorm,
+            width: width as u32,
+            height: height as u32,
+            present_mode: wgpu::PresentMode::AutoNoVsync,  // Disabling vsync makes it so tiled rendering isn't slowed down.
+            desired_maximum_frame_latency: 0,
+            alpha_mode: wgpu::CompositeAlphaMode::Auto,
+            view_formats: vec![],
+        };
+
+        let (device, queue, surface, adapter, denoise_device) = lp::init_default_wgpu_context_with_denoising_capabilities(&surface_config, window.clone());
+
+        let viewport_id = egui_ctx.viewport_id();
+        let egui_state = egui_winit::State::new(egui_ctx.clone(), viewport_id, &window, None, None, None);
+        let egui_renderer = egui_wgpu::Renderer::new(&device, wgpu::TextureFormat::Rgba8Unorm, Default::default());
+
         const DEFAULT_SAMPLES_PER_PIXEL: u32 = 5;
         const DEFAULT_MAX_BOUNCES: u32 = 8;
 
@@ -223,7 +247,7 @@ impl<'a> AppState<'a>
 
         let (scene, scene_cameras) = lpl::build_scene_cornell_box(&device, &queue, false);
 
-        let output = DoubleBufferedTexture::create(device, &wgpu::TextureDescriptor {
+        let output = lp::DoubleBufferedTexture::create(&device, &wgpu::TextureDescriptor {
             label: None,
             size: wgpu::Extent3d { width: width as u32, height: height as u32, depth_or_array_layers: 1 },
             mip_level_count: 1,
@@ -236,7 +260,7 @@ impl<'a> AppState<'a>
             view_formats: &[]
         });
 
-        let albedo = DoubleBufferedTexture::create(device, &wgpu::TextureDescriptor {
+        let albedo = lp::DoubleBufferedTexture::create(&device, &wgpu::TextureDescriptor {
             label: None,
             size: wgpu::Extent3d { width: width as u32, height: height as u32, depth_or_array_layers: 1 },
             mip_level_count: 1,
@@ -249,7 +273,7 @@ impl<'a> AppState<'a>
             view_formats: &[]
         });
 
-        let normals = DoubleBufferedTexture::create(device, &wgpu::TextureDescriptor {
+        let normals = lp::DoubleBufferedTexture::create(&device, &wgpu::TextureDescriptor {
             label: None,
             size: wgpu::Extent3d { width: width as u32, height: height as u32, depth_or_array_layers: 1 },
             mip_level_count: 1,
@@ -278,10 +302,17 @@ impl<'a> AppState<'a>
         let num_cameras = scene_cameras.len();
 
         let mut res = Self {
+            // WGPU
             device: device,
             denoise_device: denoise_device,
             queue: queue,
-            window: window,
+            window: window.clone(),
+            surface: surface,
+            surface_config: surface_config,
+
+            // EGUI
+            egui_state,
+            egui_renderer,
 
             // UI
             render_type: RenderType::Pathtrace,
@@ -340,7 +371,7 @@ impl<'a> AppState<'a>
         return res;
     }
 
-    pub fn update_and_render(&mut self, egui_ctx: &egui::Context, egui_state: &mut egui_winit::State, egui_renderer: &mut egui_wgpu::Renderer, swapchain: &wgpu::Texture, input: &Input, delta_time: f32)
+    pub fn update_and_render(&mut self, egui_ctx: &egui::Context, input: &Input, delta_time: f32)
     {
         // Update
         if self.selected_cam == -1  // Free-roam
@@ -359,12 +390,12 @@ impl<'a> AppState<'a>
         }
 
         // Consume the accumulated egui inputs
-        let egui_input = egui_state.take_egui_input(&self.window);
+        let egui_input = self.egui_state.take_egui_input(&self.window);
 
         // Update UI
         let egui_output = egui_ctx.run(egui_input, |ui|
         {
-            self.update_ui(egui_ctx);
+            self.update_ui(&egui_ctx);
         });
 
         if self.should_rebuild_pathtrace_resources
@@ -379,16 +410,29 @@ impl<'a> AppState<'a>
         }
 
         // Render scene
+        let frame_result = self.surface.get_current_texture();
+        match frame_result
+        {
+            Err(wgpu::SurfaceError::Timeout) => panic!("Error: Timeout"),
+            Err(wgpu::SurfaceError::Outdated) => panic!("Error: Outdated"),
+            Err(wgpu::SurfaceError::Lost) => panic!("Error: Lost"),
+            Err(wgpu::SurfaceError::OutOfMemory) => panic!("Error: OutOfMemory"),
+            Err(wgpu::SurfaceError::Other) => panic!("Error: Other"),
+            Ok(_) => {},
+        }
+        let frame = frame_result.unwrap();
+        let swapchain = &frame.texture;
         self.render_scene(swapchain);
+        self.render_egui(egui_ctx, swapchain, egui_output);
 
-        self.render_egui(egui_ctx, egui_state, egui_renderer, swapchain, egui_output);
+        frame.present();
     }
 
-    fn render_egui(&mut self, egui_ctx: &egui::Context, egui_state: &mut egui_winit::State, egui_renderer: &mut egui_wgpu::Renderer, swapchain: &wgpu::Texture, egui_output: egui::FullOutput)
+    fn render_egui(&mut self, egui_ctx: &egui::Context, swapchain: &wgpu::Texture, egui_output: egui::FullOutput)
     {
         let swapchain_view = swapchain.create_view(&Default::default());
 
-        egui_state.handle_platform_output(&self.window, egui_output.platform_output);
+        self.egui_state.handle_platform_output(&self.window, egui_output.platform_output);
         let tris = egui_ctx.tessellate(egui_output.shapes, egui_output.pixels_per_point);
 
         let win_width = self.window.inner_size().width.max(1) as u32;
@@ -396,7 +440,7 @@ impl<'a> AppState<'a>
 
         for (id, image_delta) in &egui_output.textures_delta.set
         {
-            egui_renderer.update_texture(&self.device, &self.queue, *id, &image_delta);
+            self.egui_renderer.update_texture(&self.device, &self.queue, *id, &image_delta);
         }
 
         {
@@ -406,7 +450,7 @@ impl<'a> AppState<'a>
                 size_in_pixels: [win_width, win_height],
                 pixels_per_point: self.window.scale_factor() as f32,
             };
-            egui_renderer.update_buffers(&self.device, &self.queue, &mut encoder, &tris, &screen_descriptor);
+            self.egui_renderer.update_buffers(&self.device, &self.queue, &mut encoder, &tris, &screen_descriptor);
 
             let pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor
             {
@@ -429,7 +473,7 @@ impl<'a> AppState<'a>
 
             // Apparently the egui_wgpu needs to get around the borrow-checker like this...
             let mut pass_static = pass.forget_lifetime();
-            egui_renderer.render(&mut pass_static, &tris, &screen_descriptor);
+            self.egui_renderer.render(&mut pass_static, &tris, &screen_descriptor);
             drop(pass_static);
 
             let cmd_buf = encoder.finish();
@@ -438,7 +482,7 @@ impl<'a> AppState<'a>
 
         for x in &egui_output.textures_delta.free
         {
-            egui_renderer.free_texture(x)
+            self.egui_renderer.free_texture(x)
         }
     }
 
@@ -530,7 +574,7 @@ impl<'a> AppState<'a>
         {
             RenderType::Falsecolor(falsecolor_type) =>
             {
-                lp::pathtrace_scene_falsecolor(self.device, self.queue, &self.pathtrace_resources, &self.scene, self.output.front(),
+                lp::pathtrace_scene_falsecolor(&self.device, &self.queue, &self.pathtrace_resources, &self.scene, self.output.front(),
                                                falsecolor_type, &desc);
                 tonemap_desc.filmic = false;
                 tonemap_desc.srgb = false;
@@ -539,13 +583,13 @@ impl<'a> AppState<'a>
             {
                 if self.accum_counter < self.max_accums
                 {
-                    lp::pathtrace_scene(self.device, self.queue, &self.pathtrace_resources, &self.scene, self.output.front(),
+                    lp::pathtrace_scene(&self.device, &self.queue, &self.pathtrace_resources, &self.scene, self.output.front(),
                                         self.pathtrace_type, &desc);
                     if self.denoising
                     {
-                        lp::pathtrace_scene_falsecolor(self.device, self.queue, &self.pathtrace_resources, &self.scene, self.albedo.front(),
+                        lp::pathtrace_scene_falsecolor(&self.device, &self.queue, &self.pathtrace_resources, &self.scene, self.albedo.front(),
                                                        lp::FalsecolorType::Albedo, &desc_albedo_no_tiles);
-                        lp::pathtrace_scene_falsecolor(self.device, self.queue, &self.pathtrace_resources, &self.scene, self.normals.front(),
+                        lp::pathtrace_scene_falsecolor(&self.device, &self.queue, &self.pathtrace_resources, &self.scene, self.normals.front(),
                                                        lp::FalsecolorType::Normals, &desc_albedo_no_tiles);
                     }
                 }
@@ -558,7 +602,7 @@ impl<'a> AppState<'a>
                     heatmap_max: self.debug_viz.heatmap_max,
                     first_hit_only: !self.debug_viz.multibounce,
                 };
-                lp::pathtrace_scene_debug(self.device, self.queue, &self.pathtrace_resources, &self.scene, self.output.front(),
+                lp::pathtrace_scene_debug(&self.device, &self.queue, &self.pathtrace_resources, &self.scene, self.output.front(),
                                     &debug_desc, &desc);
             }
         }
@@ -569,7 +613,7 @@ impl<'a> AppState<'a>
         {
             if self.use_gbuffers_for_denoise
             {
-                lp::denoise(self.device, self.queue, self.denoise_device, &mut self.denoise_resources, &lp::DenoiseDesc {
+                lp::denoise(&self.device, &self.queue, &self.denoise_device, &mut self.denoise_resources, &lp::DenoiseDesc {
                     pathtrace_output: self.output.front(),
                     albedo: Some(self.albedo.front()),
                     normals: Some(self.normals.front()),
@@ -579,7 +623,7 @@ impl<'a> AppState<'a>
             }
             else
             {
-                lp::denoise(self.device, self.queue, self.denoise_device, &mut self.denoise_resources, &lp::DenoiseDesc {
+                lp::denoise(&self.device, &self.queue, &self.denoise_device, &mut self.denoise_resources, &lp::DenoiseDesc {
                     pathtrace_output: self.output.front(),
                     albedo: None,
                     normals: None,
@@ -610,11 +654,11 @@ impl<'a> AppState<'a>
             // so that when we swap buffers it won't be as jarring.
             if self.tiled_rendering
             {
-                self.output.copy_front_to_back(self.device, self.queue);
+                self.output.copy_front_to_back(&self.device, &self.queue);
                 if self.denoising
                 {
-                    self.albedo.copy_front_to_back(self.device, self.queue);
-                    self.normals.copy_front_to_back(self.device, self.queue);
+                    self.albedo.copy_front_to_back(&self.device, &self.queue);
+                    self.normals.copy_front_to_back(&self.device, &self.queue);
                 }
             }
 
@@ -710,11 +754,21 @@ impl<'a> AppState<'a>
     fn resize_output_textures(&mut self, new_width: u32, new_height: u32)
     {
         self.reset_accumulation();
-        self.output.resize(self.device, new_width, new_height);
-        self.albedo.resize(self.device, new_width, new_height);
-        self.normals.resize(self.device, new_width, new_height);
-        self.denoise_resources = lp::build_denoise_resources(self.device, self.denoise_device, new_width, new_height);
-        resize_texture(self.device, &mut self.denoised, new_width, new_height);
+        self.output.resize(&self.device, new_width, new_height);
+        self.albedo.resize(&self.device, new_width, new_height);
+        self.normals.resize(&self.device, new_width, new_height);
+        self.denoise_resources = lp::build_denoise_resources(&self.device, &self.denoise_device, new_width, new_height);
+        resize_texture(&self.device, &mut self.denoised, new_width, new_height);
+    }
+
+    fn on_resize(&mut self, new_width: u32, new_height: u32)
+    {
+        self.reset_accumulation();
+
+        // Rebuild surface
+        self.surface_config.width = new_width;
+        self.surface_config.height = new_height;
+        self.surface.configure(&self.device, &self.surface_config);
     }
 
     fn update_ui(&mut self, egui_ctx: &egui::Context)
@@ -915,7 +969,7 @@ impl<'a> AppState<'a>
                             .add_filter("json", &["json"])
                             .pick_file()
                         {
-                            let res = lpl::load_scene_yoctogl_v24(&path, self.device, self.queue, false);
+                            let res = lpl::load_scene_yoctogl_v24(&path, &self.device, &self.queue, false);
                             match res
                             {
                                 Ok(res) =>
@@ -1018,11 +1072,11 @@ impl<'a> AppState<'a>
                             .save_file()
                         {
                             let res = if self.denoising {
-                                lpl::save_texture(self.device, self.queue,
+                                lpl::save_texture(&self.device, &self.queue,
                                                   &path,
                                                   &self.denoised)
                             } else {
-                                lpl::save_texture(self.device, self.queue,
+                                lpl::save_texture(&self.device, &self.queue,
                                                   &path,
                                                   self.output.front())
                             };
@@ -1251,61 +1305,4 @@ pub struct DoubleBufferedTexture
     pub textures: [wgpu::Texture; 2],
     pub front_idx: usize,
     pub back_idx: usize
-}
-
-impl<'a> DoubleBufferedTexture
-{
-    pub fn create(device: &wgpu::Device, desc: &wgpu::TextureDescriptor) -> DoubleBufferedTexture
-    {
-        return Self {
-            textures: [
-                device.create_texture(desc),
-                device.create_texture(desc),
-            ],
-            front_idx: 0,
-            back_idx: 1,
-        }
-    }
-
-    pub fn front(&'a self) -> &'a wgpu::Texture
-    {
-        return &self.textures[self.front_idx];
-    }
-
-    pub fn back(&'a self) -> &'a wgpu::Texture
-    {
-        return &self.textures[self.back_idx];
-    }
-
-    pub fn copy_front_to_back(&self, device: &wgpu::Device, queue: &wgpu::Queue)
-    {
-        assert!(self.textures[0].format() == self.textures[1].format());
-
-        let format = self.textures[0].format();
-        let blitter = wgpu::util::TextureBlitter::new(device, format);
-        let mut encoder = device.create_command_encoder(&Default::default());
-        let src = self.textures[self.front_idx].create_view(&Default::default());
-        let dst = self.textures[self.back_idx].create_view(&Default::default());
-        blitter.copy(device, &mut encoder, &src, &dst);
-        queue.submit(Some(encoder.finish()));
-    }
-
-    pub fn flip(&mut self)
-    {
-        let tmp = self.front_idx;
-        self.front_idx = self.back_idx;
-        self.back_idx = tmp;
-    }
-
-    pub fn resize(&mut self, device: &wgpu::Device, width: u32, height: u32)
-    {
-        resize_texture(device, &mut self.textures[0], width, height);
-        resize_texture(device, &mut self.textures[1], width, height);
-    }
-
-    // TODO
-    pub fn fill_black(&mut self, device: &wgpu::Device)
-    {
-
-    }
 }
