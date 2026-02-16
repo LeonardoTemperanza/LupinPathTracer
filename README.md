@@ -2,7 +2,7 @@
 **Lupin** is a data-oriented library for fast photorealistic rendering on the GPU with WGPU. It's meant to be simple and C-like, and while it supports hardware raytracing, it still provides a software implementation for compatibility with older devices. It is designed for research, testing, or integration into graphics pipelines.
 
 - Physically based path tracing with multiple importance sampling (MIS).
-
+- Naive path tracing and other algorithms are also supported.
 - Russian Roulette path termination.
 - Progressive and tiled rendering.
 - Emissive mesh lights and HDRIs.
