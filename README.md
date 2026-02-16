@@ -17,12 +17,16 @@ Scene serialization could be implemented using **lupin_loader**, or a custom loa
 
 ## Showcase:
 ![lonemonk](readme_images/lonemonk.png)
+Scene by Carlo Bergonzini.
 
 ![classroom](readme_images/classroom.png)
+Scene by Christophe Seux.
 
 ![bistroexterior](readme_images/bistroexterior.png)
+Scene by Amazon Lumberyard.
 
 ![landscape](readme_images/landscape1.png)
+Scene by Jan-Walter Schliep, Burak Kahraman, Timm Dapper.
 
 Depending on the hardware and on the complexity of the scene, the user can likely move the camera and visualize the path traced scene in a pseudo-real-time fashion. Try it yourself by downloading the latest release, which includes **Lupin Viewer** and a few test scenes!
 
@@ -50,6 +54,6 @@ Just add the following line to your `Cargo.toml`:
 lupin = "*"
 ```
 
-This library optionally supports denoising using [OIDN](https://www.openimagedenoise.org/). To enable denoising, make sure to add `features = [ "denoising" ]` to your `Cargo.toml`. **OIDN** has to be installed separately (binaries can be found [here]())
+This library optionally supports denoising using [OIDN](https://www.openimagedenoise.org/). To enable denoising, make sure to add `features = [ "denoising" ]` to your `Cargo.toml`. **OIDN** has to be installed separately (binaries can be found [here](https://github.com/RenderKit/oidn/releases))
 
 Other features are `"denoise-force-disable-shared-device"`, which forces the CPU denoising fallback, and `"force-swrt"` which acts like the device doesn't support hardware raytracing, even if it does.
