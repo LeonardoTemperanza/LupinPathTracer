@@ -459,7 +459,7 @@ impl Default for BakedPathtraceParams
     fn default() -> Self
     {
         return Self {
-            with_runtime_checks: true,
+            with_runtime_checks: false,
             max_bounces: 8,
             samples_per_pixel: 5,
         };

@@ -68,10 +68,14 @@ impl ApplicationHandler for WinitApp
 
         let window_attributes = Window::default_attributes()
             .with_title("Lupin Viewer")
+            .with_visible(false)
             .with_inner_size(winit::dpi::LogicalSize::new(1000.0, 1000.0));
 
         let window = Arc::new(event_loop.create_window(window_attributes).unwrap());
-        self.app = Some(AppState::new(window, &self.egui_ctx));
+        let mut app = AppState::new(window.clone(), &self.egui_ctx);
+        app.update_and_render(&self.egui_ctx, &self.input, 0.0);
+        self.app = Some(app);
+        window.set_visible(true);
     }
 
     fn window_event(&mut self, event_loop: &ActiveEventLoop, id: WindowId, event: WindowEvent)
@@ -234,9 +238,9 @@ impl AppState
         const DEFAULT_MAX_BOUNCES: u32 = 8;
 
         let pathtrace_resources = lp::build_pathtrace_resources(&device, &lp::BakedPathtraceParams {
-            with_runtime_checks: false,
             samples_per_pixel: DEFAULT_SAMPLES_PER_PIXEL,
             max_bounces: DEFAULT_MAX_BOUNCES,
+            ..Default::default()
         });
         let tonemap_resources = lp::build_tonemap_resources(&device);
 
@@ -401,9 +405,9 @@ impl AppState
         if self.should_rebuild_pathtrace_resources
         {
             self.pathtrace_resources = lp::build_pathtrace_resources(&self.device, &lp::BakedPathtraceParams {
-                with_runtime_checks: true,
                 samples_per_pixel: self.samples_per_pixel,
                 max_bounces: self.max_bounces,
+                ..Default::default()
             });
             self.reset_accumulation();
             self.should_rebuild_pathtrace_resources = false;
@@ -547,12 +551,8 @@ impl AppState
             }
         };
 
-        let mut desc_no_tiles = desc;
-        desc_no_tiles.tile_params = None;
         let mut desc_albedo_no_tiles = desc_albedo;
         desc_albedo_no_tiles.tile_params = None;
-        let mut desc_normals_no_tiles = desc_normals;
-        desc_normals_no_tiles.tile_params = None;
 
         let mut tonemap_desc = lp::TonemapDesc {
             viewport: Some(viewport),
