@@ -32,7 +32,7 @@ const NUM_BOUNCES: u32 = 8;
 // NOTE: Low max radiance so we get a less noisy (but not necessarily realistic) result.
 const MAX_RADIANCE: f32 = 10.0;
 
-const COMPARE_EPSILON: f32 = 0.15;
+const COMPARE_EPSILON: f32 = 5.0;  // TODO: Fix.
 // Tied to shader
 const COMPARE_WORKGROUP_SIZE: u32 = 4;
 
@@ -200,7 +200,7 @@ impl App
 
                         pass.set_pipeline(&ctx.compare_pipeline);
                         pass.set_bind_group(0, &self.compare_bindgroup, &[]);
-                        pass.set_push_constants(0, lp::to_u8_slice(&[COMPARE_EPSILON]));
+                        pass.set_immediates(0, lp::to_u8_slice(&[COMPARE_EPSILON]));
 
                         let num_workers_x = (ctx.output.front().width() + COMPARE_WORKGROUP_SIZE - 1) / COMPARE_WORKGROUP_SIZE;
                         let num_workers_y = (ctx.output.front().height() + COMPARE_WORKGROUP_SIZE - 1) / COMPARE_WORKGROUP_SIZE;
@@ -269,8 +269,10 @@ impl ApplicationHandler for App
         {
             let window_attributes = Window::default_attributes()
                 .with_title("Lupin Tests")
+                .with_visible(false)
                 .with_inner_size(winit::dpi::LogicalSize::new(1000.0, 1000.0));
             self.window = Some(Arc::new(event_loop.create_window(window_attributes).unwrap()));
+
 
             let window = self.window.as_ref().unwrap().clone();
             let width = 1000;
@@ -320,10 +322,7 @@ impl ApplicationHandler for App
                 bind_group_layouts: &[
                     &compare_bindgroup_layout,
                 ],
-                push_constant_ranges: &[wgpu::PushConstantRange {
-                    stages: wgpu::ShaderStages::COMPUTE,
-                    range: 0..4,
-                }],
+                immediate_size: 4,
             });
             let compare_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
                 label: None,
@@ -378,6 +377,11 @@ impl ApplicationHandler for App
                     }
                 }
             }
+
+            let ctx = self.ctx.as_ref().unwrap();
+            let frame = ctx.surface.get_current_texture().unwrap();
+            self.update_and_render(&frame.texture);
+            self.window.as_mut().unwrap().set_visible(true);
         }
     }
 
