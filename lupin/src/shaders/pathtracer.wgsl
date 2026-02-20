@@ -223,8 +223,7 @@ fn pathtrace_main(@builtin(local_invocation_id) local_id: vec3u, @builtin(global
 {
     let global_id = global_id_.xy + constants.id_offset;
     let output_dim = textureDimensions(output).xy;
-    let rnd_seq = vec2<u64>(output_dim) * u64(constants.accum_counter) + vec2<u64>(global_id);
-    init_rng(rnd_seq.y * u64(output_dim.x) + rnd_seq.x);
+    init_rng(global_id.y * output_dim.x + global_id.x);
 
     var color = vec3f(0.0f);
 
@@ -300,8 +299,7 @@ fn pathtrace_falsecolor_main(@builtin(local_invocation_id) local_id: vec3u, @bui
 {
     let global_id = global_id_.xy + constants.id_offset;
     let output_dim = textureDimensions(output).xy;
-    let rnd_seq = vec2<u64>(output_dim) * u64(constants.accum_counter) + vec2<u64>(global_id);
-    init_rng(rnd_seq.y * u64(output_dim.x) + rnd_seq.x);
+    init_rng(global_id.y * output_dim.x + global_id.x);
 
     var color = vec3f(0.0f);
     for(var sample: u32 = 0; sample < SAMPLES_PER_PIXEL; sample++)
@@ -462,8 +460,7 @@ fn pathtrace_debug_main(@builtin(local_invocation_id) local_id: vec3u, @builtin(
 
     let global_id = global_id_.xy + constants.id_offset;
     let output_dim = textureDimensions(output).xy;
-    let rnd_seq = vec2<u64>(output_dim) * u64(constants.accum_counter) + vec2<u64>(global_id);
-    init_rng(rnd_seq.y * u64(output_dim.x) + rnd_seq.x);
+    init_rng(global_id.y * output_dim.x + global_id.x);
 
     let pixel_offset = random_vec2f() - 0.5f;
     let camera_ray = compute_camera_ray(global_id, output_dim, pixel_offset);
@@ -1561,43 +1558,45 @@ fn microfacet_shadowing(roughness: f32, normal: vec3f, halfway: vec3f, outgoing:
 // Random number generation
 //////////////////////////////////////////////
 
+var<private> RNG_STATE: u32 = 0u;
+
+fn init_rng(global_id: u32)
+{
+    let seed = 0u;
+    RNG_STATE = hash_u32((global_id * 19349663u) ^ (constants.accum_counter * 83492791u) ^ (seed * 73856093u));
+}
+
+fn hash_u32(seed: u32) -> u32
+{
+    var x = seed;
+    x ^= x >> 17;
+    x *= 0xed5ad4bb;
+    x ^= x >> 11;
+    x *= 0xac4c1b51;
+    x ^= x >> 15;
+    x *= 0x31848bab;
+    x ^= x >> 14;
+    return x;
+}
+
 // PCG Random number generator.
-// From: www.pcg-random.org and https://github.com/xelatihy/yocto-gl
-
-struct RngState
-{
-    state: u64,
-    inc: u64,
-}
-
-var<private> RNG_STATE: RngState = RngState(0, 0);
-
-fn init_rng(seq: u64)
-{
-    let seed: u64 = u64(constants.rng_seed);
-
-    RNG_STATE.state = 0;
-    RNG_STATE.inc = u64((seq << 1u) | 1);
-    random_u32();
-    RNG_STATE.state += seed;
-    random_u32();
-}
-
+// From: www.pcg-random.org and www.shadertoy.com/view/XlGcRh
 fn random_u32() -> u32
 {
-    let oldstate = RNG_STATE.state;
-    RNG_STATE.state = oldstate * u64(6364136223846793005) + RNG_STATE.inc;
-    let xorshifted = u32(((oldstate >> 18u) ^ oldstate) >> 27u);
-    let rot = u32(oldstate >> 59u);
-    return (xorshifted >> rot) | (xorshifted << ((~rot + 1u) & 31));
+    RNG_STATE = RNG_STATE * 747796405u + 2891336453u;
+    var result = ((RNG_STATE >> ((RNG_STATE >> 28u) + 4u)) ^ RNG_STATE) * 277803737u;
+    result = (result >> 22u) ^ result;
+    return result;
+
 }
 
 // From 0 (inclusive) to 1 (exclusive)
 fn random_f32() -> f32
 {
-    // Faster than dividing by f32(max_u32)? Profile.
-    let bits = (random_u32() >> 9u) | 0x3f800000u;
-    return bitcast<f32>(bits) - 1.0f;
+    RNG_STATE = RNG_STATE * 747796405u + 2891336453u;
+    var result: u32 = ((RNG_STATE >> ((RNG_STATE >> 28u) + 4u)) ^ RNG_STATE) * 277803737u;
+    result = (result >> 22u) ^ result;
+    return f32(result) / 4294967295.0f;
 }
 
 // NOTE: max_exclusive must be > 0!
