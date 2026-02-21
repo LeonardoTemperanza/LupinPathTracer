@@ -251,9 +251,36 @@ pub fn lerp(a: f32, b: f32, t: f32)->f32
 }
 
 #[inline]
+pub fn lerp_vec3(a: Vec3, b: Vec3, t: f32)->Vec3
+{
+    return a + (b - a) * t;
+}
+
+#[inline]
+pub fn lerp_vec2(a: Vec2, b: Vec2, t: f32)->Vec2
+{
+    return a + (b - a) * t;
+}
+
+#[inline]
 pub fn square(n: f32)->f32
 {
     return n*n;
+}
+
+impl std::ops::Add for Vec2
+{
+    type Output = Self;
+
+    #[inline]
+    fn add(self, other: Self) -> Self::Output
+    {
+        return Self
+        {
+            x: self.x + other.x,
+            y: self.y + other.y,
+        };
+    }
 }
 
 impl std::ops::AddAssign<Vec2> for Vec2
@@ -263,6 +290,84 @@ impl std::ops::AddAssign<Vec2> for Vec2
     {
         self.x += rhs.x;
         self.y += rhs.y;
+    }
+}
+
+impl std::ops::Sub for Vec2
+{
+    type Output = Self;
+
+    #[inline]
+    fn sub(self, other: Self)->Self::Output
+    {
+        return Self
+        {
+            x: self.x - other.x,
+            y: self.y - other.y,
+        };
+    }
+}
+
+impl std::ops::Mul<f32> for Vec2
+{
+    type Output = Vec2;
+
+    #[inline]
+    fn mul(self, rhs: f32)->Vec2
+    {
+        return Self
+        {
+            x: self.x * rhs,
+            y: self.y * rhs,
+        };
+    }
+}
+
+impl std::ops::MulAssign<f32> for Vec2
+{
+    #[inline]
+    fn mul_assign(&mut self, rhs: f32)
+    {
+        self.x *= rhs;
+        self.y *= rhs;
+    }
+}
+
+impl std::ops::Div<f32> for Vec2
+{
+    type Output = Vec2;
+
+    #[inline]
+    fn div(self, rhs: f32)->Vec2
+    {
+        return Self
+        {
+            x: self.x / rhs,
+            y: self.y / rhs,
+        };
+    }
+}
+
+impl std::ops::Index<isize> for Vec2
+{
+    type Output = f32;
+    #[inline]
+    fn index<'a>(&'a self, i: isize) -> &'a f32
+    {
+        debug_assert!(i < 3 && i >= 0);
+        let ptr = &self.x as *const f32;
+        return unsafe { &*ptr.add(i as usize) };
+    }
+}
+
+impl std::ops::IndexMut<isize> for Vec2
+{
+    #[inline]
+    fn index_mut<'a>(&'a mut self, i: isize) -> &'a mut f32
+    {
+        debug_assert!(i < 3 && i >= 0);
+        let ptr = &mut self.x as *mut f32;
+        return unsafe { &mut *ptr.add(i as usize) };
     }
 }
 
