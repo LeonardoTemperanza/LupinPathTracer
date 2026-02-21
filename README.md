@@ -48,7 +48,7 @@ fn main()
         samples_per_pixel: 5,
     });
     // Load/create the scene.
-    let (scene, cameras) = lp::build_scene_cornell_box(&device, &queue, false);
+    let (scene, cameras) = lpl::build_scene_cornell_box(&device, &queue, false);
     // let (scene, cameras) = lpl::load_scene_yoctogl_v24("scene_path", &device, &queue, false).unwrap();
     // Set up double buffered output texture for accumulation
     let output = lp::DoubleBufferedTexture::create(&device, &wgpu::TextureDescriptor {
