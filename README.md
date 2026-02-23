@@ -30,7 +30,9 @@ Scene by Jan-Walter Schliep, Burak Kahraman, Timm Dapper.
 
 https://github.com/user-attachments/assets/ef2bbb75-690a-4a81-b201-fae6343ec184
 
-Full video can be found [here](https://www.youtube.com/watch?v=EcDY_xUkNxs). Depending on the hardware and on the complexity of the scene, the user can likely move the camera and visualize the path traced scene in a pseudo-real-time fashion. Try it yourself by downloading the latest release, which includes **Lupin Viewer** and a few test scenes!
+(Full video [here](https://www.youtube.com/watch?v=EcDY_xUkNxs)).
+
+Depending on the hardware and on the complexity of the scene, the user can likely move the camera and visualize the path traced scene in a pseudo-real-time fashion. Try it yourself by downloading the latest release, which includes **Lupin Viewer** and a few test scenes! More complex scenes can be found [here](https://github.com/LeonardoTemperanza/lupin_scenes).
 
 ## API Usage:
 Here's a simple example of loading a scene and producing a path traced image:
@@ -113,6 +115,6 @@ Just add the following line to your `Cargo.toml`:
 lupin_pt = "*"
 ```
 
-This library optionally supports denoising using [OIDN](https://www.openimagedenoise.org/). To enable denoising, make sure to add `features = [ "denoising" ]` to your `Cargo.toml`. **OIDN** has to be installed separately (binaries can be found [here](https://github.com/RenderKit/oidn/releases))
+This library optionally supports denoising using [OIDN](https://www.openimagedenoise.org/). To enable denoising, make sure to add `features = [ "denoising" ]` to your `Cargo.toml`. **OIDN** has to be installed separately (binaries can be found [here](https://github.com/RenderKit/oidn/releases)). Make sure CUDA/HIP (NVIDIA/AMD) is installed on your system for proper GPU denoising.
 
 Other features are `"denoise-force-disable-shared-device"`, which forces the CPU denoising fallback, and `"force-swrt"` which acts like the device doesn't support hardware raytracing, even if it does.
