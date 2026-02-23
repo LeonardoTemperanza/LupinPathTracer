@@ -28,6 +28,8 @@ Scene by Amazon Lumberyard.
 ![landscape](readme_images/landscape1.png)
 Scene by Jan-Walter Schliep, Burak Kahraman, Timm Dapper.
 
+https://www.youtube.com/watch?v=EcDY_xUkNxs
+
 Depending on the hardware and on the complexity of the scene, the user can likely move the camera and visualize the path traced scene in a pseudo-real-time fashion. Try it yourself by downloading the latest release, which includes **Lupin Viewer** and a few test scenes!
 
 ## API Usage:
