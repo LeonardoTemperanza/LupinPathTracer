@@ -1,6 +1,6 @@
 
-use lupin as lp;
-use lupin::wgpu as wgpu;
+use lupin_pt as lp;
+use lupin_pt::wgpu as wgpu;
 
 /// Builds an empty scene, which should show up as a black texture in a render.
 /// Useful for testing of this library, more than anything else, really.

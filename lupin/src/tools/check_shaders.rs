@@ -9,7 +9,7 @@
 
 use std::time::Instant;
 
-pub use lupin as lp;
+pub use lupin_pt as lp;
 
 fn main()
 {

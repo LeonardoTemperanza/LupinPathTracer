@@ -6,9 +6,9 @@
 
 use std::sync::Arc;
 
-pub use lupin as lp;
+pub use lupin_pt as lp;
 pub use lupin_loader as lpl;
-use lupin::wgpu as wgpu;
+use lupin_pt::wgpu as wgpu;
 
 use winit::application::ApplicationHandler;
 use winit::event::WindowEvent;

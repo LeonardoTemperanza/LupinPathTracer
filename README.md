@@ -108,7 +108,7 @@ For more info see: MISSING.
 Just add the following line to your `Cargo.toml`:
 ```toml
 [dependencies]
-lupin = "*"
+lupin_pt = "*"
 ```
 
 This library optionally supports denoising using [OIDN](https://www.openimagedenoise.org/). To enable denoising, make sure to add `features = [ "denoising" ]` to your `Cargo.toml`. **OIDN** has to be installed separately (binaries can be found [here](https://github.com/RenderKit/oidn/releases))

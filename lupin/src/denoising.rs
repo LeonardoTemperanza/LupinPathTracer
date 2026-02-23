@@ -146,6 +146,8 @@ pub fn build_denoise_resources(device: &wgpu::Device, denoise_device: &DenoiseDe
                 use oidn::sys::*;
                 let device_raw = oidn_device.raw();
 
+                oidn_check(device_raw);
+
                 let beauty_private_raw = oidnNewBuffer(device_raw, buffer_size as usize);
                 let albedo_private_raw = oidnNewBuffer(device_raw, buffer_size as usize);
                 let normals_private_raw = oidnNewBuffer(device_raw, buffer_size as usize);

@@ -8,4 +8,4 @@
 mod loader;
 
 pub use loader::*;
-pub use lupin::wgpu as wgpu;
+pub use lupin_pt::wgpu as wgpu;

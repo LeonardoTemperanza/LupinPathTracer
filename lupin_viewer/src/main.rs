@@ -21,8 +21,8 @@ pub use winit::
 
 use ::egui::FontDefinitions;
 
-pub use lupin as lp;
-use lupin::wgpu as wgpu;
+pub use lupin_pt as lp;
+use lupin_pt::wgpu as wgpu;
 
 mod input;
 mod ui;
