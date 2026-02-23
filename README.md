@@ -28,9 +28,9 @@ Scene by Amazon Lumberyard.
 ![landscape](readme_images/landscape1.png)
 Scene by Jan-Walter Schliep, Burak Kahraman, Timm Dapper.
 
-<iframe width="560" height="315" src="https://www.youtube.com/embed/EcDY_xUkNxs?si=2XS4YlcYp20L4Rrr" title="YouTube video player" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen></iframe>
+https://github.com/user-attachments/assets/ef2bbb75-690a-4a81-b201-fae6343ec184
 
-Depending on the hardware and on the complexity of the scene, the user can likely move the camera and visualize the path traced scene in a pseudo-real-time fashion. Try it yourself by downloading the latest release, which includes **Lupin Viewer** and a few test scenes!
+Full video can be found [here](https://www.youtube.com/watch?v=EcDY_xUkNxs). Depending on the hardware and on the complexity of the scene, the user can likely move the camera and visualize the path traced scene in a pseudo-real-time fashion. Try it yourself by downloading the latest release, which includes **Lupin Viewer** and a few test scenes!
 
 ## API Usage:
 Here's a simple example of loading a scene and producing a path traced image:
