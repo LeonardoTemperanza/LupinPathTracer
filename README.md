@@ -1,4 +1,6 @@
 # Lupin: A WGPU Path Tracing Library
+**Warning**: This project uses [WGPU](https://wgpu.rs/) features that are currently experimental, so use at your own risk.
+
 **Lupin** is a data-oriented library for fast photorealistic rendering on the GPU with WGPU. It's meant to be simple and C-like, and while it supports hardware raytracing, it still provides a software implementation for compatibility with older devices. It is mainly designed for research and testing.
 
 - Physically based path tracing with multiple importance sampling (MIS).
