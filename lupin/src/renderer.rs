@@ -359,6 +359,7 @@ pub enum DenoiseDevice
     OidnDevice(oidn::Device),
 }
 
+#[cfg(feature = "denoising")]
 impl DenoiseDevice
 {
     pub fn oidn_device(&self) -> &oidn::Device
