@@ -3,6 +3,12 @@
 name = "lupin_pt"
 version = "0.1.0"
 edition = "2021"
+license = "MIT"
+keywords = [ "pathtracing", "photorealistic", "rendering", "WGPU" ]
+categories = [ "graphics", "rendering" ]
+description = "A WGPU Path Tracing Library"
+repository = "https://github.com/LeonardoTemperanza/LupinPathtracer"
+readme = "../README.md"
 
 [[bin]]
 name = "check_shaders"
