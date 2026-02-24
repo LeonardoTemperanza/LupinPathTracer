@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-lupin_pt = { path = "../lupin" }
+lupin_pt = "0.1.0"
 winit = "0.30.7"
-lupin_loader = { path = "../lupin_loader" }
+lupin_loader = "0.1.0"
 clap = { version = "4.5", features = ["derive"] }

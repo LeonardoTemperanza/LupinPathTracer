@@ -1762,13 +1762,25 @@ dependencies = [
 name = "lupin_examples"
 version = "0.1.0"
 dependencies = [
- "lupin_loader",
- "lupin_pt 0.1.0",
+ "lupin_loader 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "lupin_pt 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
 [[package]]
 name = "lupin_loader"
 version = "0.1.0"
+dependencies = [
+ "half",
+ "image",
+ "lupin_pt 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "tobj",
+]
+
+[[package]]
+name = "lupin_loader"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7269d9403317a7b172537c7015c6ca8e9efdb8fdd22e4c8341ef12ba196aa436"
 dependencies = [
  "half",
  "image",
@@ -1805,8 +1817,8 @@ name = "lupin_tests"
 version = "0.1.0"
 dependencies = [
  "clap",
- "lupin_loader",
- "lupin_pt 0.1.0",
+ "lupin_loader 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "lupin_pt 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "winit",
 ]
 
@@ -1817,7 +1829,7 @@ dependencies = [
  "egui",
  "egui-wgpu",
  "egui-winit",
- "lupin_loader",
+ "lupin_loader 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "lupin_pt 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "rfd",
  "winit",

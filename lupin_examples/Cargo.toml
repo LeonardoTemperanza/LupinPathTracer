@@ -8,5 +8,5 @@ name = "example1"
 path = "src/example1.rs"
 
 [dependencies]
-lupin_pt = { path = "../lupin" }
-lupin_loader = { path = "../lupin_loader" }
+lupin_pt = "0.1.0"
+lupin_loader = "0.1.0"

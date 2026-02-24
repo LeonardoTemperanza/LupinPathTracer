@@ -5,7 +5,7 @@ edition = "2021"
 
 [dependencies]
 lupin_pt = { version = "0.1.0", features = [ "denoising" ] }
-lupin_loader = { path = "../lupin_loader" }
+lupin_loader = "0.1.0"
 
 # GUI
 winit = "0.30.7"
