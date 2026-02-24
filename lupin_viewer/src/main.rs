@@ -25,9 +25,7 @@ pub use lupin_pt as lp;
 use lupin_pt::wgpu as wgpu;
 
 mod input;
-mod ui;
 pub use input::*;
-pub use ui::*;
 
 pub use lupin_loader as lpl;
 
