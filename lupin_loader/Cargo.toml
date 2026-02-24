@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-lupin_pt = { path = "../lupin" }
+lupin_pt = "0.1.0"
 
 # Serialization
 tobj  = "4.0.2"
