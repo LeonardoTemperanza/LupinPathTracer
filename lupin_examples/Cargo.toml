@@ -1,0 +1,12 @@
+[package]
+name = "lupin_examples"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "example1"
+path = "src/example1.rs"
+
+[dependencies]
+lupin_pt = { path = "../lupin" }
+lupin_loader = { path = "../lupin_loader" }

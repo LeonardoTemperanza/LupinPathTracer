@@ -1759,6 +1759,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "lupin_examples"
+version = "0.1.0"
+dependencies = [
+ "lupin_loader",
+ "lupin_pt",
+]
+
+[[package]]
 name = "lupin_loader"
 version = "0.1.0"
 dependencies = [

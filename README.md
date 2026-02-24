@@ -1,5 +1,5 @@
 # Lupin: A WGPU Path Tracing Library
-**Lupin** is a data-oriented library for fast photorealistic rendering on the GPU with WGPU. It's meant to be simple and C-like, and while it supports hardware raytracing, it still provides a software implementation for compatibility with older devices. It is designed for research, testing, or integration into graphics pipelines.
+**Lupin** is a data-oriented library for fast photorealistic rendering on the GPU with WGPU. It's meant to be simple and C-like, and while it supports hardware raytracing, it still provides a software implementation for compatibility with older devices. It is mainly designed for research and testing.
 
 - Physically based path tracing with multiple importance sampling (MIS).
 - Naive path tracing and other algorithms are also supported.
@@ -37,27 +37,28 @@ Depending on the hardware and on the complexity of the scene, the user can likel
 ## API Usage:
 Here's a simple example of loading a scene and producing a path traced image:
 ```rust
-use lupin as lp;
-use lupin_loader as lpl;  // Optional
-use lupin::wgpu as wgpu;
+use lupin_pt as lp;
+use lupin_loader as lpl;
+use lupin_pt::wgpu as wgpu;
+
 fn main()
 {
     // Initialize WGPU
-    let (device, queue, adapter) = lp::init_default_wgpu_context_no_window();
+    let (device, queue, _) = lp::init_default_wgpu_context_no_window();
     // Initialize lupin resources (all desc-type structs have reasonable defaults)
-    let tonemap_res = lp::build_tonemap_resources(&device);
     let pathtrace_res = lp::build_pathtrace_resources(&device, &lp::BakedPathtraceParams {
-        with_runtime_checks: false,
+        with_runtime_checks: false,  // This greatly affects render time!
         max_bounces: 8,
         samples_per_pixel: 5,
     });
+
     // Load/create the scene.
     let (scene, cameras) = lpl::build_scene_cornell_box(&device, &queue, false);
     // let (scene, cameras) = lpl::load_scene_yoctogl_v24("scene_path", &device, &queue, false).unwrap();
     // Set up double buffered output texture for accumulation
-    let output = lp::DoubleBufferedTexture::create(&device, &wgpu::TextureDescriptor {
+    let mut output = lp::DoubleBufferedTexture::create(&device, &wgpu::TextureDescriptor {
         label: None,
-        size: wgpu::Extent3d { width: width as u32, height: height as u32, depth_or_array_layers: 1 },
+        size: wgpu::Extent3d { width: 1000, height: 1000, depth_or_array_layers: 1 },
         mip_level_count: 1,
         sample_count: 1,
         dimension: wgpu::TextureDimension::D2,
@@ -67,6 +68,7 @@ fn main()
                wgpu::TextureUsages::RENDER_ATTACHMENT,
         view_formats: &[]
     });
+
     // Accumulation loop. This is highly recommended as opposed to increasing the sample
     // count in lp::BakedPathtraceParams, because shader invocations that run for too long
     // will cause most current OSs to issue a complete driver reset. Accumulation is useful
@@ -74,25 +76,27 @@ fn main()
     let num_accums = 200;
     for accum_idx in 0..num_accums
     {
-        lp::pathtrace_scene(&device, &queue, &pathtrace_res, Default::default(), &lp::PathtraceDesc {
+        lp::pathtrace_scene(&device, &queue, &pathtrace_res, &scene, output.front(), Default::default(), &lp::PathtraceDesc {
             accum_params: Some(lp::AccumulationParams {
                 prev_frame: output.back(),
                 accum_counter: accum_idx,
             }),
             tile_params: None,
-            camera_params: Default::default(),
-            camera_transform: Default::default(),
+            camera_params: cameras[0].params,
+            camera_transform: cameras[0].transform,
             force_software_bvh: false,
             advanced: Default::default(),
         });
         output.flip();
     }
     output.flip();
-    lpl::save_texture(&device, &queue, "output.hdr", output.front());
+
+    lpl::save_texture(&device, &queue, std::path::Path::new("output.hdr"), output.front()).unwrap();
 }
 ```
 
-For more info see: MISSING.
+To run this example: `cargo run --release --bin=example1`.
+For more information see the project's [crates.io page](https://crates.io/crates/lupin_pt).
 
 ## Support Matrix:
 |         | DX12 | Vulkan | Metal |
